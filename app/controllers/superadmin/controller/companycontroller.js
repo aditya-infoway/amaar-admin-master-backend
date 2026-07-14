@@ -6,7 +6,7 @@ const {
   requiredmessage,
   selectWithJoins,
   updateModel,
-} = require("../../helper/index.js");
+} = require("../../../helper/index.js");
 
 // ---- Login ----
 const companyLogin = async (req, res) => {
