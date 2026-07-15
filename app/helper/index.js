@@ -59,7 +59,7 @@ function cleanString(str){
 const getBlobTempPublicUrl = (blobName) => {
   return blobName == "" || blobName == undefined || blobName == null
     ? ""
-    : "https://domain.com/pickApp/api/test/Uploadimages/" + blobName;
+    : "http://localhost:8001/Uploadimages/" + blobName;
 }
 const categoryURL = (blobName) => {
   return (blobName == "" || blobName == undefined || blobName == null) ? "" : getBlobTempPublicUrl("icons/" + blobName)

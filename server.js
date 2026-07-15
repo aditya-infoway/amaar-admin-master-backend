@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 
@@ -30,6 +31,8 @@ db.sequelize.sync({alter: false})
   });
 
 
+app.use("/Uploadimages", express.static(path.join(__dirname, "Uploadimages")));
+
 // simple route
 app.get("/", (req, res) => {
   res.json({ message: "Welcome to Amaar Software." });
@@ -38,10 +41,9 @@ app.get("/", (req, res) => {
 require("./app/routes/master.routes.js")(app);
 require("./app/routes/company.routes.js")(app);
 require("./app/routes/superadmin.routes.js")(app);
-// require("./app/routes/vendor.routes.js")(app);
-// require("./app/routes/service.routes.js")(app);
-// require("./app/routes/booking.routes.js")(app);
-// require("./app/routes/driver.routes.js")(app);
+require("./app/routes/category.routes.js")(app);
+require("./app/routes/productseries.routes.js")(app);
+require("./app/routes/model.routes.js")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8001;
