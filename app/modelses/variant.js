@@ -1,12 +1,12 @@
 const { DataTypes } = require('sequelize');
 module.exports = sequelize => {
   const attributes = {
-    modelId: {
+    variantId: {
       type: DataTypes.INTEGER,
       allowNull: false,
       primaryKey: true,
       autoIncrement: true,
-      field: "modelId"
+      field: "variantId"
     },
     companyId: {
       type: DataTypes.INTEGER,
@@ -23,40 +23,50 @@ module.exports = sequelize => {
       allowNull: false,
       field: "seriesId"
     },
-    modelCode: {
+    modelId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "modelId"
+    },
+    variantCode: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      field: "modelCode"
+      field: "variantCode"
     },
-    modelName: {
-      type: DataTypes.STRING(100),
+    variantName: {
+      type: DataTypes.STRING(150),
       allowNull: false,
-      field: "modelName"
+      field: "variantName"
     },
-    capacity: {
-      type: DataTypes.STRING(50),
+    bodyTypeId: {
+      type: DataTypes.INTEGER,
       allowNull: false,
-      field: "capacity"
+      field: "bodyTypeId"
     },
-    length: {
-      type: DataTypes.STRING(20),
+    axleBrandId: {
+      type: DataTypes.INTEGER,
       allowNull: false,
-      field: "length"
+      field: "axleBrandId"
     },
-    width: {
-      type: DataTypes.STRING(20),
+    hydraulicBrandId: {
+      type: DataTypes.INTEGER,
       allowNull: false,
-      field: "width"
+      field: "hydraulicBrandId"
     },
-    height: {
-      type: DataTypes.STRING(20),
+    tyreBrandId: {
+      type: DataTypes.INTEGER,
       allowNull: false,
-      field: "height"
+      field: "tyreBrandId"
     },
-    standardWeight: {
-      type: DataTypes.STRING(20),
+    targetCost: {
+      type: DataTypes.DECIMAL(12, 2),
       allowNull: false,
-      field: "standardWeight"
+      field: "targetCost"
+    },
+    sellingPrice: {
+      type: DataTypes.DECIMAL(12, 2),
+      allowNull: false,
+      field: "sellingPrice"
     },
     status: {
       type: DataTypes.STRING(20),
@@ -82,12 +92,12 @@ module.exports = sequelize => {
     },
   };
   const options = {
-    tableName: "model",
+    tableName: "variant",
     comment: "",
     indexes: [
-      { unique: true, fields: ["companyId", "modelCode"] },
+      { unique: true, fields: ["companyId", "variantCode"] },
     ]
   };
-  const ModelModel = sequelize.define("model", attributes, options);
-  return ModelModel;
+  const VariantModel = sequelize.define("variant", attributes, options);
+  return VariantModel;
 };

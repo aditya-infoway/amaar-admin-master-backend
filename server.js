@@ -44,6 +44,16 @@ require("./app/routes/superadmin.routes.js")(app);
 require("./app/routes/category.routes.js")(app);
 require("./app/routes/productseries.routes.js")(app);
 require("./app/routes/model.routes.js")(app);
+require("./app/routes/variant.routes.js")(app);
+require("./app/routes/variantstructure.routes.js")(app);
+require("./app/routes/enquirytype.routes.js")(app);
+require("./app/routes/enquirysource.routes.js")(app);
+require("./app/routes/profession.routes.js")(app);
+require("./app/routes/enquirystatus.routes.js")(app);
+require("./app/routes/bodytype.routes.js")(app);
+require("./app/routes/axlebrand.routes.js")(app);
+require("./app/routes/hydraulicbrand.routes.js")(app);
+require("./app/routes/tyrebrand.routes.js")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8001;
