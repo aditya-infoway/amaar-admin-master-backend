@@ -15,9 +15,6 @@ const createModel = Joi.object().keys({
   modelName: Joi.string().trim().required().messages({
     "string.empty": "Model name is required",
   }),
-  axleType: Joi.string().trim().required().messages({
-    "string.empty": "Axle type is required",
-  }),
   capacity: Joi.string().trim().required().messages({
     "string.empty": "Capacity is required",
   }),
@@ -56,9 +53,6 @@ const updateModel = Joi.object().keys({
   }),
   modelName: Joi.string().trim().required().messages({
     "string.empty": "Model name is required",
-  }),
-  axleType: Joi.string().trim().required().messages({
-    "string.empty": "Axle type is required",
   }),
   capacity: Joi.string().trim().required().messages({
     "string.empty": "Capacity is required",
