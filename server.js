@@ -54,6 +54,11 @@ require("./app/routes/bodytype.routes.js")(app);
 require("./app/routes/axlebrand.routes.js")(app);
 require("./app/routes/hydraulicbrand.routes.js")(app);
 require("./app/routes/tyrebrand.routes.js")(app);
+require("./app/routes/group.routes.js")(app);
+require("./app/routes/account.routes.js")(app);
+require("./app/routes/itemcategory.routes.js")(app);
+require("./app/routes/itemgroup.routes.js")(app);
+require("./app/routes/itemmaster.routes.js")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8001;
