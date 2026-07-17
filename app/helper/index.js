@@ -422,7 +422,18 @@ const selectWithJoinsV2 = async (tableName, joinClauses, whereClauses, selectCol
     if (typeof value === 'object' && value !== null) {
       const operator = Object.keys(value)[0];
       const columnValue = value[operator];
-      return `${key} ${operator} '${columnValue}'`;
+      // return `${key} ${operator} '${columnValue}'`;
+
+      if (typeof value === "object" && value !== null) {
+        const operator = Object.keys(value)[0];
+        const columnValue = value[operator];
+
+        if (operator.toUpperCase() === "IN") {
+            return `${key} IN ${columnValue}`;
+        }
+
+        return `${key} ${operator} '${columnValue}'`;
+    }
     } else {
       return `${key} = '${value}'`;
     }

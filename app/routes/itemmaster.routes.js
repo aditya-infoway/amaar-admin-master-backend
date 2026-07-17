@@ -18,15 +18,18 @@ const validate = (schema) => (req, res, next) => {
 module.exports = (app) => {
   routes.use(superAdminAuth);
 
-  routes.get("/generate-barcode", itemmaster.getNextBarcode); // 👈 :id se pehle
+  // ───── Static / named GET routes — hamesha "/:id" se PEHLE ─────
+  routes.get("/list", itemmaster.getItemMasterList);
+  routes.get("/vehicle-list", itemmaster.getVehicleItemList);
+  routes.get("/generate-barcode", itemmaster.getNextBarcode);
+  routes.get("/barcode/:barcode", itemmaster.getItemByBarcode);
 
+  // ───── POST / PUT / DELETE routes (method alag hai, order matter nahi karta) ─────
   routes.post(
     "/create",
     validate(itemmasterValidation.createItemMaster),
     itemmaster.createItemMaster
   );
-  routes.get("/list", itemmaster.getItemMasterList);
-  routes.get("/:id", itemmaster.getItemMasterById);
   routes.put(
     "/update",
     validate(itemmasterValidation.updateItemMaster),
@@ -37,11 +40,24 @@ module.exports = (app) => {
     validate(itemmasterValidation.deleteItemMaster),
     itemmaster.deleteItemMaster
   );
+  routes.put(
+    "/set-barcode",
+    validate(itemmasterValidation.setItemBarcode),
+    itemmaster.setItemBarcode
+  );
+  routes.post(
+    "/auto-generate",
+    validate(itemmasterValidation.autoGenerateItemBarcode),
+    itemmaster.autoGenerateItemBarcode
+  );
+  routes.post(
+    "/bulk-generate",
+    validate(itemmasterValidation.bulkAutoGenerateBarcode),
+    itemmaster.bulkAutoGenerateBarcode
+  );
 
-  routes.get("/generate-barcode", itemmaster.getNextBarcode);
-  routes.put("/set-barcode", validate(itemmasterValidation.setItemBarcode), itemmaster.setItemBarcode);
-  routes.post("/auto-generate", validate(itemmasterValidation.autoGenerateItemBarcode), itemmaster.autoGenerateItemBarcode);
-  routes.post("/bulk-generate", validate(itemmasterValidation.bulkAutoGenerateBarcode), itemmaster.bulkAutoGenerateBarcode);
+  // ───── Generic dynamic GET route — hamesha SABSE AAKHIR me ─────
+  routes.get("/:id", itemmaster.getItemMasterById);
 
   app.use("/master/itemmaster", routes);
 };

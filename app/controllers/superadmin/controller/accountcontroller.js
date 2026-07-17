@@ -255,10 +255,140 @@ const deleteAccount = async (req, res) => {
   }
 };
 
+const getCashAccountList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "account",
+      [],
+      {
+        'account."companyId"': companyId,
+        'account."groupId"': 4,
+        'account."delete"': 0,
+      },
+      [
+        "account.id",
+        'account."accountName"',
+        'account."mobileNo"',
+        'account."currentBalance"',
+        'account."currentDrOrCr"',
+      ],
+      [["account.id", "DESC"]],
+      0,
+      0
+    );
+
+    return successResponse(res, list, "Account list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
+const getBankAccountList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "account",
+      [],
+      {
+        'account."companyId"': companyId,
+        'account."groupId"': 1,
+        'account."delete"': 0,
+      },
+      [
+        "account.id",
+        'account."accountName"',
+        'account."mobileNo"',
+        'account."currentBalance"',
+        'account."currentDrOrCr"',
+      ],
+      [["account.id", "DESC"]],
+      0,
+      0
+    );
+
+    return successResponse(res, list, "Account list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
+const getSupplierAccountList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "account",
+      [],
+      {
+        'account."companyId"': companyId,
+        'account."groupId"': { IN: "(30,34)" },
+        'account."delete"': 0,
+      },
+      [
+        "account.id",
+        'account."accountName"',
+        'account."mobileNo"',
+        'account."currentBalance"',
+        'account."currentDrOrCr"',
+        'account."stateName"',
+      ],
+      [["account.id", "DESC"]],
+      0,
+      0
+    );
+
+    return successResponse(res, list, "Account list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
+const getCustomerAccountList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "account",
+      [],
+      {
+        'account."companyId"': companyId,
+        'account."groupId"': { IN: "(31,35)" },
+        'account."delete"': 0,
+      },
+      [
+        "account.id",
+        'account."accountName"',
+        'account."mobileNo"',
+        'account."currentBalance"',
+        'account."currentDrOrCr"',
+        'account."stateName"',
+      ],
+      [["account.id", "DESC"]],
+      0,
+      0
+    );
+
+    return successResponse(res, list, "Account list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   createAccount,
   getAccountList,
   getAccountById,
   updateAccount,
   deleteAccount,
+  getCashAccountList,
+  getBankAccountList,
+  getSupplierAccountList,
+  getCustomerAccountList,
 };
