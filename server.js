@@ -19,7 +19,7 @@ app.use(bodyParser.json());
 const db = require("./app/modelses/index.js");
 
 // set alter :true when sync model with database   
-db.sequelize.sync({alter: false})
+db.sequelize.sync({alter: true})
   .then(() => {
     console.log("Synced db.");
   })
@@ -59,6 +59,7 @@ require("./app/routes/account.routes.js")(app);
 require("./app/routes/itemcategory.routes.js")(app);
 require("./app/routes/itemgroup.routes.js")(app);
 require("./app/routes/itemmaster.routes.js")(app);
+require("./app/routes/purchase.routes.js")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8001;

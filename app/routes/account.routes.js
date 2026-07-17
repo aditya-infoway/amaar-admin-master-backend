@@ -19,6 +19,10 @@ module.exports = (app) => {
 
   routes.post("/create", validate(accountValidation.createAccount), account.createAccount);
   routes.get("/list", account.getAccountList);
+  routes.get("/cash/list", account.getCashAccountList);
+  routes.get("/bank/list", account.getBankAccountList);
+  routes.get("/supplier/list", account.getSupplierAccountList);
+  routes.get("/customer/list", account.getCustomerAccountList);
   routes.get("/:id", account.getAccountById);
   routes.put("/update", validate(accountValidation.updateAccount), account.updateAccount);
   routes.delete("/delete", validate(accountValidation.deleteAccount), account.deleteAccount);

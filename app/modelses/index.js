@@ -34,6 +34,8 @@ db.accountopeningbalance = require("./accountopeningbalance.js")(sequelize, Sequ
 db.itemcategory = require("./itemcategory.js")(sequelize, Sequelize);
 db.itemgroup = require("./itemgroup.js")(sequelize, Sequelize);
 db.itemmaster = require("./itemmaster.js")(sequelize, Sequelize);
+db.purchase = require("./purchase.js")(sequelize, Sequelize);
+db.purchasedetails = require("./purchasedetails.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;

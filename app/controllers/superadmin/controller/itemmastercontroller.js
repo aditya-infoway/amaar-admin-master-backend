@@ -472,6 +472,108 @@ const bulkAutoGenerateBarcode = async (req, res) => {
   }
 };
 
+// ---------------- VEHICLE ITEMS LIST (for Vehicle Purchase Bill drawer) ----------------
+const getVehicleItemList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "itemmaster",
+      [
+        {
+          table: "itemcategory",
+          alias: "ic",
+          onClause: { 'ic."itemCategoryId"': { "=": 'itemmaster."itemCategoryId"' } },
+        },
+        {
+          table: "itemgroup",
+          alias: "ig",
+          onClause: { 'ig."itemGroupId"': { "=": 'itemmaster."groupId"' } },
+        },
+      ],
+      {
+        'itemmaster."companyId"': companyId,
+        'itemmaster."delete"': 0,
+      },
+      [
+        'itemmaster."itemId"',
+        'itemmaster."itemCode"',
+        'itemmaster."itemName"',
+        'itemmaster."hsnCode"',
+        'ic."categoryName" AS "categoryName"',
+        'ig."groupName" AS "groupName"',
+        'itemmaster."unit"',
+        'itemmaster."taxSlab"',
+        'itemmaster."salesPrice"',
+        'itemmaster."barcode"',
+      ],
+      [['itemmaster."itemId"', "DESC"]],
+      0,
+      0
+    );
+
+    return successResponse(res, list, "Vehicle item list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
+// ---------------- ITEM LOOKUP BY BARCODE (for scan input) ----------------
+const getItemByBarcode = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { barcode } = req.params;
+    if (!barcode) return errorResponse(res, "Barcode is required.");
+
+    const rows = await selectWithJoinsV2(
+      "itemmaster",
+      [
+        {
+          table: "itemcategory",
+          alias: "ic",
+          onClause: { 'ic."itemCategoryId"': { "=": 'itemmaster."itemCategoryId"' } },
+        },
+        {
+          table: "itemgroup",
+          alias: "ig",
+          onClause: { 'ig."itemGroupId"': { "=": 'itemmaster."groupId"' } },
+        },
+      ],
+      {
+        'itemmaster."companyId"': companyId,
+        'itemmaster."barcode"': barcode.trim(),
+        'itemmaster."delete"': 0,
+      },
+      [
+        'itemmaster."itemId"',
+        'itemmaster."itemCode"',
+        'itemmaster."itemName"',
+        'itemmaster."hsnCode"',
+        'ic."categoryName" AS "categoryName"',
+        'ig."groupName" AS "groupName"',
+        'itemmaster."unit"',
+        'itemmaster."taxSlab"',
+        'itemmaster."salesPrice"',
+        'itemmaster."barcode"',
+      ],
+      [],
+      1,
+      0
+    );
+
+    if (rows.length === 0) {
+      return errorResponse(res, "No item found for this barcode.");
+    }
+
+    return successResponse(res, rows[0], "Item found successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextBarcode,
   createItemMaster,
@@ -482,4 +584,6 @@ module.exports = {
   setItemBarcode,
   autoGenerateItemBarcode,
   bulkAutoGenerateBarcode,
+  getVehicleItemList,
+  getItemByBarcode,
 };
