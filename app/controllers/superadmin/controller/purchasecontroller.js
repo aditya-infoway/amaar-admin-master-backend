@@ -39,7 +39,8 @@ const getNextBillNo = async (req, res) => {
 const createPurchase = async (req, res) => {
   try {
     const companyId = req.companyId;
-    const financialYearId = req.financialYearId; // session se
+    const { financialYearId } = req.body;
+    
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
     if (!financialYearId) return errorResponse(res, "Financial Year not found in session. Please select a company year.");
@@ -233,7 +234,176 @@ const createPurchase = async (req, res) => {
   }
 };
 
+const getPurchaseList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+ 
+    const { financialYearId } = req.query;
+ 
+    const purchaseWhere = { companyId, delete: 0 };
+    if (financialYearId) purchaseWhere.financialYearId = financialYearId;
+ 
+    const purchases = await selectWithJoins(
+      "purchase",
+      [],
+      purchaseWhere,
+      [
+        "purchaseId", "purchaseDate", "terms", "accountId", "branchId",
+        "billNo", "purchaseBillNo", "transportCharge", "loadingCharge",
+        "otherCharge", "taxableValue", "gstAmount", "cgstAmount", "sgstAmount",
+        "igstAmount", "grandTotal", "billStatus",
+      ]
+    );
+ 
+    if (!purchases.length) {
+      return successResponse(res, [], "Purchase list fetched successfully");
+    }
+ 
+    // ---- Related suppliers (account) ----
+    const accountIds = [...new Set(purchases.map((p) => p.accountId).filter(Boolean))];
+    let accountMap = {};
+    if (accountIds.length) {
+      const accounts = await selectWithJoins(
+        "account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName", "mobileNo"]
+      );
+      accounts.forEach((a) => { accountMap[a.id] = a; });
+    }
+ 
+    // ---- Related branch / location ----
+    const branchIds = [...new Set(purchases.map((p) => p.branchId).filter(Boolean))];
+    let branchMap = {};
+    if (branchIds.length) {
+      try {
+        const branches = await selectWithJoins(
+          "branch", [], { branchId: branchIds, companyId, delete: 0 }, ["branchId", "branchName"]
+        );
+        branches.forEach((b) => { branchMap[b.branchId] = b; });
+      } catch (e) {
+        // agar "branch" table exist nahi karti to location blank rahega
+        branchMap = {};
+      }
+    }
+ 
+    // ---- Total qty per purchase (from purchasedetails) ----
+    const purchaseIds = purchases.map((p) => p.purchaseId);
+    const details = await selectWithJoins(
+      "purchasedetails", [], { purchaseId: purchaseIds, companyId, delete: 0 }, ["purchaseId", "qty"]
+    );
+    const qtyMap = {};
+    details.forEach((d) => {
+      qtyMap[d.purchaseId] = (qtyMap[d.purchaseId] || 0) + Number(d.qty || 0);
+    });
+ 
+    const data = purchases.map((p) => {
+      const account = accountMap[p.accountId] || {};
+      const branch = branchMap[p.branchId] || {};
+      return {
+        id: String(p.purchaseId),
+        purchaseDate: p.purchaseDate,
+        terms: p.terms,
+        supplierName: account.accountName || "",
+        billNo: p.billNo,
+        purchaseBillNo: p.purchaseBillNo,
+        location: branch.branchName || "",
+        totalQuantity: String(qtyMap[p.purchaseId] || 0),
+        totalAmount: String(p.taxableValue),
+        transportLoadingOtherCharge: String(
+          (Number(p.transportCharge) || 0) + (Number(p.loadingCharge) || 0) + (Number(p.otherCharge) || 0)
+        ),
+        cgstAmount: String(p.cgstAmount),
+        sgstAmount: String(p.sgstAmount),
+        igstAmount: String(p.igstAmount),
+        grandTotal: String(p.grandTotal),
+        transportName: "", // schema mein column nahi he abhi
+        mobileNo: account.mobileNo || "",
+        vehicleNo: "", // schema mein column nahi he abhi
+        status: p.billStatus,
+      };
+    });
+ 
+    return successResponse(res, data, "Purchase list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// ---------------- GET PURCHASE BY ID (with items) ----------------
+const getPurchaseById = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { id } = req.params;
+
+    const rows = await selectWithJoins(
+      "purchase",
+      [],
+      { purchaseId: id, companyId, delete: 0 },
+      [
+        "purchaseId", "date", "terms", "accountId", "branchId",
+        "billNo", "purchaseBillNo", "purchaseDate", "dueDate", "narration",
+        "transportCharge", "loadingCharge", "otherCharge",
+        "discountPct", "discountAmount", "roundAmount",
+        "taxableValue", "gstAmount", "cgstAmount", "sgstAmount", "igstAmount",
+        "grandTotal", "billStatus", "created",
+      ]
+    );
+
+    if (rows.length === 0) return requiredmessage(res, "Purchase not found");
+    const purchase = rows[0];
+
+    // ---- Party details ----
+    const partyRows = await selectWithJoins(
+      "account", [], { id: purchase.accountId, companyId, delete: 0 },
+      ["id", "accountName", "mobileNo", "stateName", "addressLine1"]
+    );
+    const party = partyRows[0] || {};
+
+    // ---- Branch/location details ----
+    let branch = {};
+    if (purchase.branchId) {
+      try {
+        const branchRows = await selectWithJoins(
+          "branch", [], { branchId: purchase.branchId, companyId, delete: 0 }, ["branchId", "branchName"]
+        );
+        branch = branchRows[0] || {};
+      } catch (e) {
+        branch = {};
+      }
+    }
+
+    // ---- Items ----
+    const items = await selectWithJoins(
+      "purchasedetails",
+      [],
+      { purchaseId: purchase.purchaseId, companyId, delete: 0 },
+      [
+        "purchaseDetailsId", "itemId", "itemCode", "itemName", "hsnCode", "uom",
+        "qty", "rate", "discount", "taxable", "gstPct", "gstAmt", "total",
+      ]
+    );
+
+    return successResponse(
+      res,
+      {
+        ...purchase,
+        supplierName: party.accountName || "",
+        supplierMobile: party.mobileNo || "",
+        supplierAddress: party.addressLine1 || "",
+        branchName: branch.branchName || "",
+        items,
+      },
+      "Purchase fetched successfully"
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextBillNo,
   createPurchase,
+  getPurchaseList,
+  getPurchaseById,
 };

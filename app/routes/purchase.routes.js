@@ -15,6 +15,8 @@ module.exports = (app) => {
   routes.use(superAdminAuth);
 
   routes.get("/next-bill-no", purchase.getNextBillNo);
+  routes.get("/list", purchase.getPurchaseList);
+  routes.get("/:id", purchase.getPurchaseById);
 
   routes.post("/create", validate(purchaseValidation.createPurchase), purchase.createPurchase);
 
