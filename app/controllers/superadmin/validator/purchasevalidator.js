@@ -2,6 +2,7 @@ const Joi = require("joi");
 
 const createPurchase = Joi.object().keys({
   terms: Joi.string().valid("Credit", "Cash", "Bank").required(),
+  financialYearId: Joi.number().required().messages({ "any.required": "financial Year Id is required" }),
   accountId: Joi.number().required().messages({ "any.required": "Party is required" }),
   billNo: Joi.string().required(),
   purchaseBillNo: Joi.string().required(),
