@@ -40,6 +40,16 @@ module.exports = sequelize => {
     bankNarration: { type: DataTypes.TEXT, allowNull: true },
 
     billStatus: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "pending" },
+    created: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    updated: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
     delete: { type: DataTypes.INTEGER, defaultValue: 0 },
   };
   const options = {

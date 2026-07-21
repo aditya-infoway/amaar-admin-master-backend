@@ -16,6 +16,16 @@ module.exports = sequelize => {
     gstPct: { type: DataTypes.DECIMAL(5,2), allowNull: false },
     gstAmt: { type: DataTypes.DECIMAL(15,2), allowNull: false },
     total: { type: DataTypes.DECIMAL(15,2), allowNull: false },
+    created: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    updated: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
     delete: { type: DataTypes.INTEGER, defaultValue: 0 }
   };
   const options = {

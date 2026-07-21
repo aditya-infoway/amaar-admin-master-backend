@@ -60,6 +60,9 @@ require("./app/routes/itemcategory.routes.js")(app);
 require("./app/routes/itemgroup.routes.js")(app);
 require("./app/routes/itemmaster.routes.js")(app);
 require("./app/routes/purchase.routes.js")(app);
+require("./app/routes/role.routes.js")(app);
+require("./app/routes/employee.routes.js")(app);
+require("./app/routes/employeelogin.routes.js")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8001;
