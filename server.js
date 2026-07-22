@@ -19,7 +19,7 @@ app.use(bodyParser.json());
 const db = require("./app/modelses/index.js");
 
 // set alter :true when sync model with database   
-db.sequelize.sync({alter: true})
+db.sequelize.sync({alter: false})
   .then(() => {
     console.log("Synced db.");
   })
@@ -38,31 +38,7 @@ app.get("/", (req, res) => {
   res.json({ message: "Welcome to Amaar Software." });
 });
 
-require("./app/routes/master.routes.js")(app);
-require("./app/routes/company.routes.js")(app);
-require("./app/routes/superadmin.routes.js")(app);
-require("./app/routes/category.routes.js")(app);
-require("./app/routes/productseries.routes.js")(app);
-require("./app/routes/model.routes.js")(app);
-require("./app/routes/variant.routes.js")(app);
-require("./app/routes/variantstructure.routes.js")(app);
-require("./app/routes/enquirytype.routes.js")(app);
-require("./app/routes/enquirysource.routes.js")(app);
-require("./app/routes/profession.routes.js")(app);
-require("./app/routes/enquirystatus.routes.js")(app);
-require("./app/routes/bodytype.routes.js")(app);
-require("./app/routes/axlebrand.routes.js")(app);
-require("./app/routes/hydraulicbrand.routes.js")(app);
-require("./app/routes/tyrebrand.routes.js")(app);
-require("./app/routes/group.routes.js")(app);
-require("./app/routes/account.routes.js")(app);
-require("./app/routes/itemcategory.routes.js")(app);
-require("./app/routes/itemgroup.routes.js")(app);
-require("./app/routes/itemmaster.routes.js")(app);
-require("./app/routes/purchase.routes.js")(app);
-require("./app/routes/role.routes.js")(app);
-require("./app/routes/employee.routes.js")(app);
-require("./app/routes/employeelogin.routes.js")(app);
+require("./app/routes")(app);
 
 // set port, listen for requests
 const PORT = process.env.PORT || 8001;

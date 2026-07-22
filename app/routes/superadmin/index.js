@@ -1,0 +1,25 @@
+module.exports = (app) => {
+    require("./superadmin.routes")(app);
+    require("./category.routes")(app);
+    require("./productseries.routes")(app);
+    require("./model.routes")(app);
+    require("./variant.routes")(app);
+    require("./variantstructure.routes")(app);
+    require("./enquirytype.routes")(app);
+    require("./enquirysource.routes")(app);
+    require("./profession.routes")(app);
+    require("./enquirystatus.routes")(app);
+    require("./bodytype.routes")(app);
+    require("./axlebrand.routes")(app);
+    require("./hydraulicbrand.routes")(app);
+    require("./tyrebrand.routes")(app);
+    require("./group.routes")(app);
+    require("./account.routes")(app);
+    require("./itemcategory.routes")(app);
+    require("./itemgroup.routes")(app);
+    require("./itemmaster.routes")(app);
+    require("./purchase.routes")(app);
+    require("./role.routes")(app);
+    require("./employee.routes")(app);
+    require("./employeelogin.routes")(app);
+};
