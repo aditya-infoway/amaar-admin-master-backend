@@ -66,15 +66,14 @@ module.exports = sequelize => {
       field: "status"
     },
     createdBy: {
-      type: DataTypes.STRING(50),
+      type: DataTypes.INTEGER,
       allowNull: false,
-      defaultValue: "Admin",
+      defaultValue: 0,
       field: "createdBy"
     },
     createdType: {
-      type: DataTypes.STRING(20),
-      allowNull: false,
-      defaultValue: "Manual",
+      type: DataTypes.STRING(50),
+      allowNull: true,
       field: "createdType"
     },
     created: {

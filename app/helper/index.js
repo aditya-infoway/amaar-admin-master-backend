@@ -68,6 +68,15 @@ const videoUrl = (blobName) => {
   return (blobName == "" || blobName == undefined || blobName == null) ? "" : getBlobTempPublicUrl("videos/" + blobName)
 }
 
+// ===== YE NAYA FUNCTION ADD KIYA — DB ka relative path le ke full URL banata hai =====
+const toFullUrl = (relativePath) => {
+  if (!relativePath) return null;
+  // agar path me already "Uploadimages/" laga hua hai (jaisa getFilePath deta hai),
+  // to usko hata do taaki URL me "Uploadimages" do baar na aaye
+  const cleanPath = relativePath.replace(/^Uploadimages[\\/]/, "");
+  return "http://localhost:8001/Uploadimages/" + cleanPath;
+};
+
 //catch error message
 const errorResponse = (
   res,
@@ -1023,6 +1032,7 @@ const numberFormate = (value)=>{
 
 module.exports = {
   getBlobTempPublicUrl,
+  toFullUrl,
   selectWithJoins,
   saveModel,
   updateModel,
