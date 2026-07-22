@@ -36,6 +36,8 @@ db.itemgroup = require("./itemgroup.js")(sequelize, Sequelize);
 db.itemmaster = require("./itemmaster.js")(sequelize, Sequelize);
 db.purchase = require("./purchase.js")(sequelize, Sequelize);
 db.purchasedetails = require("./purchasedetails.js")(sequelize, Sequelize);
+db.role = require("./role.js")(sequelize, Sequelize);
+db.employee = require("./employee.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
