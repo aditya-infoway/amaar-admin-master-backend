@@ -19,7 +19,9 @@ module.exports = (app) => {
     require("./itemgroup.routes")(app);
     require("./itemmaster.routes")(app);
     require("./purchase.routes")(app);
+    require("./stockreport.routes")(app);
     require("./role.routes")(app);
     require("./employee.routes")(app);
     require("./employeelogin.routes")(app);
+    require("./payment.routes")(app);
 };

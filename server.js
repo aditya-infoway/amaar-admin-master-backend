@@ -30,7 +30,6 @@ db.sequelize.sync({alter: false})
     console.log(err.sql);
   });
 
-
 app.use("/Uploadimages", express.static(path.join(__dirname, "Uploadimages")));
 
 // simple route
