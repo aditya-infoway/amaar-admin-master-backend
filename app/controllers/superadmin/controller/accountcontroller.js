@@ -381,6 +381,38 @@ const getCustomerAccountList = async (req, res) => {
   }
 };
 
+const getOppAccountList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "account",
+      [],
+      {
+        'account."companyId"': companyId,
+        'account."groupId"': { IN: "(30,31,34,35)" },
+        'account."delete"': 0,
+      },
+      [
+        "account.id",
+        'account."accountName"',
+        'account."mobileNo"',
+        'account."currentBalance"',
+        'account."currentDrOrCr"',
+        'account."stateName"',
+      ],
+      [["account.id", "DESC"]],
+      0,
+      0
+    );
+
+    return successResponse(res, list, "Account list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   createAccount,
   getAccountList,
@@ -391,4 +423,5 @@ module.exports = {
   getBankAccountList,
   getSupplierAccountList,
   getCustomerAccountList,
+  getOppAccountList,
 };

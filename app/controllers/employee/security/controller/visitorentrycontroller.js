@@ -20,6 +20,13 @@ const getFilePath = (files, field) => {
   return null;
 };
 
+// ✅ NEW — Badge Number aur Gate Pass Number ab backend hi generate karega
+const generateBadgeNumber = () =>
+  `B-${Math.floor(1000 + Math.random() * 9000)}`;
+
+const generateGatePassNumber = () =>
+  `GP-${Date.now().toString().slice(-8)}`;
+
 const mapPhotoUrls = (row) => ({
   ...row,
   idFrontPhoto: toFullUrl(row.idFrontPhoto),
@@ -116,6 +123,9 @@ const createVisitorEntry = async (req, res) => {
       status: "IN",              // ✅ CHANGED — ab HOLD nahi, seedha IN
       otpVerified: true,         // ✅ CHANGED — wizard yaha OTP verify hone ke baad hi call karta hai
       checkInTime,                // ✅ CHANGED — Entry Time se banaya gaya check-in time
+      badgeNumber: generateBadgeNumber(),
+      gatePassNumber: generateGatePassNumber(),
+      gatePassIssuedAt: new Date().toISOString(),
       createdBy: sessionEmployeeId,
       createdType: "Security",
       delete: 0,

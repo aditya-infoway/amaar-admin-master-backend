@@ -66,4 +66,10 @@ const createPurchase = Joi.object().keys({
   ).required().messages({ "array.min": "Please add at least one item." }),
 });
 
-module.exports = { createPurchase };
+const verifyPurchaseItem = Joi.object().keys({
+  purchaseDetailsId: Joi.number().required().messages({
+    "any.required": "Purchase detail id is required",
+  }),
+});
+
+module.exports = { createPurchase, verifyPurchaseItem };

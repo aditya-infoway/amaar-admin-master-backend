@@ -16,6 +16,8 @@ module.exports = sequelize => {
     gstPct: { type: DataTypes.DECIMAL(5,2), allowNull: false },
     gstAmt: { type: DataTypes.DECIMAL(15,2), allowNull: false },
     total: { type: DataTypes.DECIMAL(15,2), allowNull: false },
+    verified: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: "verified" },
+    currentStock: { type: DataTypes.DECIMAL(12,3), allowNull: false, defaultValue: 0, field: "currentStock" },
     created: {
       type: DataTypes.DATE,
       allowNull: false,

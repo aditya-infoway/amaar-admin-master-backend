@@ -3,6 +3,7 @@ const {
   errorResponse,
   requiredmessage,
   saveModel,
+  updateModel: updateModelHelper,
   selectWithJoins,
 } = require("../../../helper/index.js");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
@@ -210,6 +211,7 @@ const createPurchase = async (req, res) => {
         gstPct: row.gstPct,
         gstAmt: row.gstAmt,
         total: row.total,
+        currentStock: row.qty,
         delete: 0,
       });
     }
@@ -381,6 +383,7 @@ const getPurchaseById = async (req, res) => {
       [
         "purchaseDetailsId", "itemId", "itemCode", "itemName", "hsnCode", "uom",
         "qty", "rate", "discount", "taxable", "gstPct", "gstAmt", "total",
+        "verified",
       ]
     );
 
@@ -401,9 +404,40 @@ const getPurchaseById = async (req, res) => {
   }
 };
 
+// ---------------- VERIFY PURCHASE ITEM ----------------
+const verifyPurchaseItem = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { purchaseDetailsId } = req.body;
+    if (!purchaseDetailsId) return errorResponse(res, "Purchase detail id is required.");
+
+    const existing = await selectWithJoins(
+      "purchasedetails", [], { purchaseDetailsId, companyId, delete: 0 }, ["purchaseDetailsId", "verified"]
+    );
+    if (existing.length === 0) return requiredmessage(res, "Purchase item not found.");
+
+    if (existing[0].verified) {
+      return successResponse(res, {}, "Item already verified.");
+    }
+
+    await updateModelHelper(
+      "purchasedetails",
+      { verified: true, updated: new Date() },
+      { purchaseDetailsId, companyId }
+    );
+
+    return successResponse(res, {}, "Item verified successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextBillNo,
   createPurchase,
   getPurchaseList,
   getPurchaseById,
+  verifyPurchaseItem,
 };
