@@ -5,7 +5,8 @@ const generateVoucherNo = async ({
   companyId,
   financialYearId,
   tableName,
-  prefixColumn,
+  idColumn = "id",
+  fixedPrefix,
   tag = "",
   extraWhere = {},
   padLength = 3,
@@ -19,9 +20,7 @@ const generateVoucherNo = async ({
     throw new Error("Invalid or inactive Financial Year for this company.");
   }
 
-//   const companyRow = await selectWithJoins("companydetails", [], { companyId: companyId }, [prefixColumn]);
-//   const prefix = companyRow[0]?.[prefixColumn] || "";
-  const prefix = "P";
+  const prefix = fixedPrefix || "P";
 
   const whereClause = {
     companyId,
@@ -30,7 +29,8 @@ const generateVoucherNo = async ({
     ...extraWhere,
   };
 
-  const existingRows = await selectWithJoins("purchase", [], whereClause, ["purchaseId"]);
+  // 👇 ab dono cheezein dynamic — tableName aur idColumn, "purchase"/"purchaseId" hardcoded nahi
+  const existingRows = await selectWithJoins(tableName, [], whereClause, [idColumn]);
   const nextSeq = existingRows.length + 1;
   const seqPadded = String(nextSeq).padStart(padLength, "0");
 
@@ -39,8 +39,11 @@ const generateVoucherNo = async ({
   parts.push(fy.fyLabel);
   parts.push(seqPadded);
 
+  const voucherNo = parts.join("/");
+
   return {
-    billNo: parts.join("/"),
+    voucherNo,
+    billNo: voucherNo, // purchase controller isi shape ko use karta he, backward-compatible
     financialYearId: fy.financialYearId,
     fyLabel: fy.fyLabel,
   };

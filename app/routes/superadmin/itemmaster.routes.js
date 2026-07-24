@@ -23,6 +23,7 @@ module.exports = (app) => {
   routes.get("/vehicle-list", itemmaster.getVehicleItemList);
   routes.get("/generate-barcode", itemmaster.getNextBarcode);
   routes.get("/barcode/:barcode", itemmaster.getItemByBarcode);
+  routes.get("/purchase-list", itemmaster.getPurchaseItemList);
 
   // ───── POST / PUT / DELETE routes (method alag hai, order matter nahi karta) ─────
   routes.post(
