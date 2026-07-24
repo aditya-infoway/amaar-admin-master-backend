@@ -18,8 +18,15 @@ module.exports = (app) => {
   routes.use(superAdminAuth);
 
   routes.get("/next-voucher-no", payment.getNextVoucherNo);
+
   routes.get("/cash/list", payment.getCashPaymentList);
   routes.post("/cash/create", validate(paymentValidation.createCashPayment), payment.createCashPayment);
+
+  routes.get("/bank/list", payment.getBankPaymentList);
+  routes.post("/bank/create", validate(paymentValidation.createBankPayment), payment.createBankPayment);
+
+  routes.get("/cash-book", payment.getCashBook);  
+  routes.get("/bank-book", payment.getBankBook);
 
   app.use("/payment", routes);
 };

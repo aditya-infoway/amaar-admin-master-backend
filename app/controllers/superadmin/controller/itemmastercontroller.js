@@ -574,6 +574,28 @@ const getItemByBarcode = async (req, res) => {
   }
 };
 
+const getPurchaseItemList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const list = await selectWithJoinsV2(
+      "itemmaster", [],
+      { 'itemmaster."companyId"': companyId, 'itemmaster."delete"': 0 },
+      [
+        'itemmaster."itemId"', 'itemmaster."itemCode"', 'itemmaster."itemName"',
+        'itemmaster."hsnCode"', 'itemmaster."unit"', 'itemmaster."taxSlab"',
+        'itemmaster."purchasePrice"',
+      ],
+      [['itemmaster."itemId"', "DESC"]], 0, 0
+    );
+
+    return successResponse(res, list, "Item list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextBarcode,
   createItemMaster,
@@ -586,4 +608,5 @@ module.exports = {
   bulkAutoGenerateBarcode,
   getVehicleItemList,
   getItemByBarcode,
+  getPurchaseItemList,
 };

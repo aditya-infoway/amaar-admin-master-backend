@@ -15,6 +15,7 @@ module.exports = sequelize => {
     // CASH PAYMENT | BANK PAYMENT | CASH RECEIPT | BANK RECEIPT | CONTRA | JOURNAL
     voucherType: { type: DataTypes.STRING(30), allowNull: false, field: "voucherType" },
     voucherNo: { type: DataTypes.STRING(50), allowNull: false, field: "voucherNo" },
+    paymentCollectedByModules: { type: DataTypes.STRING(30), allowNull: true, field: "paymentCollectedByModules" },
 
     date: { type: DataTypes.DATEONLY, allowNull: false, field: "date" },
 
@@ -33,7 +34,6 @@ module.exports = sequelize => {
     chequeNo: { type: DataTypes.STRING(30), allowNull: true, field: "chequeNo" },
     chequeDate: { type: DataTypes.DATEONLY, allowNull: true, field: "chequeDate" },
     chequeClearDate: { type: DataTypes.DATEONLY, allowNull: true, field: "chequeClearDate" },
-    bankNarration: { type: DataTypes.STRING(255), allowNull: true, field: "bankNarration" },
 
     createdBy: {
       type: DataTypes.INTEGER,

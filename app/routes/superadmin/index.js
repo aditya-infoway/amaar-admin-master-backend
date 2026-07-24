@@ -24,4 +24,5 @@ module.exports = (app) => {
     require("./employee.routes")(app);
     require("./employeelogin.routes")(app);
     require("./payment.routes")(app);
+    require("./purchaseorder.routes")(app);
 };

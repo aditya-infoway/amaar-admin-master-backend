@@ -26,8 +26,8 @@ const getNextBillNo = async (req, res) => {
       companyId,
       financialYearId,
       tableName: "purchase",
-      prefixColumn: "purchasePrefix",
-      tag: "",
+      idColumn: "purchaseId",   // 👈 purchase table ka real PK
+      fixedPrefix: "P",
     });
 
     return successResponse(res, { billNo, fyLabel, financialYearId }, "Bill number generated successfully");

@@ -41,6 +41,8 @@ db.employee = require("./employee.js")(sequelize, Sequelize);
 db.vehicleentry = require("./vehicleentry.js")(sequelize, Sequelize);
 db.visitorentry = require("./visitorentry.js")(sequelize, Sequelize);
 db.payment = require("./payment.js")(sequelize, Sequelize);
+db.purchaseorder = require("./purchaseorder.js")(sequelize, Sequelize);
+db.purchaseorderdetails = require("./purchaseorderdetails.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
