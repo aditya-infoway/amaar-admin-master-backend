@@ -16,9 +16,8 @@ const createItemGroup = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { groupName, status } = req.body;
+    const { groupName, itemCategoryId, status } = req.body;
 
-    // groupName company-wise unique honi chahiye
     const nameExists = await selectWithJoins(
       "itemgroup",
       [],
@@ -33,6 +32,7 @@ const createItemGroup = async (req, res) => {
     const payload = {
       companyId,
       groupName: groupName.trim(),
+      itemCategoryId,
       status,
       delete: 0,
     };
@@ -61,7 +61,7 @@ const getItemGroupList = async (req, res) => {
       "itemgroup",
       [],
       { companyId, delete: 0 },
-      ["itemGroupId", "companyId", "groupName", "status", "created"],
+      ["itemGroupId", "companyId", "groupName", "itemCategoryId", "status", "created"],
       [["itemGroupId", "DESC"]]
     );
 
@@ -86,7 +86,7 @@ const getItemGroupById = async (req, res) => {
       "itemgroup",
       [],
       { itemGroupId: id, companyId, delete: 0 },
-      ["itemGroupId", "companyId", "groupName", "status", "created"]
+      ["itemGroupId", "companyId", "groupName", "itemCategoryId", "status", "created"]
     );
 
     if (rows.length === 0) {
@@ -108,7 +108,7 @@ const updateItemGroup = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { itemGroupId, groupName, status } = req.body;
+    const { itemGroupId, groupName, itemCategoryId, status } = req.body;
 
     const existing = await selectWithJoins(
       "itemgroup",
@@ -121,7 +121,6 @@ const updateItemGroup = async (req, res) => {
       return requiredmessage(res, "Item group not found");
     }
 
-    // groupName uniqueness check — same record ke alawa koi aur is naam se na ho
     const nameExists = await selectWithJoins(
       "itemgroup",
       [],
@@ -141,6 +140,7 @@ const updateItemGroup = async (req, res) => {
       "itemgroup",
       {
         groupName: groupName.trim(),
+        itemCategoryId,
         status,
         updated: new Date(),
       },

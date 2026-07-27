@@ -8,6 +8,7 @@ const {
 } = require("../../../helper/index.js");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
+const { updateAccountBalance } = require("../../../helper/accountBalance.js");
 
 // ---------------- Normalize state string for comparison ----------------
 const normalizeState = (s) =>
@@ -26,7 +27,7 @@ const getNextBillNo = async (req, res) => {
       companyId,
       financialYearId,
       tableName: "purchase",
-      idColumn: "purchaseId",   // 👈 purchase table ka real PK
+      idColumn: "purchaseId",
       fixedPrefix: "P",
     });
 
@@ -41,7 +42,6 @@ const createPurchase = async (req, res) => {
   try {
     const companyId = req.companyId;
     const { financialYearId } = req.body;
-    
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
     if (!financialYearId) return errorResponse(res, "Financial Year not found in session. Please select a company year.");
@@ -52,6 +52,7 @@ const createPurchase = async (req, res) => {
       transportCharge, loadingCharge, otherCharge, discountPct, discountAmount, roundAmount,
       cashAccountId, bankAccountId, paymentMode, chequeNo, chequeDate, chequeClearDate, bankNarration,
       items,
+      createdBy, createdType,
     } = req.body;
 
     if (!accountId) return errorResponse(res, "Party is required.");
@@ -59,6 +60,9 @@ const createPurchase = async (req, res) => {
     if (!Array.isArray(items) || items.length === 0) {
       return errorResponse(res, "Please add at least one item.");
     }
+
+    const finalCreatedBy = createdBy != null ? Number(createdBy) : companyId;
+    const finalCreatedType = createdType || "Super Admin";
 
     // ---- Financial Year validate ----
     const fy = await getFinancialYearById(financialYearId, companyId);
@@ -74,7 +78,8 @@ const createPurchase = async (req, res) => {
 
     // ---- Party (account) validate + state fetch ----
     const partyRows = await selectWithJoins(
-      "account", [], { id: accountId, companyId, delete: 0 }, ["id", "accountName", "stateName"]
+      "account", [], { id: accountId, companyId, delete: 0 },
+      ["id", "accountName", "stateName", "currentBalance", "currentDrOrCr"]
     );
     if (partyRows.length === 0) return errorResponse(res, "Selected party is invalid.");
     const party = partyRows[0];
@@ -86,23 +91,35 @@ const createPurchase = async (req, res) => {
     if (companyRows.length === 0) return errorResponse(res, "Company details not found.");
     const companyStateVal = companyRows[0].state;
 
-    // ---- Cash / Bank account validate ----
+    // ---- Cash / Bank account validate + balance fetch ----
+    let cashAcc = null, bankAcc = null;
+
     if (terms === "Cash") {
       if (!cashAccountId) return errorResponse(res, "Cash account is required.");
-      const cashRows = await selectWithJoins("account", [], { id: cashAccountId, companyId, delete: 0 }, ["id"]);
+      const cashRows = await selectWithJoins(
+        "account", [], { id: cashAccountId, companyId, delete: 0 },
+        ["id", "accountName", "currentBalance", "currentDrOrCr"]
+      );
       if (cashRows.length === 0) return errorResponse(res, "Selected cash account is invalid.");
+      cashAcc = cashRows[0];
     }
+
     if (terms === "Bank") {
       if (!bankAccountId) return errorResponse(res, "Bank account is required.");
-      const bankRows = await selectWithJoins("account", [], { id: bankAccountId, companyId, delete: 0 }, ["id"]);
+      const bankRows = await selectWithJoins(
+        "account", [], { id: bankAccountId, companyId, delete: 0 },
+        ["id", "accountName", "currentBalance", "currentDrOrCr"]
+      );
       if (bankRows.length === 0) return errorResponse(res, "Selected bank account is invalid.");
+      bankAcc = bankRows[0];
+
       if (!paymentMode) return errorResponse(res, "Payment mode is required.");
       if (paymentMode === "CHEQUE" && (!chequeNo || !chequeDate)) {
         return errorResponse(res, "Cheque No and Cheque Date are required for cheque payment.");
       }
     }
 
-    // ---- Validate + recompute each item server-side (don't trust frontend blindly) ----
+    // ---- Validate + recompute each item server-side ----
     let taxableValue = 0;
     let totalGst = 0;
     const cleanItems = [];
@@ -111,7 +128,6 @@ const createPurchase = async (req, res) => {
       if (!row.itemId) return errorResponse(res, `Item id missing for "${row.itemName || "an item"}".`);
       if (!row.qty || row.qty <= 0) return errorResponse(res, `Invalid quantity for "${row.itemName}".`);
 
-      // itemId company ka hi ho, aur active ho
       const itemRows = await selectWithJoins(
         "itemmaster", [], { itemId: row.itemId, companyId, delete: 0 }, ["itemId", "itemCode", "itemName", "hsnCode", "unit"]
       );
@@ -154,6 +170,20 @@ const createPurchase = async (req, res) => {
     const grandTotal =
       taxableValue + totalGst + otherTotal - (Number(discountAmount) || 0) + (Number(roundAmount) || 0);
 
+    // ---- Payment terms ke hisab se balance check pehle (fail-fast, DB insert se pehle) ----
+    if (terms === "Cash" && Number(cashAcc.currentBalance) < grandTotal) {
+      return errorResponse(
+        res,
+        `Insufficient Cash Balance! You need ₹${grandTotal} but only ₹${cashAcc.currentBalance} available.`
+      );
+    }
+    if (terms === "Bank" && Number(bankAcc.currentBalance) < grandTotal) {
+      return errorResponse(
+        res,
+        `Insufficient Bank Balance! You need ₹${grandTotal} but only ₹${bankAcc.currentBalance} available.`
+      );
+    }
+
     // ---- Save Purchase ----
     const purchase = await saveModel("purchase", {
       companyId,
@@ -182,15 +212,9 @@ const createPurchase = async (req, res) => {
       igstAmount: finalIgst,
       grandTotal: Number(grandTotal.toFixed(2)),
 
-    //   cashAccountId: terms === "Cash" ? cashAccountId : null,
-    //   bankAccountId: terms === "Bank" ? bankAccountId : null,
-    //   paymentMode: terms === "Bank" ? paymentMode : null,
-    //   chequeNo: paymentMode === "CHEQUE" ? chequeNo : null,
-    //   chequeDate: paymentMode === "CHEQUE" ? chequeDate : null,
-    //   chequeClearDate: paymentMode === "CHEQUE" ? (chequeClearDate || null) : null,
-    //   bankNarration: terms === "Bank" ? (bankNarration || "") : "",
-
       billStatus: "pending",
+      createdBy: finalCreatedBy,
+      createdType: finalCreatedType,
       delete: 0,
     });
 
@@ -216,6 +240,114 @@ const createPurchase = async (req, res) => {
       });
     }
 
+    // =========================================================
+    // Payment entry + balance update (terms wise)
+    // =========================================================
+    const roundedGrandTotal = Number(grandTotal.toFixed(2));
+
+    // ---- Sirf party ki liability badhegi (CR), koi cash/bank movement nahi ----
+    await saveModel("payment", {
+      companyId,
+      financialYearId: fy.financialYearId,
+      voucherType: "PURCHASE",
+      paymentCollectedByModules: "PUR",
+      voucherNo: null,
+      date: purchaseDate,
+      selfAccountId: accountId,
+      selfDrOrCr: "CR",
+      accountId: accountId,       // schema NOT NULL hai isliye same party rakha (single-sided entry)
+      accountDrOrCr: "CR",
+      amount: roundedGrandTotal,
+      narration: narration || "",
+      paymentMode: "CREDIT",
+      purchaseId: purchase.purchaseId,   // ledger report join ke liye
+      createdBy: finalCreatedBy,
+      createdType: finalCreatedType,
+      status: "active",
+      delete: 0,
+    });
+
+    if (terms === "Credit") {
+
+      // Party ka payable balance badhao
+      await updateAccountBalance(accountId, roundedGrandTotal, "CR", companyId);
+    }
+
+    if (terms === "Cash") {
+      const { voucherNo } = await generateVoucherNo({
+        companyId,
+        financialYearId: fy.financialYearId,
+        tableName: "payment",
+        idColumn: "paymentId",
+        fixedPrefix: "CP",
+        extraWhere: { voucherType: "CASH PAYMENT" },
+      });
+
+      await saveModel("payment", {
+        companyId,
+        financialYearId: fy.financialYearId,
+        voucherType: "CASH PAYMENT",
+        paymentCollectedByModules: "PCP",
+        voucherNo,
+        date: purchaseDate,
+        selfAccountId: cashAccountId,
+        selfDrOrCr: "CR",              // cash account se paisa gaya
+        accountId: accountId,          // party — reporting/reference ke liye
+        accountDrOrCr: "DR",
+        amount: roundedGrandTotal,
+        narration: narration || "",
+        paymentMode: "CASH",
+        purchaseId: purchase.purchaseId,   // ledger report join ke liye
+        createdBy: finalCreatedBy,
+        createdType: finalCreatedType,
+        status: "active",
+        delete: 0,
+      });
+
+      // Sirf cash account credited hoga (paisa bahar gaya) — party balance touch nahi hoga
+      await updateAccountBalance(cashAccountId, roundedGrandTotal, "CR", companyId);
+    }
+
+    if (terms === "Bank") {
+      const { voucherNo } = await generateVoucherNo({
+        companyId,
+        financialYearId: fy.financialYearId,
+        tableName: "payment",
+        idColumn: "paymentId",
+        fixedPrefix: "BP",
+        extraWhere: { voucherType: "BANK PAYMENT" },
+      });
+
+      const modeUpper = String(paymentMode || "").toUpperCase();
+
+      await saveModel("payment", {
+        companyId,
+        financialYearId: fy.financialYearId,
+        voucherType: "BANK PAYMENT",
+        paymentCollectedByModules: "PBP",
+        voucherNo,
+        date: purchaseDate,
+        selfAccountId: bankAccountId,
+        selfDrOrCr: "CR",
+        accountId: accountId,          // party — reporting/reference ke liye
+        accountDrOrCr: "DR",
+        amount: roundedGrandTotal,
+        narration: bankNarration || narration || "",
+        paymentMode: modeUpper,
+        chequeNo: modeUpper === "CHEQUE" ? chequeNo : null,
+        chequeDate: modeUpper === "CHEQUE" ? chequeDate : null,
+        chequeClearDate: modeUpper === "CHEQUE" ? (chequeClearDate || null) : null,
+        purchaseId: purchase.purchaseId,   // ledger report join ke liye
+        createdBy: finalCreatedBy,
+        createdType: finalCreatedType,
+        status: "active",
+        delete: 0,
+      });
+
+      // Sirf bank account credited hoga (paisa bahar gaya)
+      await updateAccountBalance(bankAccountId, roundedGrandTotal, "CR", companyId);
+    }
+
     return successResponse(
       res,
       {
@@ -224,7 +356,7 @@ const createPurchase = async (req, res) => {
         cgstAmount: finalCgst,
         sgstAmount: finalSgst,
         igstAmount: finalIgst,
-        grandTotal,
+        grandTotal: roundedGrandTotal,
       },
       "Purchase saved successfully"
     );

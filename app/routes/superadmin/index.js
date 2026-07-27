@@ -25,4 +25,5 @@ module.exports = (app) => {
     require("./employeelogin.routes")(app);
     require("./payment.routes")(app);
     require("./purchaseorder.routes")(app);
+    require("./ledgerreport.routes")(app);
 };
