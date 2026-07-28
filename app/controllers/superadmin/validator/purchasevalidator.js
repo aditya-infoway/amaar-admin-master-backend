@@ -48,6 +48,9 @@ const createPurchase = Joi.object().keys({
   chequeClearDate: Joi.string().allow("", null),
   bankNarration: Joi.string().allow("", null),
 
+  createdBy: Joi.number().allow(null),
+  createdType: Joi.string().trim().allow("", null),
+
   items: Joi.array().min(1).items(
     Joi.object({
       itemId: Joi.number().required().messages({ "any.required": "Item id is required" }),

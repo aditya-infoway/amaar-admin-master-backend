@@ -301,7 +301,7 @@ const getCashBook = async (req, res) => {
  
     const where = {
       companyId,
-      paymentMode: "CASH",
+      voucherType: "CASH PAYMENT",
       delete: 0,
     };
     if (financialYearId) where.financialYearId = financialYearId;
@@ -421,7 +421,7 @@ const getBankBook = async (req, res) => {
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const where = { companyId, delete: 0 };
+    const where = { companyId, delete: 0, voucherType : "BANK PAYMENT" };
     if (financialYearId) where.financialYearId = financialYearId;
     if (bankAccountId && bankAccountId !== "ALL") where.selfAccountId = Number(bankAccountId);
 

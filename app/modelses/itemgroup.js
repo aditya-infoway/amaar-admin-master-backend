@@ -13,6 +13,12 @@ module.exports = sequelize => {
       allowNull: false,
       field: "companyId"
     },
+    itemCategoryId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "itemCategoryId"
+    },
     groupName: {
       type: DataTypes.STRING(100),
       allowNull: false,
