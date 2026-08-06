@@ -19,7 +19,7 @@ app.use(bodyParser.json());
 const db = require("./app/modelses/index.js");
 
 // set alter :true when sync model with database   
-db.sequelize.sync({alter: true})
+db.sequelize.sync({alter: false})
   .then(() => {
     console.log("Synced db.");
   })
