@@ -23,4 +23,4 @@ module.exports = (app) => {
   routes.put("/item/verify", validate(purchaseValidation.verifyPurchaseItem), purchase.verifyPurchaseItem);
 
   app.use("/purchase", routes);
-};
+};         
