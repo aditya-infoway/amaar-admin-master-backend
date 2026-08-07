@@ -12,11 +12,11 @@ const { updateAccountBalance } = require("../../../helper/accountBalance.js");
 const { resolveCreatedByNames, getCreatedByName } = require("../../../helper/resolveCreatedBy.js");
 
 const VOUCHER_CONFIG = {
-  "CASH PAYMENT": { prefix: "CP" },
-  "BANK PAYMENT": { prefix: "BP" },
-  "CASH RECEIPT": { prefix: "CR" },
-  "BANK RECEIPT": { prefix: "BR" },
-  "CONTRA": { prefix: "CN" },
+  "CASH PAYMENT": { prefix: "CASH PAYMENT" },
+  "BANK PAYMENT": { prefix: "BANK PAYMENT" },
+  "CASH RECEIPT": { prefix: "CASH RECEIPT" },
+  "BANK RECEIPT": { prefix: "BANK RECEIPT" },
+  "CONTRA": { prefix: "CONTRA" },
   "JOURNAL": { prefix: "JV" },
 };
 
@@ -39,7 +39,7 @@ const getNextVoucherNo = async (req, res) => {
       financialYearId,
       tableName: "payment",
       idColumn: "paymentId",
-      fixedPrefix: prefix,
+      prefixFor: prefix,
       extraWhere: { voucherType },
     });
 

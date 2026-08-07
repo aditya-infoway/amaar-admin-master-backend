@@ -15,7 +15,7 @@ const getNextPoNumber = async (req, res) => {
 
     const { billNo, fyLabel } = await generateVoucherNo({
       companyId, financialYearId,
-      tableName: "purchaseorder", idColumn: "purchaseOrderId", fixedPrefix: "PO",
+      tableName: "purchaseorder", idColumn: "purchaseOrderId", prefixFor: "PURCHASE ORDER",
     });
 
     return successResponse(res, { poNumber: billNo, fyLabel, financialYearId }, "PO number generated successfully");

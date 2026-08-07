@@ -3,6 +3,8 @@ const company = require("../../controllers/superadmin/controller/companycontroll
 const companyDetails = require("../../controllers/superadmin/controller/companydetailscontroller.js");
 const companyvalidation = require('../../controllers/superadmin/validator/companyvalidator.js');
 const { companyDetailsSchema, companyDetailsUpdateSchema } = require("../../controllers/superadmin/validator/companydetailsvalidator.js");
+const prefix = require("../../controllers/superadmin/controller/prefixcontroller.js");
+const { prefixCreateSchema, prefixUpdateSchema } = require("../../controllers/superadmin/validator/prefixvalidator.js");
 const { checktoken } = require("../../middleware/token.js");
 const { createUploader } = require("../../middleware/upload.js");
 const multer = require("multer");
@@ -40,6 +42,10 @@ module.exports = (app) => {
 
   routes.get("/financial-years", companyDetails.getFinancialYears);
   routes.get("/company-details", companyDetails.getCompanyDetails);
+
+  routes.post("/prefix/create", validate(prefixCreateSchema), prefix.createPrefix);
+  routes.post("/prefix/update", validate(prefixUpdateSchema), prefix.updatePrefix);
+  routes.get("/prefix/list", prefix.getPrefixList);
 
   app.use("/superadmin", routes);
 };
