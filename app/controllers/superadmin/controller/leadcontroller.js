@@ -22,7 +22,7 @@ const getNextLeadId = async (req, res) => {
       financialYearId,
       tableName: "lead",
       idColumn: "leadId",
-      fixedPrefix: "LD",
+      prefixFor: "LEAD",
     });
 
     // billNo hi frontend ko "leadCode" ke naam se jayega

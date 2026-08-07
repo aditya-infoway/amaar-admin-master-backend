@@ -16,6 +16,7 @@ db.group = require("./group.js")(sequelize, Sequelize);
 db.company = require("./company.js")(sequelize, Sequelize);
 db.companydetails = require("./companydetails.js")(sequelize, Sequelize);
 db.financialyear = require("./financialyear.js")(sequelize, Sequelize);
+db.companyprefix = require("./companyprefix.js")(sequelize, Sequelize);
 db.category = require("./category.js")(sequelize, Sequelize);
 db.productseries = require("./productseries.js")(sequelize, Sequelize);
 db.model = require("./model.js")(sequelize, Sequelize);
