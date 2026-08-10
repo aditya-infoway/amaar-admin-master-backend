@@ -72,10 +72,29 @@ const getLeadList = async (req, res) => {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
+    const { role, } = req.query;
+
+    const branchId = req.branchId;
+    const employeeId = req.employeeId;
+
+    // base filter — company + not-deleted
+    const where = { companyId, delete: 0 };
+
+    if (role === "Super Admin") {
+      // koi extra filter nahi — sara data dikhega
+    } else if (role === "Branch") {
+      if (!branchId) return requiredmessage(res, "Branch not found.");
+      where.branchId = branchId;
+    } else if (role === "Sale Executive") {
+      if (!employeeId) return requiredmessage(res, "Employee not found.");
+      where.createdBy = employeeId;
+      where.createdType = "Sale Executive";
+    }
+
     const list = await selectWithJoins(
       "lead",
       [],
-      { companyId, delete: 0 },
+      where,
       [
         "leadId", "leadCode", "name", "number", "email", "address", "city",
         "model", "remark", "nextFollowupDate", "createdBy", "createdType", "created",
