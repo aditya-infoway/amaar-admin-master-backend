@@ -28,4 +28,6 @@ module.exports = (app) => {
     require("./ledgerreport.routes")(app);
     require("./lead.routes")(app);
     require("./followup.routes")(app);
+    require("./createmaster.routes")(app);
+    require("./quotation.routes")(app);
 };

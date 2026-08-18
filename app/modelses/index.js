@@ -46,6 +46,8 @@ db.purchaseorder = require("./purchaseorder.js")(sequelize, Sequelize);
 db.purchaseorderdetails = require("./purchaseorderdetails.js")(sequelize, Sequelize);
 db.lead = require("./lead.js")(sequelize, Sequelize);
 db.followup = require("./followup.js")(sequelize, Sequelize);
+db.createmaster = require("./createmaster.js")(sequelize, Sequelize);
+db.quotation = require("./quotation.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
