@@ -429,30 +429,67 @@ const getQuotationList = async (req, res) => {
       quotationWhere.financialYearId = financialYearId;
     }
 
-    const quotations = await selectWithJoins("quotation", [], quotationWhere, [
-      "quotationId",
-      "financialYearId",
-      "qNo",
-      "leadId",
-      "customerName",
-      "mobile",
-      "email",
-      "city",
-      "model",
-      "vehicleType",
-      "basicCost",
-      "gstAmount",
-      "finalPrice",
-      "discountType",
-      "discountValue",
-      "position",
-      "createdBy",
-      "created",
-      "updated",
-    ]);
+    const quotations = await selectWithJoins(
+      "quotation",
+      [],
+      quotationWhere,
+      [
+        "quotationId",
+        "financialYearId",
+        "qNo",
+        "leadId",
+
+        "customerName",
+        "mobile",
+        "email",
+        "address",
+        "city",
+        "model",
+        "remark",
+
+        "vehicleType",
+
+        "trailer",
+        "chassis",
+        "body",
+        "hydraulic",
+        "axle",
+        "suspension",
+        "tyre",
+        "rim",
+        "kingPin",
+        "landingLeg",
+        "brakeSystem",
+        "mudguard",
+        "color",
+        "electricalTapes",
+        "supdRupd",
+        "box",
+        "spareWheelCarrier",
+
+        "warranty",
+
+        "discountType",
+        "discountValue",
+
+        "basicCost",
+        "gstAmount",
+        "finalPrice",
+
+        "position",
+        "createdBy",
+
+        "created",
+        "updated",
+      ],
+    );
 
     if (!quotations.length) {
-      return successResponse(res, [], "Quotation list fetched successfully");
+      return successResponse(
+        res,
+        [],
+        "Quotation list fetched successfully",
+      );
     }
 
     const data = quotations.map((quotation) => ({
@@ -466,18 +503,39 @@ const getQuotationList = async (req, res) => {
       customerName: quotation.customerName || "",
       mobile: quotation.mobile || "",
       email: quotation.email || "",
-
+      address: quotation.address || "",
       city: quotation.city || "",
       model: quotation.model || "",
+      remark: quotation.remark || "",
 
       vehicleType: quotation.vehicleType,
+
+      trailer: quotation.trailer,
+      chassis: quotation.chassis,
+      body: quotation.body,
+      hydraulic: quotation.hydraulic,
+      axle: quotation.axle,
+      suspension: quotation.suspension,
+      tyre: quotation.tyre,
+      rim: quotation.rim,
+      kingPin: quotation.kingPin,
+      landingLeg: quotation.landingLeg,
+      brakeSystem: quotation.brakeSystem,
+      mudguard: quotation.mudguard,
+      color: quotation.color,
+      electricalTapes: quotation.electricalTapes,
+      supdRupd: quotation.supdRupd,
+      box: quotation.box,
+      spareWheelCarrier: quotation.spareWheelCarrier,
+
+      warranty: quotation.warranty || "",
+
+      discountType: quotation.discountType,
+      discountValue: String(quotation.discountValue || 0),
 
       basicCost: String(quotation.basicCost || 0),
       gstAmount: String(quotation.gstAmount || 0),
       finalPrice: String(quotation.finalPrice || 0),
-
-      discountType: quotation.discountType,
-      discountValue: String(quotation.discountValue || 0),
 
       position: quotation.position || "",
       createdBy: quotation.createdBy || "",
@@ -486,9 +544,17 @@ const getQuotationList = async (req, res) => {
       updatedAt: quotation.updated,
     }));
 
-    return successResponse(res, data, "Quotation list fetched successfully");
+    return successResponse(
+      res,
+      data,
+      "Quotation list fetched successfully",
+    );
   } catch (error) {
-    return errorResponse(res, error.message || "Something Went Wrong", error);
+    return errorResponse(
+      res,
+      error.message || "Something Went Wrong",
+      error,
+    );
   }
 };
 
@@ -669,6 +735,8 @@ const updateQuotation = async (req, res) => {
       return requiredmessage(res, "Quotation not found.");
     }
 
+     const qNo = existingRows[0].qNo; 
+
     const {
       financialYearId,
       leadId,
@@ -747,28 +815,7 @@ const updateQuotation = async (req, res) => {
       return errorResponse(res, "Invalid Financial Year.");
     }
 
-    // --------------------------------------------------------
-    // QNO DUPLICATE
-    // --------------------------------------------------------
-
-   const duplicate = await selectWithJoins(
-  "quotation",
-  [],
-  {
-    companyId,
-    financialYearId: fy.financialYearId,
-    qNo,
-    delete: 0,
-  },
-  ["quotationId"],
-);
-
-    if (
-      duplicate.length > 0 &&
-      Number(duplicate[0].quotationId) !== Number(id)
-    ) {
-      return errorResponse(res, "This Quotation No already exists.");
-    }
+ 
 
     // --------------------------------------------------------
     // DISCOUNT
