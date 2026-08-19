@@ -196,7 +196,7 @@ const createQuotation = async (req, res) => {
 
     const {
       financialYearId,
-      
+
       leadId,
 
       customerName,
@@ -234,6 +234,7 @@ const createQuotation = async (req, res) => {
 
       position,
       createdBy,
+      createdType,
     } = req.body;
 
     if (!financialYearId) {
@@ -250,14 +251,14 @@ const createQuotation = async (req, res) => {
     }
 
     const { billNo } = await generateVoucherNo({
-  companyId,
-  financialYearId: fy.financialYearId,
-  tableName: "quotation",
-  idColumn: "quotationId",
-  prefixFor: "QUOTATION",
-});
+      companyId,
+      financialYearId: fy.financialYearId,
+      tableName: "quotation",
+      idColumn: "quotationId",
+      prefixFor: "QUOTATION",
+    });
 
-const qNo = billNo;
+    const qNo = billNo;
 
     // --------------------------------------------------------
     // QUOTATION NO DUPLICATE
@@ -377,10 +378,8 @@ const qNo = billNo;
 
       position: position || null,
 
-      createdBy:
-        createdBy !== undefined && createdBy !== null
-          ? String(createdBy)
-          : null,
+      createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+      createdtype: req.employeeId ? "Sale Executive" : createdType || null,
 
       delete: 0,
     });
@@ -418,13 +417,26 @@ const getQuotationList = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { financialYearId } = req.query;
+    const { financialYearId, role } = req.query;
+    const branchId = req.branchId;
+    const employeeId = req.employeeId;
 
+    // base filter — company + not-deleted
     const quotationWhere = {
       companyId,
       delete: 0,
     };
 
+    // Employee panel requests always carry req.employeeId (set by employeeAuth) —
+    // trust that over any frontend-supplied role, and scope strictly to this employee.
+    if (employeeId) {
+      quotationWhere.createdBy = String(employeeId);
+      quotationWhere.createdtype = "Sale Executive";
+    } else if (role === "Branch") {
+      if (!branchId) return requiredmessage(res, "Branch not found.");
+      quotationWhere.branchId = branchId;
+    }
+    // Super Admin (or admin panel with no role) → no extra filter, sees everything
     if (financialYearId) {
       quotationWhere.financialYearId = financialYearId;
     }
@@ -438,7 +450,6 @@ const getQuotationList = async (req, res) => {
         "financialYearId",
         "qNo",
         "leadId",
-
         "customerName",
         "mobile",
         "email",
@@ -446,9 +457,7 @@ const getQuotationList = async (req, res) => {
         "city",
         "model",
         "remark",
-
         "vehicleType",
-
         "trailer",
         "chassis",
         "body",
@@ -466,95 +475,107 @@ const getQuotationList = async (req, res) => {
         "supdRupd",
         "box",
         "spareWheelCarrier",
-
         "warranty",
-
         "discountType",
         "discountValue",
-
         "basicCost",
         "gstAmount",
         "finalPrice",
-
         "position",
         "createdBy",
-
+        "createdtype",
         "created",
         "updated",
       ],
+      [["quotationId", "DESC"]],
     );
 
     if (!quotations.length) {
-      return successResponse(
-        res,
-        [],
-        "Quotation list fetched successfully",
-      );
+      return successResponse(res, [], "Quotation list fetched successfully");
     }
 
-    const data = quotations.map((quotation) => ({
-      id: String(quotation.quotationId),
+    // ✅ Get employee IDs - only numeric values (skip "Admin")
+    const employeeIds = quotations
+      .map(q => q.createdBy)
+      .filter(id => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
 
-      financialYearId: quotation.financialYearId,
+    let employeeMap = {};
 
-      qNo: quotation.qNo,
-      leadId: quotation.leadId,
+    if (employeeIds.length > 0) {
+      try {
+        const employees = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: employeeIds },
+          ["employeeId", "employeeName"],
+        );
+        
+        employeeMap = employees.reduce((map, emp) => {
+          map[String(emp.employeeId)] = emp.employeeName || String(emp.employeeId);
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching employees:", err.message);
+      }
+    }
 
-      customerName: quotation.customerName || "",
-      mobile: quotation.mobile || "",
-      email: quotation.email || "",
-      address: quotation.address || "",
-      city: quotation.city || "",
-      model: quotation.model || "",
-      remark: quotation.remark || "",
+    const data = quotations.map((quotation) => {
+      // ✅ Handle different createdBy values
+      let createdByName = quotation.createdBy || "";
+      
+      if (createdByName === "Admin") {
+        createdByName = "Admin";
+      } else if (!isNaN(Number(createdByName)) && employeeMap[String(createdByName)]) {
+        createdByName = employeeMap[String(createdByName)];
+      }
+      
+      return {
+        id: String(quotation.quotationId),
+        financialYearId: quotation.financialYearId,
+        qNo: quotation.qNo,
+        leadId: quotation.leadId,
+        customerName: quotation.customerName || "",
+        mobile: quotation.mobile || "",
+        email: quotation.email || "",
+        address: quotation.address || "",
+        city: quotation.city || "",
+        model: quotation.model || "",
+        remark: quotation.remark || "",
+        vehicleType: quotation.vehicleType,
+        trailer: quotation.trailer,
+        chassis: quotation.chassis,
+        body: quotation.body,
+        hydraulic: quotation.hydraulic,
+        axle: quotation.axle,
+        suspension: quotation.suspension,
+        tyre: quotation.tyre,
+        rim: quotation.rim,
+        kingPin: quotation.kingPin,
+        landingLeg: quotation.landingLeg,
+        brakeSystem: quotation.brakeSystem,
+        mudguard: quotation.mudguard,
+        color: quotation.color,
+        electricalTapes: quotation.electricalTapes,
+        supdRupd: quotation.supdRupd,
+        box: quotation.box,
+        spareWheelCarrier: quotation.spareWheelCarrier,
+        warranty: quotation.warranty || "",
+        discountType: quotation.discountType,
+        discountValue: String(quotation.discountValue || 0),
+        basicCost: String(quotation.basicCost || 0),
+        gstAmount: String(quotation.gstAmount || 0),
+        finalPrice: String(quotation.finalPrice || 0),
+        position: quotation.position || "",
+        createdBy: createdByName,  // ✅ Now shows "Admin" or employee name
+        createdType: quotation.createdtype || "",
+        createdAt: quotation.created,
+        updatedAt: quotation.updated,
+      };
+    });
 
-      vehicleType: quotation.vehicleType,
-
-      trailer: quotation.trailer,
-      chassis: quotation.chassis,
-      body: quotation.body,
-      hydraulic: quotation.hydraulic,
-      axle: quotation.axle,
-      suspension: quotation.suspension,
-      tyre: quotation.tyre,
-      rim: quotation.rim,
-      kingPin: quotation.kingPin,
-      landingLeg: quotation.landingLeg,
-      brakeSystem: quotation.brakeSystem,
-      mudguard: quotation.mudguard,
-      color: quotation.color,
-      electricalTapes: quotation.electricalTapes,
-      supdRupd: quotation.supdRupd,
-      box: quotation.box,
-      spareWheelCarrier: quotation.spareWheelCarrier,
-
-      warranty: quotation.warranty || "",
-
-      discountType: quotation.discountType,
-      discountValue: String(quotation.discountValue || 0),
-
-      basicCost: String(quotation.basicCost || 0),
-      gstAmount: String(quotation.gstAmount || 0),
-      finalPrice: String(quotation.finalPrice || 0),
-
-      position: quotation.position || "",
-      createdBy: quotation.createdBy || "",
-
-      createdAt: quotation.created,
-      updatedAt: quotation.updated,
-    }));
-
-    return successResponse(
-      res,
-      data,
-      "Quotation list fetched successfully",
-    );
+    return successResponse(res, data, "Quotation list fetched successfully");
   } catch (error) {
-    return errorResponse(
-      res,
-      error.message || "Something Went Wrong",
-      error,
-    );
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 
@@ -735,7 +756,7 @@ const updateQuotation = async (req, res) => {
       return requiredmessage(res, "Quotation not found.");
     }
 
-     const qNo = existingRows[0].qNo; 
+    const qNo = existingRows[0].qNo;
 
     const {
       financialYearId,
@@ -774,14 +795,14 @@ const updateQuotation = async (req, res) => {
       discountValue,
 
       position,
+
       createdBy,
+      createdType,
     } = req.body;
 
     // --------------------------------------------------------
     // VALIDATION
     // --------------------------------------------------------
-
-  
 
     if (!leadId) {
       return errorResponse(res, "Lead is required.");
@@ -814,8 +835,6 @@ const updateQuotation = async (req, res) => {
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
     }
-
- 
 
     // --------------------------------------------------------
     // DISCOUNT
@@ -921,10 +940,8 @@ const updateQuotation = async (req, res) => {
 
         position: position || null,
 
-        createdBy:
-          createdBy !== undefined && createdBy !== null
-            ? String(createdBy)
-            : null,
+        createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+        createdtype: req.employeeId ? "Sale Executive" : createdType || null,
 
         updated: new Date(),
       },

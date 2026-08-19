@@ -10,3 +10,5 @@ const checkCompanyToken = async (token) => {
 };
 
 module.exports = { checkCompanyToken };
+
+
