@@ -242,6 +242,12 @@ module.exports = (sequelize) => {
       defaultValue: DataTypes.NOW,
     },
 
+    createdtype: {
+  type: DataTypes.STRING(100),
+  allowNull: true,
+  field: "createdtype",
+},
+
     updated: {
       type: DataTypes.DATE,
       allowNull: false,

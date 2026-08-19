@@ -244,6 +244,9 @@ discountValue: Joi.when("discountType", {
       Joi.string()
     )
     .allow(null, ""),
+
+      createdType: Joi.string()
+    .allow(null, ""),
 });
 
 module.exports = {
