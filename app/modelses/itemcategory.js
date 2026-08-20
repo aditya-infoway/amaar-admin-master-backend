@@ -24,6 +24,12 @@ module.exports = sequelize => {
       defaultValue: "active",
       field: "status"
     },
+     categoryType: {
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      defaultValue: "manual",
+      field: "categoryType"
+    },
     created: {
       type: DataTypes.DATE,
       allowNull: false,
