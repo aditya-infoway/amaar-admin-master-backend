@@ -39,9 +39,12 @@ const generateVoucherNo = async ({
   // 👇 sirf database wala prefix — kuch save nahi to blank
   const prefix = await getCompanyPrefix(companyId, prefixFor);
 
+  // NOTE: intentionally NOT filtering by delete: 0 here.
+  // Numbering must stay sequential and never reuse a number, even after
+  // a record is deleted — otherwise deleting all rows resets the count
+  // back to 0 and the next voucher number restarts from 001.
   const whereClause = {
     companyId,
-    delete: 0,
     financialYearId: fy.financialYearId,
     ...extraWhere,
   };

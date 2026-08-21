@@ -57,6 +57,12 @@ module.exports = (app) => {
     itemmaster.bulkAutoGenerateBarcode
   );
 
+    routes.post(
+    "/bulk-import",
+    validate(itemmasterValidation.bulkImportItemMaster),
+    itemmaster.bulkImportItemMaster
+  );
+
   // ───── Generic dynamic GET route — hamesha SABSE AAKHIR me ─────
   routes.get("/:id", itemmaster.getItemMasterById);
 
