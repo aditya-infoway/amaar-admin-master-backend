@@ -30,4 +30,5 @@ module.exports = (app) => {
     require("./followup.routes")(app);
     require("./createmaster.routes")(app);
     require("./quotation.routes")(app);
+    require("./bom.routes")(app);
 };
