@@ -12,6 +12,39 @@ const {
 const fs = require("fs");
 const path = require("path");
 
+// ---- Default Item Categories (auto-created on company creation) ----
+const CATEGORY_MASTER_LIST = [
+  "Trailer Detail",
+  "Main Chassis",
+  "Body Details",
+  "Hyd Kit",
+  "Axle",
+  "Suspension",
+  "Tyre",
+  "Rim",
+  "King Pin",
+  "Landing Leg",
+  "Brake System",
+  "Mudgaurd",
+  "Paint",
+  "Electrical & Reflective Tapes",
+  "SUPD & RUPD",
+  "Tool Box",
+  "Spare Wheel Carrier",
+];
+
+const createDefaultItemCategories = async (companyId) => {
+  for (const categoryName of CATEGORY_MASTER_LIST) {
+    await saveModel("itemcategory", {
+      companyId,
+      categoryName,
+      categoryType: "default",
+      status: "active",
+      delete: 0,
+    });
+  }
+};
+
 // ---- Create Company Details + Financial Year ----
 const createCompanyDetails = async (req, res) => {
   try {
@@ -107,6 +140,8 @@ const createCompanyDetails = async (req, res) => {
     if (!financialYearId) {
       return errorResponse(res, "Failed to save financial year details");
     }
+
+       await createDefaultItemCategories(companyId);
 
     return successResponse(
       res,

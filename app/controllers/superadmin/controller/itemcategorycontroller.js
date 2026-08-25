@@ -61,7 +61,7 @@ const getItemCategoryList = async (req, res) => {
       "itemcategory",
       [],
       { companyId, delete: 0 },
-      ["itemCategoryId", "companyId", "categoryName", "status", "created"],
+      ["itemCategoryId", "companyId", "categoryName", "status", "categoryType", "created"],
       [["itemCategoryId", "DESC"]]
     );
 

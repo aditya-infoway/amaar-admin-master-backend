@@ -121,7 +121,44 @@ const bulkAutoGenerateBarcode = Joi.object().keys({
   itemIds: Joi.array().items(Joi.number()).min(1).required(),
 });
 
+const bulkImportItemMaster = Joi.object().keys({
+  items: Joi.array()
+    .items(
+      Joi.object().keys({
+        itemCode: Joi.string().trim().required(),
+        itemName: Joi.string().trim().required(),
+        categoryName: Joi.string().trim().required(),
+        groupName: Joi.string().trim().required(),
+        shortName: Joi.string().trim().allow("", null),
+        hsnCode: Joi.string().trim().allow("", null),
+        unit: Joi.string().trim().allow("", null),
+        taxSlab: Joi.string().trim().allow("", null),
+        purchasePrice: Joi.number().allow(null, ""),
+        actualPurchasePrice: Joi.number().allow(null, ""),
+        salesPrice: Joi.number().allow(null, ""),
+        mrp: Joi.number().allow(null, ""),
+        barcode: Joi.alternatives()
+  .try(
+    Joi.string().trim(),
+    Joi.number()
+  )
+  .allow("", null),
+      })
+    )
+    .min(1)
+    .required()
+    .messages({
+      "array.min": "No items to import.",
+      "any.required": "Items array is required.",
+    }),
+});
+
 module.exports = {
-  createItemMaster, updateItemMaster, deleteItemMaster,
-  setItemBarcode, autoGenerateItemBarcode, bulkAutoGenerateBarcode,
+  createItemMaster,
+  updateItemMaster,
+  deleteItemMaster,
+  setItemBarcode,
+  autoGenerateItemBarcode,
+  bulkAutoGenerateBarcode,
+  bulkImportItemMaster,
 };

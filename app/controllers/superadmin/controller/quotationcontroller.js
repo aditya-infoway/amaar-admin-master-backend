@@ -47,6 +47,18 @@ const round2 = (value) => Number(Number(value || 0).toFixed(2));
 // VALIDATE CREATE MASTER SELECTIONS + GET PRICES
 // ============================================================
 
+// Fields not required when vehicleType = "tipper" (hidden on the frontend for Tipper)
+const TIPPER_OPTIONAL_FIELDS = [
+  "axle",
+  "suspension",
+  "tyre",
+  "rim",
+  "landingLeg",
+  "brakeSystem",
+  "electricalTapes",
+  "spareWheelCarrier",
+];
+
 const getQuotationMasterPrices = async ({
   companyId,
   vehicleType,
@@ -56,8 +68,8 @@ const getQuotationMasterPrices = async ({
   let basicCost = 0;
 
   for (const [field, type] of Object.entries(MASTER_TYPES)) {
-    // Main chassis is not required for tipper
-    if (field === "chassis" && vehicleType === "tipper") {
+    // Skip these 8 fields for Tipper — they're hidden on the frontend
+    if (vehicleType === "tipper" && TIPPER_OPTIONAL_FIELDS.includes(field)) {
       result[field] = null;
       continue;
     }
@@ -74,20 +86,23 @@ const getQuotationMasterPrices = async ({
       {
         createMasterId: masterId,
         companyId,
-        type,
         delete: 0,
         status: "active",
       },
       ["createMasterId", "companyId", "type", "description", "exShowroom"],
     );
 
-    if (rows.length === 0) {
+    // Match type case-insensitively (DB data may have inconsistent casing,
+    // e.g. "Brake System" vs "Brake system"), same as frontend's getMasterOptions()
+    const master = rows.find(
+      (row) => row.type?.trim().toLowerCase() === type.trim().toLowerCase(),
+    );
+
+    if (!master) {
       throw new Error(
         `Invalid ${type} selected. Please select a valid active master item.`,
       );
     }
-
-    const master = rows[0];
 
     const price = Number(master.exShowroom) || 0;
 
@@ -236,6 +251,40 @@ const createQuotation = async (req, res) => {
       createdBy,
       createdType,
     } = req.body;
+
+        // --------------------------------------------------------
+    // Trailer-only fields required only when vehicleType = trailer
+    // --------------------------------------------------------
+
+    const TRAILER_ONLY_FIELDS = {
+      axle: "Axle",
+      suspension: "Suspension",
+      tyre: "Tyre",
+      rim: "Rim",
+      landingLeg: "Landing Leg",
+      brakeSystem: "Brake System",
+      electricalTapes: "Electrical & Reflective Tapes",
+      spareWheelCarrier: "Spare Wheel Carrier",
+    };
+
+    if (vehicleType === "trailer") {
+      const fieldValues = {
+        axle,
+        suspension,
+        tyre,
+        rim,
+        landingLeg,
+        brakeSystem,
+        electricalTapes,
+        spareWheelCarrier,
+      };
+
+      for (const [field, label] of Object.entries(TRAILER_ONLY_FIELDS)) {
+        if (!normalizeId(fieldValues[field])) {
+          return errorResponse(res, `${label} is required.`);
+        }
+      }
+    }
 
     if (!financialYearId) {
       return errorResponse(
@@ -799,6 +848,45 @@ const updateQuotation = async (req, res) => {
       createdBy,
       createdType,
     } = req.body;
+
+
+
+
+
+
+        // --------------------------------------------------------
+    // Trailer-only fields required only when vehicleType = trailer
+    // --------------------------------------------------------
+
+    const TRAILER_ONLY_FIELDS = {
+      axle: "Axle",
+      suspension: "Suspension",
+      tyre: "Tyre",
+      rim: "Rim",
+      landingLeg: "Landing Leg",
+      brakeSystem: "Brake System",
+      electricalTapes: "Electrical & Reflective Tapes",
+      spareWheelCarrier: "Spare Wheel Carrier",
+    };
+
+    if (vehicleType === "trailer") {
+      const fieldValues = {
+        axle,
+        suspension,
+        tyre,
+        rim,
+        landingLeg,
+        brakeSystem,
+        electricalTapes,
+        spareWheelCarrier,
+      };
+
+      for (const [field, label] of Object.entries(TRAILER_ONLY_FIELDS)) {
+        if (!normalizeId(fieldValues[field])) {
+          return errorResponse(res, `${label} is required.`);
+        }
+      }
+    }
 
     // --------------------------------------------------------
     // VALIDATION

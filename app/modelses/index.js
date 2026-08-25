@@ -48,6 +48,8 @@ db.lead = require("./lead.js")(sequelize, Sequelize);
 db.followup = require("./followup.js")(sequelize, Sequelize);
 db.createmaster = require("./createmaster.js")(sequelize, Sequelize);
 db.quotation = require("./quotation.js")(sequelize, Sequelize);
+db.bom = require("./bom.js")(sequelize, Sequelize);
+db.bomItem = require("./bomItem.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;

@@ -596,6 +596,362 @@ const getPurchaseItemList = async (req, res) => {
   }
 };
 
+
+
+// ---------------- BULK IMPORT (from Excel) — validate ALL rows first, reject whole file if any error ----------------
+const bulkImportItemMaster = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { items } = req.body; // already shape-validated by Joi
+
+    // ============================================================
+    // GET CATEGORIES
+    // ============================================================
+    const categories = await selectWithJoins(
+      "itemcategory",
+      [],
+      { companyId, delete: 0 },
+      ["itemCategoryId", "categoryName"]
+    );
+
+    // ============================================================
+    // GET GROUPS
+    // ============================================================
+    const groups = await selectWithJoins(
+      "itemgroup",
+      [],
+      { companyId, delete: 0 },
+      ["itemGroupId", "groupName"]
+    );
+
+    const categoryMap = new Map(
+      categories.map((c) => [
+        c.categoryName.trim().toLowerCase(),
+        c.itemCategoryId,
+      ])
+    );
+
+    const groupMap = new Map(
+      groups.map((g) => [
+        g.groupName.trim().toLowerCase(),
+        g.itemGroupId,
+      ])
+    );
+
+    // ============================================================
+    // GET EXISTING ITEMS
+    // IMPORTANT:
+    // We get BOTH active and soft-deleted records.
+    // ============================================================
+    const existingItems = await selectWithJoins(
+      "itemmaster",
+      [],
+      { companyId },
+      ["itemId", "itemCode", "barcode", "delete"]
+    );
+
+    // ============================================================
+    // ACTIVE ITEM CODES
+    // delete = 0
+    // These should be rejected as duplicate.
+    // ============================================================
+    const activeCodes = new Set(
+      existingItems
+        .filter((i) => Number(i.delete) === 0)
+        .map((i) => (i.itemCode || "").trim().toLowerCase())
+    );
+
+    // ============================================================
+    // SOFT-DELETED ITEMS
+    // delete = 1
+    //
+    // If imported itemCode matches one of these,
+    // we will RESTORE the existing record instead of INSERTING.
+    // ============================================================
+    const deletedItemsByCode = new Map(
+      existingItems
+        .filter((i) => Number(i.delete) === 1)
+        .map((i) => [
+          (i.itemCode || "").trim().toLowerCase(),
+          i,
+        ])
+    );
+
+    // ============================================================
+    // ACTIVE BARCODES
+    // ============================================================
+    const activeBarcodes = new Set(
+      existingItems
+        .filter((i) => Number(i.delete) === 0 && i.barcode)
+        .map((i) => i.barcode.trim().toLowerCase())
+    );
+
+    // ============================================================
+    // PASS 1
+    // Validate every row first.
+    // Nothing is saved yet.
+    // ============================================================
+    const errors = [];
+    const seenCodes = new Set();
+    const seenBarcodes = new Set();
+    const normalizedRows = [];
+
+    items.forEach((row, i) => {
+      const rowNum = i + 2;
+
+      const itemCode = row.itemCode.trim();
+      const categoryName = row.categoryName.trim();
+      const groupName = row.groupName.trim();
+      const barcode = (row.barcode || "").toString().trim();
+
+      // ==========================================================
+      // CATEGORY CHECK
+      // ==========================================================
+      const itemCategoryId = categoryMap.get(
+        categoryName.toLowerCase()
+      );
+
+      if (!itemCategoryId) {
+        errors.push({
+          row: rowNum,
+          itemCode,
+          reason: `Item Category "${categoryName}" not found`,
+        });
+        return;
+      }
+
+      // ==========================================================
+      // GROUP CHECK
+      // ==========================================================
+      const groupId = groupMap.get(
+        groupName.toLowerCase()
+      );
+
+      if (!groupId) {
+        errors.push({
+          row: rowNum,
+          itemCode,
+          reason: `Group "${groupName}" not found`,
+        });
+        return;
+      }
+
+      // ==========================================================
+      // ITEM CODE CHECK
+      // ==========================================================
+      const codeKey = itemCode.toLowerCase();
+
+      // Active record already exists
+      if (activeCodes.has(codeKey)) {
+        errors.push({
+          row: rowNum,
+          itemCode,
+          reason: "Item code already exists in database",
+        });
+        return;
+      }
+
+      // Duplicate inside uploaded Excel/file
+      if (seenCodes.has(codeKey)) {
+        errors.push({
+          row: rowNum,
+          itemCode,
+          reason: "Duplicate item code within the imported file",
+        });
+        return;
+      }
+
+      // ==========================================================
+      // BARCODE CHECK
+      // ==========================================================
+      const barcodeKey = barcode
+        ? barcode.toLowerCase()
+        : null;
+
+      // Active barcode already exists
+      if (barcodeKey && activeBarcodes.has(barcodeKey)) {
+        errors.push({
+          row: rowNum,
+          itemCode,
+          reason: "Barcode already exists in database",
+        });
+        return;
+      }
+
+      // Duplicate barcode inside uploaded file
+      if (barcodeKey && seenBarcodes.has(barcodeKey)) {
+        errors.push({
+          row: rowNum,
+          itemCode,
+          reason: "Duplicate barcode within the imported file",
+        });
+        return;
+      }
+
+      // ==========================================================
+      // Mark code/barcode as seen
+      // ==========================================================
+      seenCodes.add(codeKey);
+
+      if (barcodeKey) {
+        seenBarcodes.add(barcodeKey);
+      }
+
+      // ==========================================================
+      // NORMALIZE ROW
+      // ==========================================================
+      normalizedRows.push({
+        rowNum,
+        itemCode,
+        itemName: row.itemName.trim(),
+        shortName: (row.shortName || row.itemName).trim(),
+        hsnCode: (row.hsnCode || "").trim(),
+        itemCategoryId,
+        groupId,
+        unit: (row.unit || "").trim(),
+        taxSlab: (row.taxSlab || "").trim(),
+        purchasePrice: Number(row.purchasePrice) || 0,
+        actualPurchasePrice: Number(row.actualPurchasePrice) || 0,
+        salesPrice: Number(row.salesPrice) || 0,
+        mrp: Number(row.mrp) || 0,
+        barcode: barcode || null,
+      });
+    });
+
+    // ============================================================
+    // REJECT WHOLE FILE IF ANY ROW HAS ERROR
+    // ============================================================
+    if (errors.length > 0) {
+      return errorResponse(
+        res,
+        `Import rejected: ${errors.length} row(s) have errors.`,
+        errors
+      );
+    }
+
+    // ============================================================
+    // PASS 2
+    // Everything is valid.
+    //
+    // If soft-deleted item exists:
+    //     UPDATE + RESTORE it
+    //
+    // Otherwise:
+    //     CREATE new item
+    // ============================================================
+    const created = [];
+
+    for (const row of normalizedRows) {
+      const codeKey = row.itemCode.toLowerCase();
+
+      // Check whether this code belongs to a soft-deleted item
+      const deletedItem = deletedItemsByCode.get(codeKey);
+
+      let savedItem;
+
+      // ==========================================================
+      // CASE 1: SOFT-DELETED ITEM EXISTS
+      // RESTORE EXISTING RECORD
+      // ==========================================================
+          if (deletedItem) {
+        await updateModelHelper(
+          "itemmaster",
+          {
+            itemName: row.itemName,
+            shortName: row.shortName,
+            hsnCode: row.hsnCode,
+            itemLocation: "",
+            itemCategoryId: row.itemCategoryId,
+            groupId: row.groupId,
+            unit: row.unit,
+            taxSlab: row.taxSlab,
+            stockMapping: false,
+            minQty: null,
+            maxQty: null,
+            purchasePrice: row.purchasePrice,
+            actualPurchasePrice: row.actualPurchasePrice,
+            salesPrice: row.salesPrice,
+            mrp: row.mrp,
+            barcodeType: "manual",
+            barcode: row.barcode,
+            status: "active",
+
+            // RESTORE
+            delete: 0,
+          },
+          {
+            itemId: deletedItem.itemId,
+            companyId,
+          }
+        );
+
+        savedItem = {
+          itemId: deletedItem.itemId,
+        };
+      }
+
+      // ==========================================================
+      // CASE 2: NO SOFT-DELETED ITEM
+      // CREATE NEW RECORD
+      // ==========================================================
+      else {
+        savedItem = await saveModel("itemmaster", {
+          companyId,
+          itemCode: row.itemCode,
+          itemName: row.itemName,
+          shortName: row.shortName,
+          hsnCode: row.hsnCode,
+          itemLocation: "",
+          itemCategoryId: row.itemCategoryId,
+          groupId: row.groupId,
+          unit: row.unit,
+          taxSlab: row.taxSlab,
+          stockMapping: false,
+          minQty: null,
+          maxQty: null,
+          purchasePrice: row.purchasePrice,
+          actualPurchasePrice: row.actualPurchasePrice,
+          salesPrice: row.salesPrice,
+          mrp: row.mrp,
+          barcodeType: "manual",
+          barcode: row.barcode,
+          status: "active",
+          delete: 0,
+        });
+      }
+
+      // ==========================================================
+      // SUCCESS RESULT
+      // ==========================================================
+      created.push({
+        row: row.rowNum,
+        itemId: savedItem.itemId,
+        itemCode: row.itemCode,
+      });
+    }
+
+    // ============================================================
+    // FINAL SUCCESS
+    // ============================================================
+    return successResponse(
+      res,
+      { created },
+      `${created.length} item(s) imported successfully.`
+    );
+  } catch (error) {
+    return errorResponse(
+      res,
+      "Something Went Wrong",
+      error
+    );
+  }
+};
+
 module.exports = {
   getNextBarcode,
   createItemMaster,
@@ -609,4 +965,5 @@ module.exports = {
   getVehicleItemList,
   getItemByBarcode,
   getPurchaseItemList,
+  bulkImportItemMaster
 };
