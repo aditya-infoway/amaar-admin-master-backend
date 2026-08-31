@@ -35,6 +35,22 @@ const baseSchema = {
     "string.empty": "Tax Slab is required",
   }),
 
+   thickness: Joi.number().required().min(0).messages({
+    "any.required": "Thickness is required",
+   "number.base": "Thickness is required",
+  }),
+  length: Joi.number().required().min(0).messages({
+    "any.required": "Length is required",
+    "number.base": "Length is required",
+  }),
+  width: Joi.number().required().min(0).messages({
+    "any.required": "Width is required",
+    "number.base": "Width is required",
+  }),
+  weight: Joi.number().allow(null, "").min(0).messages({
+    "number.base": "Weight must be a number",
+  }),
+
   stockMapping: Joi.boolean().default(false),
   minQty: Joi.when("stockMapping", {
     is: true,
@@ -53,22 +69,22 @@ const baseSchema = {
     otherwise: Joi.number().allow(null, ""),
   }),
 
-  purchasePrice: Joi.number().required().min(0).messages({
-    "any.required": "Purchase Price is required",
-    "number.base": "Purchase Price is required",
-  }),
-  actualPurchasePrice: Joi.number().required().min(0).messages({
-    "any.required": "Actual Purchase Price is required",
-    "number.base": "Actual Purchase Price is required",
-  }),
-  salesPrice: Joi.number().required().min(0).messages({
-    "any.required": "Sales Price is required",
-    "number.base": "Sales Price is required",
-  }),
-  mrp: Joi.number().required().min(0).messages({
-    "any.required": "MRP is required",
-    "number.base": "MRP is required",
-  }),
+  // purchasePrice: Joi.number().required().min(0).messages({
+  //   "any.required": "Purchase Price is required",
+  //   "number.base": "Purchase Price is required",
+  // }),
+  // actualPurchasePrice: Joi.number().required().min(0).messages({
+  //   "any.required": "Actual Purchase Price is required",
+  //   "number.base": "Actual Purchase Price is required",
+  // }),
+  // salesPrice: Joi.number().required().min(0).messages({
+  //   "any.required": "Sales Price is required",
+  //   "number.base": "Sales Price is required",
+  // }),
+  // mrp: Joi.number().required().min(0).messages({
+  //   "any.required": "MRP is required",
+  //   "number.base": "MRP is required",
+  // }),
 
   barcodeType: Joi.string().valid("manual", "generate").required().messages({
     "any.only": "Barcode Type must be either manual or generate",
@@ -133,10 +149,10 @@ const bulkImportItemMaster = Joi.object().keys({
         hsnCode: Joi.string().trim().allow("", null),
         unit: Joi.string().trim().allow("", null),
         taxSlab: Joi.string().trim().allow("", null),
-        purchasePrice: Joi.number().allow(null, ""),
-        actualPurchasePrice: Joi.number().allow(null, ""),
-        salesPrice: Joi.number().allow(null, ""),
-        mrp: Joi.number().allow(null, ""),
+        // purchasePrice: Joi.number().allow(null, ""),
+        // actualPurchasePrice: Joi.number().allow(null, ""),
+        // salesPrice: Joi.number().allow(null, ""),
+        // mrp: Joi.number().allow(null, ""),
         barcode: Joi.alternatives()
   .try(
     Joi.string().trim(),

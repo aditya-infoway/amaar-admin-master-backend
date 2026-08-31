@@ -35,17 +35,17 @@ module.exports = (sequelize) => {
       field: "actualItem",
     },
 
-    exShowroom: {
-      type: DataTypes.DECIMAL(15, 2),
-      allowNull: false,
-      field: "exShowroom",
-    },
+code: {
+  type: DataTypes.STRING(100),
+  allowNull: true,
+  field: "code",
+},
 
-    effectiveDate: {
-      type: DataTypes.DATEONLY,
-      allowNull: false,
-      field: "effectiveDate",
-    },
+totalWeight: {
+  type: DataTypes.DECIMAL(15, 2),
+  allowNull: true,
+  field: "totalWeight",
+},
 
     status: {
       type: DataTypes.STRING(20),
