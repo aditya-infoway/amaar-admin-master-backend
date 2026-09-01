@@ -50,6 +50,7 @@ db.createmaster = require("./createmaster.js")(sequelize, Sequelize);
 db.quotation = require("./quotation.js")(sequelize, Sequelize);
 db.bom = require("./bom.js")(sequelize, Sequelize);
 db.bomItem = require("./bomItem.js")(sequelize, Sequelize);
+db.createpricing = require("./createpricing.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
