@@ -1,13 +1,14 @@
+
 const { DataTypes } = require("sequelize");
 
 module.exports = (sequelize) => {
   const attributes = {
-    createMasterId: {
+    createPricingId: {
       type: DataTypes.INTEGER,
       allowNull: false,
       primaryKey: true,
       autoIncrement: true,
-      field: "createMasterId",
+      field: "createPricingId",
     },
 
     companyId: {
@@ -16,10 +17,10 @@ module.exports = (sequelize) => {
       field: "companyId",
     },
 
-    type: {
-      type: DataTypes.STRING(150),
+    code: {
+      type: DataTypes.STRING(100),
       allowNull: false,
-      field: "type",
+      field: "code",
     },
 
     description: {
@@ -28,24 +29,17 @@ module.exports = (sequelize) => {
       field: "description",
     },
 
-    actualItem: {
-      type: DataTypes.JSONB,
+    effectiveDate: {
+      type: DataTypes.DATE,
       allowNull: false,
-      defaultValue: [],
-      field: "actualItem",
+      field: "effectiveDate",
     },
 
-code: {
-  type: DataTypes.STRING(100),
-  allowNull: true,
-  field: "code",
-},
-
-totalWeight: {
-  type: DataTypes.DECIMAL(15, 2),
-  allowNull: true,
-  field: "totalWeight",
-},
+    exShowroomPrice: {
+      type: DataTypes.DECIMAL(15, 2),
+      allowNull: false,
+      field: "exShowroomPrice",
+    },
 
     status: {
       type: DataTypes.STRING(20),
@@ -75,22 +69,23 @@ totalWeight: {
   };
 
   const options = {
-    tableName: "createmaster",
+    tableName: "createpricing",
 
     comment: "",
 
     indexes: [
       {
-        fields: ["companyId", "type"],
+        fields: ["companyId", "code"],
       },
     ],
   };
 
-  const CreateMasterModel = sequelize.define(
-    "createmaster",
+  const CreatePricingModel = sequelize.define(
+    "createpricing",
     attributes,
     options,
   );
 
-  return CreateMasterModel;
+  return CreatePricingModel;
 };
+

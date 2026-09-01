@@ -80,7 +80,7 @@ const getQuotationMasterPrices = async ({
       throw new Error(`${type} selection is required.`);
     }
 
-    const rows = await selectWithJoins(
+       const rows = await selectWithJoins(
       "createmaster",
       [],
       {
@@ -89,7 +89,7 @@ const getQuotationMasterPrices = async ({
         delete: 0,
         status: "active",
       },
-      ["createMasterId", "companyId", "type", "description", "exShowroom"],
+      ["createMasterId", "companyId", "type", "description", "code"],
     );
 
     // Match type case-insensitively (DB data may have inconsistent casing,
@@ -104,7 +104,32 @@ const getQuotationMasterPrices = async ({
       );
     }
 
-    const price = Number(master.exShowroom) || 0;
+    // Price now comes from Create Pricing, matched to this master item by its code
+    if (!master.code) {
+      throw new Error(
+        `${type} item has no code set, so it cannot be priced. Please set a code in Create Master.`,
+      );
+    }
+
+    const pricingRows = await selectWithJoins(
+      "createpricing",
+      [],
+      {
+        code: master.code,
+        companyId,
+        delete: 0,
+        status: "active",
+      },
+      ["createPricingId", "exShowroomPrice"],
+    );
+
+    if (pricingRows.length === 0) {
+      throw new Error(
+        `No pricing found for ${type} (code: ${master.code}). Please add pricing in Create Pricing.`,
+      );
+    }
+
+    const price = Number(pricingRows[0].exShowroomPrice) || 0;
 
     result[field] = master.createMasterId;
     result[`${field}Description`] = master.description;

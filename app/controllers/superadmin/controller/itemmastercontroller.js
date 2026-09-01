@@ -42,6 +42,7 @@ const getNextBarcode = async (req, res) => {
 
 // ---------------- CREATE ----------------
 const createItemMaster = async (req, res) => {
+
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
@@ -49,8 +50,9 @@ const createItemMaster = async (req, res) => {
     const {
       itemCode, itemName, shortName, hsnCode, itemLocation,
       itemCategoryId, groupId, unit, taxSlab,
+      thickness, length, width, weight,
       stockMapping, minQty, maxQty,
-      purchasePrice, actualPurchasePrice, salesPrice, mrp,
+      // purchasePrice, actualPurchasePrice, salesPrice, mrp,
       barcodeType, barcode, status,
     } = req.body;
 
@@ -116,13 +118,17 @@ const createItemMaster = async (req, res) => {
       groupId,
       unit,
       taxSlab,
+       thickness,
+      length,
+      width,
+      weight,
       stockMapping: Boolean(stockMapping),
       minQty: stockMapping ? minQty : null,
       maxQty: stockMapping ? maxQty : null,
-      purchasePrice,
-      actualPurchasePrice,
-      salesPrice,
-      mrp,
+      // purchasePrice,
+      // actualPurchasePrice,
+      // salesPrice,
+      // mrp,
       barcodeType,
       barcode: finalBarcode || null, // 👈 blank barcode ko NULL store karo (unique constraint safe)
       status: status || "active",
@@ -172,15 +178,19 @@ const getItemMasterList = async (req, res) => {
         'itemmaster."hsnCode"',
         'ic."categoryName" AS "categoryName"',
         'ig."groupName" AS "groupName"',
-        'itemmaster."unit"',
-        'itemmaster."taxSlab"',
-        'itemmaster."stockMapping"',
+                 'itemmaster."unit"',
+         'itemmaster."taxSlab"',
+        'itemmaster."thickness"',
+        'itemmaster."length"',
+        'itemmaster."width"',
+        'itemmaster."weight"',
+         'itemmaster."stockMapping"',
         'itemmaster."minQty"',
         'itemmaster."maxQty"',
-        'itemmaster."purchasePrice"',
-        'itemmaster."actualPurchasePrice"',
-        'itemmaster."salesPrice"',
-        'itemmaster."mrp"',
+        // 'itemmaster."purchasePrice"',
+        // 'itemmaster."actualPurchasePrice"',
+        // 'itemmaster."salesPrice"',
+        // 'itemmaster."mrp"',
         'itemmaster."barcodeType"',
         'itemmaster."barcode"',
         "itemmaster.status",
@@ -226,8 +236,9 @@ const updateItemMaster = async (req, res) => {
     const {
       itemId, itemCode, itemName, shortName, hsnCode, itemLocation,
       itemCategoryId, groupId, unit, taxSlab,
+      thickness, length, width, weight,
       stockMapping, minQty, maxQty,
-      purchasePrice, actualPurchasePrice, salesPrice, mrp,
+      // purchasePrice, actualPurchasePrice, salesPrice, mrp,
       barcodeType, barcode, status,
     } = req.body;
 
@@ -304,13 +315,17 @@ const updateItemMaster = async (req, res) => {
         groupId,
         unit,
         taxSlab,
+         thickness,
+        length,
+        width,
+        weight,
         stockMapping: Boolean(stockMapping),
         minQty: stockMapping ? minQty : null,
         maxQty: stockMapping ? maxQty : null,
-        purchasePrice,
-        actualPurchasePrice,
-        salesPrice,
-        mrp,
+        // purchasePrice,
+        // actualPurchasePrice,
+        // salesPrice,
+        // mrp,
         barcodeType,
         barcode: finalBarcode || null, // 👈 blank barcode ko NULL store karo
         status: status || "active",

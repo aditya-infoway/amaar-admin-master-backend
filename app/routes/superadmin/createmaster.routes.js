@@ -38,6 +38,15 @@ module.exports = (app) => {
   // List
   routes.get("/list", createMaster.getCreateMasterList);
 
+    // ============================================================
+  // CHECK CODE
+  // IMPORTANT: MUST COME BEFORE /:id
+  // ============================================================
+  routes.get(
+    "/check-code",
+    createMaster.checkCreateMasterCode
+  );
+
   // Get by ID
   routes.get("/:id", createMaster.getCreateMasterById);
 
