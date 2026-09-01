@@ -16,14 +16,8 @@ const createCreateMaster = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const {
-      type,
-      description,
-      actualItem,
-      exShowroom,
-      effectiveDate,
-      status,
-    } = req.body;
+    const { type, description, actualItem, code, totalWeight, status } =
+      req.body;
 
     const typeExists = await selectWithJoins(
       "createmaster",
@@ -33,18 +27,16 @@ const createCreateMaster = async (req, res) => {
         companyId,
         delete: 0,
       },
-      ["createMasterId"]
+      ["createMasterId"],
     );
-
- 
 
     const payload = {
       companyId,
       type: type.trim(),
       description: description.trim(),
       actualItem,
-      exShowroom,
-      effectiveDate,
+      code: code.trim(),
+      totalWeight,
       status,
       delete: 0,
     };
@@ -54,13 +46,13 @@ const createCreateMaster = async (req, res) => {
     return successResponse(
       res,
       createMaster,
-      "Create master created successfully"
+      "Create master created successfully",
     );
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
       return errorResponse(
         res,
-        "Create master type already exists. Please enter a different type."
+        "Create master type already exists. Please enter a different type.",
       );
     }
 
@@ -90,18 +82,18 @@ const getCreateMasterList = async (req, res) => {
         "type",
         "description",
         "actualItem",
-        "exShowroom",
-        "effectiveDate",
+        "code",
+        "totalWeight",
         "status",
         "created",
       ],
-      [["createMasterId", "DESC"]]
+      [["createMasterId", "DESC"]],
     );
 
     return successResponse(
       res,
       list,
-      "Create master list fetched successfully"
+      "Create master list fetched successfully",
     );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -133,22 +125,18 @@ const getCreateMasterById = async (req, res) => {
         "type",
         "description",
         "actualItem",
-        "exShowroom",
-        "effectiveDate",
+        "code",
+        "totalWeight",
         "status",
         "created",
-      ]
+      ],
     );
 
     if (rows.length === 0) {
       return requiredmessage(res, "Create master not found");
     }
 
-    return successResponse(
-      res,
-      rows[0],
-      "Create master fetched successfully"
-    );
+    return successResponse(res, rows[0], "Create master fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -168,8 +156,8 @@ const updateCreateMaster = async (req, res) => {
       type,
       description,
       actualItem,
-      exShowroom,
-      effectiveDate,
+      code,
+      totalWeight,
       status,
     } = req.body;
 
@@ -181,7 +169,7 @@ const updateCreateMaster = async (req, res) => {
         companyId,
         delete: 0,
       },
-      ["createMasterId"]
+      ["createMasterId"],
     );
 
     if (existing.length === 0) {
@@ -196,15 +184,12 @@ const updateCreateMaster = async (req, res) => {
         companyId,
         delete: 0,
       },
-      ["createMasterId"]
+      ["createMasterId"],
     );
 
     const typeTakenByOther = typeExists.some(
-      (row) =>
-        String(row.createMasterId) !== String(createMasterId)
+      (row) => String(row.createMasterId) !== String(createMasterId),
     );
-
- 
 
     await updateModelHelper(
       "createmaster",
@@ -212,27 +197,23 @@ const updateCreateMaster = async (req, res) => {
         type: type.trim(),
         description: description.trim(),
         actualItem,
-        exShowroom,
-        effectiveDate,
+        code: code.trim(),
+        totalWeight,
         status,
         updated: new Date(),
       },
       {
         createMasterId,
         companyId,
-      }
+      },
     );
 
-    return successResponse(
-      res,
-      {},
-      "Create master updated successfully"
-    );
+    return successResponse(res, {}, "Create master updated successfully");
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
       return errorResponse(
         res,
-        "Create master type already exists. Please enter a different type."
+        "Create master type already exists. Please enter a different type.",
       );
     }
 
@@ -259,7 +240,7 @@ const deleteCreateMaster = async (req, res) => {
         companyId,
         delete: 0,
       },
-      ["createMasterId"]
+      ["createMasterId"],
     );
 
     if (existing.length === 0) {
@@ -275,15 +256,53 @@ const deleteCreateMaster = async (req, res) => {
       {
         createMasterId,
         companyId,
-      }
+      },
+    );
+
+    return successResponse(res, {}, "Create master deleted successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
+// ---------------- CHECK CODE ----------------
+const checkCreateMasterCode = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { code, createMasterId } = req.query;
+
+    if (!code || !String(code).trim()) {
+      return successResponse(res, { exists: false }, "Code is available");
+    }
+
+    const rows = await selectWithJoins(
+      "createmaster",
+      [],
+      {
+        code: String(code).trim(),
+        companyId,
+        delete: 0,
+      },
+      ["createMasterId"],
+    );
+
+    const exists = rows.some(
+      (row) => String(row.createMasterId) !== String(createMasterId || ""),
     );
 
     return successResponse(
       res,
-      {},
-      "Create master deleted successfully"
+      { exists },
+      exists ? "Code already exists" : "Code is available",
     );
   } catch (error) {
+    console.error("Check Create Master code error:", error);
+
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
@@ -292,6 +311,7 @@ module.exports = {
   createCreateMaster,
   getCreateMasterList,
   getCreateMasterById,
+  checkCreateMasterCode,
   updateCreateMaster,
   deleteCreateMaster,
 };
