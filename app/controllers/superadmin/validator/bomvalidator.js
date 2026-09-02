@@ -33,8 +33,10 @@ const itemNode = Joi.object({
   shapeDim: Joi.string().trim().allow("", null),
   finQtty: Joi.string().trim().allow("", null),
   shape: Joi.string().trim().allow("", null),
-  length: Joi.string().trim().allow("", null),
-  width: Joi.string().trim().allow("", null),
+ thickness: Joi.string().trim().allow("", null),
+length: Joi.string().trim().allow("", null),
+width: Joi.string().trim().allow("", null),
+weight: Joi.string().trim().allow("", null),
 
   children: Joi.array().items(Joi.link("#itemNode")).default([]),
 }).id("itemNode");
