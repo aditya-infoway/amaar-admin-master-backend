@@ -33,9 +33,16 @@ const collectRefItemIds = (nodes, set) => {
 // user ko exact pata chale kaunsa item galat tha.
 // Reject-the-whole-thing pattern — aapke bulkImportItemMaster jaisa hi.
 // ---------------------------------------------------------------------------
-const validateTreeAgainstItemMaster = (nodes, itemMap, errors, pathLabel = "") => {
+const validateTreeAgainstItemMaster = (
+  nodes,
+  itemMap,
+  errors,
+  pathLabel = "",
+) => {
   nodes.forEach((node, idx) => {
-    const label = pathLabel ? `${pathLabel} > ${node.itemCode || node.refItemId}` : (node.itemCode || `item #${idx + 1}`);
+    const label = pathLabel
+      ? `${pathLabel} > ${node.itemCode || node.refItemId}`
+      : node.itemCode || `item #${idx + 1}`;
     const master = itemMap.get(Number(node.refItemId));
 
     if (!master) {
@@ -82,12 +89,14 @@ const insertTree = async (nodes, bomId, parentId, transaction) => {
         shapeDim: node.shapeDim || null,
         finQtty: node.finQtty || null,
         shape: node.shape || null,
+        thickness: node.thickness || null,
         length: node.length || null,
         width: node.width || null,
+        weight: node.weight || null,
         sortOrder: order++,
         delete: 0,
       },
-      { transaction }
+      { transaction },
     );
 
     if (node.children && node.children.length > 0) {
@@ -128,8 +137,10 @@ const buildTree = (rows, masterMap, parentId = null) => {
         shapeDim: r.shapeDim,
         finQtty: r.finQtty,
         shape: r.shape,
+        thickness: r.thickness,
         length: r.length,
         width: r.width,
+        weight: r.weight,
         children: buildTree(rows, masterMap, r.bomItemId),
       };
     });
@@ -140,7 +151,10 @@ const buildTree = (rows, masterMap, parentId = null) => {
 // lo, phir memory me match karo — bina IN-clause helper pe depend kiye.)
 const getItemMasterMap = async (companyId) => {
   const rows = await selectWithJoins(
-    "itemmaster", [], { companyId, delete: 0 }, ["itemId", "itemCode", "itemName", "unit"]
+    "itemmaster",
+    [],
+    { companyId, delete: 0 },
+    ["itemId", "itemCode", "itemName", "unit"],
   );
   return new Map(rows.map((r) => [Number(r.itemId), r]));
 };
@@ -177,7 +191,7 @@ const createBom = async (req, res) => {
       return errorResponse(
         res,
         `BOM rejected: ${errors.length} item(s) not found in Item Master.`,
-        errors
+        errors,
       );
     }
 
@@ -190,13 +204,17 @@ const createBom = async (req, res) => {
         createdBy: req.employeeId || null,
         delete: 0,
       },
-      { transaction: t }
+      { transaction: t },
     );
 
     await insertTree(items, header.bomId, null, t);
 
     await t.commit();
-    return successResponse(res, { bomId: header.bomId }, "BOM created successfully");
+    return successResponse(
+      res,
+      { bomId: header.bomId },
+      "BOM created successfully",
+    );
   } catch (error) {
     await t.rollback();
     return errorResponse(res, error.message || "Something Went Wrong", error);
@@ -207,7 +225,8 @@ const createBom = async (req, res) => {
 const getBomList = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const headers = await Bom.findAll({
       where: { companyId, delete: 0 },
@@ -215,7 +234,8 @@ const getBomList = async (req, res) => {
       raw: true,
     });
 
-    if (headers.length === 0) return successResponse(res, [], "BOM list fetched successfully");
+    if (headers.length === 0)
+      return successResponse(res, [], "BOM list fetched successfully");
 
     const bomIds = headers.map((h) => h.bomId);
 
@@ -259,7 +279,8 @@ const getBomList = async (req, res) => {
 const getBomById = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { id } = req.params;
 
@@ -286,7 +307,7 @@ const getBomById = async (req, res) => {
         status: header.status,
         items: tree,
       },
-      "BOM fetched successfully"
+      "BOM fetched successfully",
     );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -324,20 +345,20 @@ const updateBom = async (req, res) => {
       return errorResponse(
         res,
         `BOM update rejected: ${errors.length} item(s) not found in Item Master.`,
-        errors
+        errors,
       );
     }
 
     await header.update(
       { bomName, bomCode, status: status || "active", updated: new Date() },
-      { transaction: t }
+      { transaction: t },
     );
 
     // Purana tree soft-delete karke naya tree fresh insert karo — isse
     // parentId re-mapping ka jhanjhat nahi rehta.
     await BomItem.update(
       { delete: 1, updated: new Date() },
-      { where: { bomId }, transaction: t }
+      { where: { bomId }, transaction: t },
     );
 
     await insertTree(items, bomId, null, t);
@@ -373,7 +394,7 @@ const deleteBom = async (req, res) => {
     await header.update({ delete: 1, updated: new Date() }, { transaction: t });
     await BomItem.update(
       { delete: 1, updated: new Date() },
-      { where: { bomId }, transaction: t }
+      { where: { bomId }, transaction: t },
     );
 
     await t.commit();
@@ -392,12 +413,15 @@ const deleteBom = async (req, res) => {
 const checkItemCodeExists = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { code } = req.params;
     const rows = await selectWithJoins(
-      "itemmaster", [], { itemCode: (code || "").trim(), companyId, delete: 0 },
-      ["itemId", "itemCode", "itemName", "unit"]
+      "itemmaster",
+      [],
+      { itemCode: (code || "").trim(), companyId, delete: 0 },
+      ["itemId", "itemCode", "itemName", "unit"],
     );
 
     if (rows.length === 0) {
