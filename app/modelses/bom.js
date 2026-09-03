@@ -10,6 +10,12 @@ module.exports = sequelize => {
       field: "bomId"
     },
     companyId: { type: DataTypes.INTEGER, allowNull: false, field: "companyId" },
+      // Finished Goods Item Master reference
+    finishedGoodsItemId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "finishedGoodsItemId"
+    },
     bomName: { type: DataTypes.STRING(150), allowNull: false, field: "bomName" },
     bomCode: { type: DataTypes.STRING(50), allowNull: false, field: "bomCode" },
     status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "active", field: "status" },

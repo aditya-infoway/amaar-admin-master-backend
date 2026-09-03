@@ -32,4 +32,5 @@ module.exports = (app) => {
     require("./quotation.routes")(app);
     require("./bom.routes")(app);
     require("./createpricing.routes")(app);
+    require("./salesorder.routes")(app);
 };

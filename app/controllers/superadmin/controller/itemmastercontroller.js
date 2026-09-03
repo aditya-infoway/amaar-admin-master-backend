@@ -967,6 +967,77 @@ const bulkImportItemMaster = async (req, res) => {
   }
 };
 
+
+
+const getFinishedGoodsItemList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return errorResponse(res, "Company not found.", 401);
+    }
+
+    // First find Finished Goods category
+    const categoryRows = await selectWithJoins(
+      "itemcategory",
+      [],
+      {
+        companyId,
+        categoryName: "Finished Goods",
+        delete: 0,
+      },
+      [
+        "itemCategoryId",
+        "categoryName",
+      ]
+    );
+
+    if (!categoryRows || categoryRows.length === 0) {
+      return successResponse(
+        res,
+        [],
+        "Finished Goods category not found."
+      );
+    }
+
+    const itemCategoryId = categoryRows[0].itemCategoryId;
+
+    // Get Finished Goods items
+    const items = await selectWithJoins(
+      "itemmaster",
+      [],
+      {
+        companyId,
+        itemCategoryId,
+        delete: 0,
+      },
+      [
+        "itemId",
+        "itemCode",
+        "itemName",
+        "shortName",
+        "unit",
+        "status",
+      ]
+    );
+
+    return successResponse(
+      res,
+      items || [],
+      "Finished Goods items fetched successfully."
+    );
+
+  } catch (error) {
+    console.error("getFinishedGoodsItemList error:", error);
+
+    return errorResponse(
+      res,
+      error.message || "Failed to fetch Finished Goods items.",
+      500
+    );
+  }
+};
+
 module.exports = {
   getNextBarcode,
   createItemMaster,
@@ -980,5 +1051,6 @@ module.exports = {
   getVehicleItemList,
   getItemByBarcode,
   getPurchaseItemList,
-  bulkImportItemMaster
+  bulkImportItemMaster,
+    getFinishedGoodsItemList,
 };
