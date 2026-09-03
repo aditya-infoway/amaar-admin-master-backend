@@ -20,6 +20,10 @@ module.exports = (app) => {
 
   // ───── Static / named GET routes — hamesha "/:id" se PEHLE ─────
   routes.get("/list", itemmaster.getItemMasterList);
+  routes.get(
+  "/finished-goods/list",
+  itemmaster.getFinishedGoodsItemList
+);
   routes.get("/vehicle-list", itemmaster.getVehicleItemList);
   routes.get("/generate-barcode", itemmaster.getNextBarcode);
   routes.get("/barcode/:barcode", itemmaster.getItemByBarcode);

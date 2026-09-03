@@ -31,6 +31,7 @@ const CATEGORY_MASTER_LIST = [
   "SUPD & RUPD",
   "Tool Box",
   "Spare Wheel Carrier",
+    "Finished Goods",
 ];
 
 const createDefaultItemCategories = async (companyId) => {
