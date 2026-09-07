@@ -6,6 +6,10 @@ const salesOrderValidation = require("../../controllers/superadmin/validator/sal
 
 const { superAdminAuth } = require("../../helper/superAdminAuth.js");
 
+const { createUploader } = require("../../middleware/upload.js");
+
+const salesOrderUpload = createUploader("sales_order");
+
 var routes = require("express").Router();
 
 const validate = (schema) => (req, res, next) => {
@@ -43,18 +47,27 @@ module.exports = (app) => {
   );
 
   // Create Sales Order
-  routes.post(
-    "/create",
-    validate(salesOrderValidation.validateSalesOrder),
-    salesOrder.createSalesOrder
-  );
-
+ routes.post(
+  "/create",
+  salesOrderUpload.fields([
+    { name: "aadharImage", maxCount: 1 },
+    { name: "panImage", maxCount: 1 },
+    { name: "gstImage", maxCount: 1 },
+  ]),
+  validate(salesOrderValidation.validateSalesOrder),
+  salesOrder.createSalesOrder
+);
   // Update Sales Order
-  routes.put(
-    "/:id",
-    validate(salesOrderValidation.validateSalesOrder),
-    salesOrder.updateSalesOrder
-  );
+routes.put(
+  "/:id",
+  salesOrderUpload.fields([
+    { name: "aadharImage", maxCount: 1 },
+    { name: "panImage", maxCount: 1 },
+    { name: "gstImage", maxCount: 1 },
+  ]),
+  validate(salesOrderValidation.validateSalesOrder),
+  salesOrder.updateSalesOrder
+);
 
   // Delete Sales Order
   routes.delete(
