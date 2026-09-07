@@ -229,6 +229,23 @@ const createSalesOrder = async (req, res) => {
       createdType,
     } = req.body;
 
+
+        // ========================================================
+    // IMAGE UPLOADS (multer via req.files)
+    // ========================================================
+
+    const aadharImage = req.files?.aadharImage?.[0]
+      ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
+      : null;
+
+    const panImage = req.files?.panImage?.[0]
+      ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
+      : null;
+
+    const gstImage = req.files?.gstImage?.[0]
+      ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
+      : null;
+
     // ========================================================
     // BASIC VALIDATION
     // ========================================================
@@ -440,9 +457,12 @@ const createSalesOrder = async (req, res) => {
         unitPrice: finalUnitPrice,
         totalAmount: finalTotalAmount,
 
-        aadharNumber: aadharNumber || null,
+               aadharNumber: aadharNumber || null,
+        aadharImage,
         panNumber: panNumber || null,
+        panImage,
         gstNumber: gstNumber || null,
+        gstImage,
 
         createdBy: req.employeeId
           ? String(req.employeeId)
@@ -1091,6 +1111,24 @@ const updateSalesOrder = async (req, res) => {
       createdType,
     } = req.body;
 
+
+        // ========================================================
+    // IMAGE UPLOADS (multer via req.files) — keep existing file
+    // if no new one was uploaded
+    // ========================================================
+
+    const aadharImage = req.files?.aadharImage?.[0]
+      ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
+      : existing.aadharImage || null;
+
+    const panImage = req.files?.panImage?.[0]
+      ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
+      : existing.panImage || null;
+
+    const gstImage = req.files?.gstImage?.[0]
+      ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
+      : existing.gstImage || null;
+
     // ========================================================
     // VALIDATION
     // ========================================================
@@ -1272,9 +1310,12 @@ const updateSalesOrder = async (req, res) => {
       unitPrice: finalUnitPrice,
       totalAmount: finalTotalAmount,
 
-      aadharNumber: aadharNumber || null,
+           aadharNumber: aadharNumber || null,
+      aadharImage,
       panNumber: panNumber || null,
+      panImage,
       gstNumber: gstNumber || null,
+      gstImage,
 
       createdBy: req.employeeId
         ? String(req.employeeId)
