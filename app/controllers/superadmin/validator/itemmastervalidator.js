@@ -35,21 +35,25 @@ const baseSchema = {
     "string.empty": "Tax Slab is required",
   }),
 
-   thickness: Joi.number().required().min(0).messages({
-    "any.required": "Thickness is required",
-   "number.base": "Thickness is required",
-  }),
-  length: Joi.number().required().min(0).messages({
-    "any.required": "Length is required",
-    "number.base": "Length is required",
-  }),
-  width: Joi.number().required().min(0).messages({
-    "any.required": "Width is required",
-    "number.base": "Width is required",
-  }),
-  weight: Joi.number().allow(null, "").min(0).messages({
-    "number.base": "Weight must be a number",
-  }),
+ thickness: Joi.number().allow(null, "").min(0).messages({
+  "number.base": "Thickness must be a number",
+  "number.min": "Thickness cannot be negative",
+}),
+
+length: Joi.number().allow(null, "").min(0).messages({
+  "number.base": "Length must be a number",
+  "number.min": "Length cannot be negative",
+}),
+
+width: Joi.number().allow(null, "").min(0).messages({
+  "number.base": "Width must be a number",
+  "number.min": "Width cannot be negative",
+}),
+
+weight: Joi.number().allow(null, "").min(0).messages({
+  "number.base": "Weight must be a number",
+  "number.min": "Weight cannot be negative",
+}),
 
   stockMapping: Joi.boolean().default(false),
   minQty: Joi.when("stockMapping", {
