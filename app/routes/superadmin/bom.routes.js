@@ -20,6 +20,12 @@ module.exports = (app) => {
 
   routes.get("/list", bom.getBomList);
   routes.get("/check-item/:code", bom.checkItemCodeExists);
+    // ---------------------------------------------------------
+  // GET SUB BOM BY BOM CODE
+  // IMPORTANT: Keep this BEFORE /:id
+  // ---------------------------------------------------------
+ routes.get("/sub-bom/:id", bom.getSubBomById);
+
   routes.get("/:id", bom.getBomById);
 
   routes.post("/create", validate(bomValidation.createBom), bom.createBom);

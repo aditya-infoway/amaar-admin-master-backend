@@ -32,10 +32,24 @@ const CATEGORY_MASTER_LIST = [
   "Tool Box",
   "Spare Wheel Carrier",
     "Finished Goods",
+  
+ 
 ];
 
-const createDefaultItemCategories = async (companyId) => {
-  for (const categoryName of CATEGORY_MASTER_LIST) {
+const syncDefaultItemCategories = async (companyId) => {
+  const existingRows = await selectWithJoins(
+    "itemcategory",
+    [],
+    { companyId, categoryType: "default", delete: 0 },
+    ["categoryName"]
+  );
+
+  const existingNames = new Set(existingRows.map((r) => r.categoryName));
+  const missingCategories = CATEGORY_MASTER_LIST.filter(
+    (name) => !existingNames.has(name)
+  );
+
+  for (const categoryName of missingCategories) {
     await saveModel("itemcategory", {
       companyId,
       categoryName,
@@ -44,7 +58,11 @@ const createDefaultItemCategories = async (companyId) => {
       delete: 0,
     });
   }
+
+  return missingCategories;
 };
+
+
 
 // ---- Create Company Details + Financial Year ----
 const createCompanyDetails = async (req, res) => {
@@ -142,7 +160,7 @@ const createCompanyDetails = async (req, res) => {
       return errorResponse(res, "Failed to save financial year details");
     }
 
-       await createDefaultItemCategories(companyId);
+             await syncDefaultItemCategories(companyId);
 
     return successResponse(
       res,
@@ -407,5 +425,6 @@ module.exports = {
   createCompanyDetails,
   getFinancialYears,
   getCompanyDetails,
-  updateCompanyDetails
+  updateCompanyDetails,
+  syncDefaultItemCategories,
 };
