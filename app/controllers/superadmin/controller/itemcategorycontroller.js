@@ -7,6 +7,9 @@ const {
   selectWithJoins,
 } = require("../../../helper/index.js");
 
+
+const { syncDefaultItemCategories } = require("./companydetailscontroller.js");
+
 // ---------------- CREATE ----------------
 const createItemCategory = async (req, res) => {
   try {
@@ -56,6 +59,8 @@ const getItemCategoryList = async (req, res) => {
     if (!companyId) {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
+
+       await syncDefaultItemCategories(companyId);
 
     const list = await selectWithJoins(
       "itemcategory",

@@ -434,6 +434,173 @@ const checkItemCodeExists = async (req, res) => {
   }
 };
 
+
+
+// ---------------- GET SUB BOM CHILDREN BY BOM ID ----------------
+// ---------------- GET SUB BOM CHILDREN BY ITEM CODE ----------------
+// Finds the given item code as a NODE anywhere inside any of this
+// company's BOM trees (it doesn't need to be a root/Finished-Goods
+// item with its own separate bomCode) and returns that node's direct
+// children. If the item appears in more than one place, we pick the
+// most recently created occurrence that actually has children.
+const getSubBomById = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { id } = req.params;
+    const code = String(id || "").trim();
+
+    if (!code) {
+      return requiredmessage(res, "Item code is required");
+    }
+
+    // ---------------------------------------------------------
+    // STEP 1: resolve the item code to an itemId
+    // ---------------------------------------------------------
+    const itemRows = await selectWithJoins(
+      "itemmaster",
+      [],
+      { itemCode: code, companyId, delete: 0 },
+      ["itemId", "itemCode", "itemName", "unit"],
+    );
+
+    if (itemRows.length === 0) {
+      return errorResponse(res, `Item code "${code}" not found in Item Master.`);
+    }
+
+    const targetItem = itemRows[0];
+
+    // ---------------------------------------------------------
+    // STEP 2: all BOMs belonging to this company (scope search)
+    // ---------------------------------------------------------
+    const companyBoms = await Bom.findAll({
+      where: { companyId, delete: 0 },
+      attributes: ["bomId"],
+      raw: true,
+    });
+    const bomIds = companyBoms.map((b) => b.bomId);
+
+    if (bomIds.length === 0) {
+      return errorResponse(
+        res,
+        `Item "${code}" was not found inside any existing BOM.`
+      );
+    }
+
+    // ---------------------------------------------------------
+    // STEP 3: find every occurrence of this item as a node in any
+    // of the company's BOM trees (root OR nested — parentId doesn't
+    // matter here)
+    // ---------------------------------------------------------
+    const matchingNodes = await BomItem.findAll({
+      where: { bomId: bomIds, itemId: targetItem.itemId, delete: 0 },
+      raw: true,
+    });
+
+    if (matchingNodes.length === 0) {
+      return errorResponse(
+        res,
+        `Item "${code}" was not found inside any existing BOM.`
+      );
+    }
+
+    // ---------------------------------------------------------
+    // STEP 4: among all occurrences, pick the most recent one that
+    // actually has children (an item might be a plain leaf in one
+    // BOM and a sub-assembly with children in another)
+    // ---------------------------------------------------------
+    const sortedNodes = [...matchingNodes].sort(
+      (a, b) => b.bomItemId - a.bomItemId,
+    );
+
+    let chosenNode = null;
+    let chosenChildren = [];
+
+    for (const node of sortedNodes) {
+      const children = await BomItem.findAll({
+        where: { parentId: node.bomItemId, delete: 0 },
+        order: [["sortOrder", "ASC"]],
+        raw: true,
+      });
+      if (children.length > 0) {
+        chosenNode = node;
+        chosenChildren = children;
+        break;
+      }
+    }
+
+    if (!chosenNode) {
+      return errorResponse(
+        res,
+        `Item "${code}" exists in a BOM, but has no child items under it.`
+      );
+    }
+
+    // ---------------------------------------------------------
+    // STEP 5: build the flat children list for the drawer
+    // ---------------------------------------------------------
+    const itemMap = await getItemMasterMap(companyId);
+
+    const items = chosenChildren.map((row) => {
+      const master = itemMap.get(Number(row.itemId)) || {};
+      return {
+        id: String(row.bomItemId),
+        refItemId: row.itemId,
+        itemCode: master.itemCode || "(item not found)",
+        itemName: master.itemName || "",
+        quantity: row.quantity,
+        unit: row.unit || master.unit || null,
+        serialNo: row.serialNo,
+        asslyQty: row.asslyQty,
+        ldDay: row.ldDay,
+        psNo: row.psNo,
+        rejPct: row.rejPct,
+        pkgNo: row.pkgNo,
+        mfgCd: row.mfgCd,
+        modDate: row.modDate,
+        person: row.person,
+        status: row.status,
+        dtlNo: row.dtlNo,
+        shapeDim: row.shapeDim,
+        finQtty: row.finQtty,
+        shape: row.shape,
+        thickness: row.thickness,
+        length: row.length,
+        width: row.width,
+        weight: row.weight,
+        children: [],
+      };
+    });
+
+    // ---------------------------------------------------------
+    // STEP 6: return — bomCode/bomName here describe the ITEM
+    // itself (not a separate root BOM record), since that's what
+    // the drawer header shows
+    // ---------------------------------------------------------
+    return successResponse(
+      res,
+      {
+        bomId: chosenNode.bomId,
+        bomCode: targetItem.itemCode,
+        bomName: targetItem.itemName,
+        status: chosenNode.status || "active",
+        items,
+      },
+      "Sub BOM children fetched successfully"
+    );
+  } catch (error) {
+    console.error("getSubBomById Error:", error);
+    return errorResponse(
+      res,
+      error.message || "Something Went Wrong",
+      error
+    );
+  }
+};
+
 module.exports = {
   createBom,
   getBomList,
@@ -441,4 +608,5 @@ module.exports = {
   updateBom,
   deleteBom,
   checkItemCodeExists,
+  getSubBomById,
 };

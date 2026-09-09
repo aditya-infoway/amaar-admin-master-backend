@@ -43,6 +43,8 @@ module.exports = (app) => {
   routes.get("/financial-years", companyDetails.getFinancialYears);
   routes.get("/company-details", companyDetails.getCompanyDetails);
 
+  
+
   routes.post("/prefix/create", validate(prefixCreateSchema), prefix.createPrefix);
   routes.post("/prefix/update", validate(prefixUpdateSchema), prefix.updatePrefix);
   routes.get("/prefix/list", prefix.getPrefixList);
