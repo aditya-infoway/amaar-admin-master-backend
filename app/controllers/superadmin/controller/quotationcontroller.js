@@ -68,8 +68,11 @@ const getQuotationMasterPrices = async ({
   let basicCost = 0;
 
   for (const [field, type] of Object.entries(MASTER_TYPES)) {
-    // Skip these 8 fields for Tipper — they're hidden on the frontend
-    if (vehicleType === "tipper" && TIPPER_OPTIONAL_FIELDS.includes(field)) {
+    // These fields are optional for Tipper
+    if (
+      vehicleType === "tipper" &&
+      TIPPER_OPTIONAL_FIELDS.includes(field)
+    ) {
       result[field] = null;
       continue;
     }
@@ -80,7 +83,10 @@ const getQuotationMasterPrices = async ({
       throw new Error(`${type} selection is required.`);
     }
 
-       const rows = await selectWithJoins(
+    // ---------------------------------------------------------
+    // 1. Get selected Create Master
+    // ---------------------------------------------------------
+    const rows = await selectWithJoins(
       "createmaster",
       [],
       {
@@ -89,13 +95,19 @@ const getQuotationMasterPrices = async ({
         delete: 0,
         status: "active",
       },
-      ["createMasterId", "companyId", "type", "description", "code"],
+      [
+        "createMasterId",
+        "companyId",
+        "type",
+        "description",
+        "code",
+      ],
     );
 
-    // Match type case-insensitively (DB data may have inconsistent casing,
-    // e.g. "Brake System" vs "Brake system"), same as frontend's getMasterOptions()
     const master = rows.find(
-      (row) => row.type?.trim().toLowerCase() === type.trim().toLowerCase(),
+      (row) =>
+        row.type?.trim().toLowerCase() ===
+        type.trim().toLowerCase(),
     );
 
     if (!master) {
@@ -104,33 +116,61 @@ const getQuotationMasterPrices = async ({
       );
     }
 
-    // Price now comes from Create Pricing, matched to this master item by its code
-    if (!master.code) {
+    // ---------------------------------------------------------
+    // 2. Create Master must have code
+    // ---------------------------------------------------------
+    if (!master.code || !String(master.code).trim()) {
       throw new Error(
         `${type} item has no code set, so it cannot be priced. Please set a code in Create Master.`,
       );
     }
 
+    const masterCode = String(master.code).trim();
+
+    // ---------------------------------------------------------
+    // 3. Find pricing using Create Master code
+    // ---------------------------------------------------------
     const pricingRows = await selectWithJoins(
       "createpricing",
       [],
       {
-        code: master.code,
+        code: masterCode,
         companyId,
         delete: 0,
         status: "active",
       },
-      ["createPricingId", "exShowroomPrice"],
+      [
+        "createPricingId",
+        "code",
+        "exShowroomPrice",
+      ],
     );
 
+    // ---------------------------------------------------------
+    // 4. Pricing record must exist
+    // ---------------------------------------------------------
     if (pricingRows.length === 0) {
       throw new Error(
-        `No pricing found for ${type} (code: ${master.code}). Please add pricing in Create Pricing.`,
+        "Price not set. Please set the price in Create Pricing first.",
       );
     }
 
-    const price = Number(pricingRows[0].exShowroomPrice) || 0;
+    // ---------------------------------------------------------
+    // 5. Pricing must have valid price > 0
+    // ---------------------------------------------------------
+    const price = Number(
+      pricingRows[0].exShowroomPrice,
+    );
 
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(
+        "Price not set. Please set the price in Create Pricing first.",
+      );
+    }
+
+    // ---------------------------------------------------------
+    // 6. Save backend-resolved values
+    // ---------------------------------------------------------
     result[field] = master.createMasterId;
     result[`${field}Description`] = master.description;
     result[`${field}Price`] = price;

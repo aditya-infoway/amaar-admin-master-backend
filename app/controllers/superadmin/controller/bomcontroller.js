@@ -436,13 +436,12 @@ const checkItemCodeExists = async (req, res) => {
 
 
 
-// ---------------- GET SUB BOM CHILDREN BY BOM ID ----------------
-// ---------------- GET SUB BOM CHILDREN BY ITEM CODE ----------------
+// ---------------- GET SUB BOM CHILDREN BY ITEM CODE (full nested tree) ----------------
 // Finds the given item code as a NODE anywhere inside any of this
 // company's BOM trees (it doesn't need to be a root/Finished-Goods
-// item with its own separate bomCode) and returns that node's direct
-// children. If the item appears in more than one place, we pick the
-// most recently created occurrence that actually has children.
+// item with its own separate bomCode) and returns that node's FULL
+// nested subtree (all descendants, not just direct children) so the
+// drawer can render it exactly like the main BOM Structure panel.
 const getSubBomById = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -457,9 +456,7 @@ const getSubBomById = async (req, res) => {
       return requiredmessage(res, "Item code is required");
     }
 
-    // ---------------------------------------------------------
-    // STEP 1: resolve the item code to an itemId
-    // ---------------------------------------------------------
+    // Step 1: resolve the item code to an itemId
     const itemRows = await selectWithJoins(
       "itemmaster",
       [],
@@ -473,9 +470,7 @@ const getSubBomById = async (req, res) => {
 
     const targetItem = itemRows[0];
 
-    // ---------------------------------------------------------
-    // STEP 2: all BOMs belonging to this company (scope search)
-    // ---------------------------------------------------------
+    // Step 2: all BOMs belonging to this company (scope search)
     const companyBoms = await Bom.findAll({
       where: { companyId, delete: 0 },
       attributes: ["bomId"],
@@ -490,11 +485,9 @@ const getSubBomById = async (req, res) => {
       );
     }
 
-    // ---------------------------------------------------------
-    // STEP 3: find every occurrence of this item as a node in any
+    // Step 3: find every occurrence of this item as a node in any
     // of the company's BOM trees (root OR nested — parentId doesn't
     // matter here)
-    // ---------------------------------------------------------
     const matchingNodes = await BomItem.findAll({
       where: { bomId: bomIds, itemId: targetItem.itemId, delete: 0 },
       raw: true,
@@ -507,27 +500,21 @@ const getSubBomById = async (req, res) => {
       );
     }
 
-    // ---------------------------------------------------------
-    // STEP 4: among all occurrences, pick the most recent one that
+    // Step 4: among all occurrences, pick the most recent one that
     // actually has children (an item might be a plain leaf in one
     // BOM and a sub-assembly with children in another)
-    // ---------------------------------------------------------
     const sortedNodes = [...matchingNodes].sort(
       (a, b) => b.bomItemId - a.bomItemId,
     );
 
     let chosenNode = null;
-    let chosenChildren = [];
 
     for (const node of sortedNodes) {
-      const children = await BomItem.findAll({
+      const childCount = await BomItem.count({
         where: { parentId: node.bomItemId, delete: 0 },
-        order: [["sortOrder", "ASC"]],
-        raw: true,
       });
-      if (children.length > 0) {
+      if (childCount > 0) {
         chosenNode = node;
-        chosenChildren = children;
         break;
       }
     }
@@ -539,47 +526,24 @@ const getSubBomById = async (req, res) => {
       );
     }
 
-    // ---------------------------------------------------------
-    // STEP 5: build the flat children list for the drawer
-    // ---------------------------------------------------------
-    const itemMap = await getItemMasterMap(companyId);
-
-    const items = chosenChildren.map((row) => {
-      const master = itemMap.get(Number(row.itemId)) || {};
-      return {
-        id: String(row.bomItemId),
-        refItemId: row.itemId,
-        itemCode: master.itemCode || "(item not found)",
-        itemName: master.itemName || "",
-        quantity: row.quantity,
-        unit: row.unit || master.unit || null,
-        serialNo: row.serialNo,
-        asslyQty: row.asslyQty,
-        ldDay: row.ldDay,
-        psNo: row.psNo,
-        rejPct: row.rejPct,
-        pkgNo: row.pkgNo,
-        mfgCd: row.mfgCd,
-        modDate: row.modDate,
-        person: row.person,
-        status: row.status,
-        dtlNo: row.dtlNo,
-        shapeDim: row.shapeDim,
-        finQtty: row.finQtty,
-        shape: row.shape,
-        thickness: row.thickness,
-        length: row.length,
-        width: row.width,
-        weight: row.weight,
-        children: [],
-      };
+    // Step 5: fetch every row belonging to that BOM (the whole tree,
+    // not just this node's direct children) so buildTree can recurse
+    // down through every depth beneath the chosen node.
+    const allRowsForBom = await BomItem.findAll({
+      where: { bomId: chosenNode.bomId, delete: 0 },
+      raw: true,
     });
 
-    // ---------------------------------------------------------
-    // STEP 6: return — bomCode/bomName here describe the ITEM
-    // itself (not a separate root BOM record), since that's what
-    // the drawer header shows
-    // ---------------------------------------------------------
+    const itemMap = await getItemMasterMap(companyId);
+
+    // buildTree is the same helper used by getBomById — reused here
+    // to build the full nested subtree rooted at chosenNode, so the
+    // drawer gets real multi-level children instead of one flat level.
+    const items = buildTree(allRowsForBom, itemMap, chosenNode.bomItemId);
+
+    // Step 6: return — bomCode/bomName here describe the ITEM itself
+    // (not a separate root BOM record), since that's what the drawer
+    // header shows
     return successResponse(
       res,
       {
@@ -601,6 +565,68 @@ const getSubBomById = async (req, res) => {
   }
 };
 
+
+
+// ---------------- LIST SUB BOM (items that have children somewhere) ----------------
+const getSubBomList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+
+    // All company BOMs
+    const headers = await Bom.findAll({
+      where: { companyId, delete: 0 },
+      attributes: ["bomId", "bomCode", "bomName", "status", "created"],
+      raw: true,
+    });
+
+    if (headers.length === 0)
+      return successResponse(res, [], "Sub BOM list fetched successfully");
+
+    const bomIds = headers.map((h) => h.bomId);
+    const headerMap = Object.fromEntries(headers.map((h) => [h.bomId, h]));
+
+    // All non-root items (these are the "sub" entries)
+    const childItems = await BomItem.findAll({
+      where: {
+        bomId: bomIds,
+        parentId: { [db.Sequelize.Op.ne]: null }, // not root
+        delete: 0,
+      },
+      order: [["bomItemId", "DESC"]],
+      raw: true,
+    });
+
+    if (childItems.length === 0)
+      return successResponse(res, [], "Sub BOM list fetched successfully");
+
+    const itemMap = await getItemMasterMap(companyId);
+
+    // One row per child occurrence (you can later group by itemId if you want unique items only)
+    const list = childItems.map((it) => {
+      const h = headerMap[it.bomId] || {};
+      const master = itemMap.get(Number(it.itemId)) || {};
+      return {
+        id: String(it.bomItemId),
+        bomId: it.bomId,
+        itemName: master.itemName || "(item not found)",
+        itemCode: master.itemCode || "-",
+        bomCode: h.bomCode,
+        bomName: h.bomName,
+        quantity: it.quantity,
+        unit: it.unit || master.unit,
+        status: h.status,
+        created: h.created,
+      };
+    });
+
+    return successResponse(res, list, "Sub BOM list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   createBom,
   getBomList,
@@ -609,4 +635,5 @@ module.exports = {
   deleteBom,
   checkItemCodeExists,
   getSubBomById,
+  getSubBomList,
 };
