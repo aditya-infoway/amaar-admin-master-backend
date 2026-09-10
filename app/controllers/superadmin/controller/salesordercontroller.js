@@ -38,49 +38,52 @@ const getNextSalesOrderNo = async (req, res) => {
     const companyId = req.companyId;
     const { financialYearId } = req.query;
 
-    if (!companyId) {
-      return requiredmessage(res, "Unauthorized. Please login again.");
-    }
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId) return errorResponse(res, "Financial Year not found. Please select a company year.");
 
-    if (!financialYearId) {
-      return errorResponse(
-        res,
-        "Financial Year not found. Please select a company year.",
-      );
-    }
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year.");
 
-    const fy = await getFinancialYearById(
-      financialYearId,
-      companyId,
-    );
+    // Retry a few times in case of a collision with another concurrent request
+    let billNo, fyLabel;
+    let attempts = 0;
+    const maxAttempts = 5;
 
-    if (!fy) {
-      return errorResponse(res, "Invalid Financial Year.");
-    }
-
-    const { billNo, fyLabel } = await generateVoucherNo({
-      companyId,
-      financialYearId: fy.financialYearId,
-      tableName: "salesorder",
-      idColumn: "salesOrderId",
-      prefixFor: "SALESORDER",
-    });
-
-    return successResponse(
-      res,
-      {
-        soNo: billNo,
-        fyLabel,
+    while (attempts < maxAttempts) {
+      attempts++;
+      const result = await generateVoucherNo({
+        companyId,
         financialYearId: fy.financialYearId,
-      },
-      "Sales Order number generated successfully",
-    );
+        tableName: "salesorder",
+        idColumn: "salesOrderId",
+        prefixFor: "SALES ORDER",
+      });
+
+      // Check if this number is already taken
+      const existing = await selectWithJoins(
+        "salesorder",
+        [],
+        { companyId, financialYearId: fy.financialYearId, soNo: result.billNo, delete: 0 },
+        ["salesOrderId"],
+      );
+
+      if (existing.length === 0) {
+        billNo = result.billNo;
+        fyLabel = result.fyLabel;
+        break;
+      }
+      // else: collision, loop and try again (a tiny delay helps under real load)
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    if (!billNo) {
+      return errorResponse(res, "Could not generate a unique Sales Order number. Please try again.");
+    }
+
+    return successResponse(res, { soNo: billNo, fyLabel, financialYearId: fy.financialYearId }, "Sales Order number generated successfully");
   } catch (error) {
-    return errorResponse(
-      res,
-      error.message || "Something Went Wrong",
-      error,
-    );
+    console.error("getNextSalesOrderNo error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 
@@ -399,7 +402,7 @@ const createSalesOrder = async (req, res) => {
       financialYearId: fy.financialYearId,
       tableName: "salesorder",
       idColumn: "salesOrderId",
-      prefixFor: "SALESORDER",
+      prefixFor: "SALES ORDER",
     });
 
     const soNo = billNo;
