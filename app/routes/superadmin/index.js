@@ -33,4 +33,5 @@ module.exports = (app) => {
     require("./bom.routes")(app);
     require("./createpricing.routes")(app);
     require("./salesorder.routes")(app);
+     require("./workorder.routes")(app);
 };

@@ -233,7 +233,7 @@ const createSalesOrder = async (req, res) => {
     } = req.body;
 
 
-        // ========================================================
+    // ========================================================
     // IMAGE UPLOADS (multer via req.files)
     // ========================================================
 
@@ -460,7 +460,7 @@ const createSalesOrder = async (req, res) => {
         unitPrice: finalUnitPrice,
         totalAmount: finalTotalAmount,
 
-               aadharNumber: aadharNumber || null,
+        aadharNumber: aadharNumber || null,
         aadharImage,
         panNumber: panNumber || null,
         panImage,
@@ -723,7 +723,37 @@ const getSalesOrderList = async (req, res) => {
         );
       }
     }
+    // ========================================================
+    // GET MODEL NAMES
+    // ========================================================
 
+    const modelIds = salesOrders
+      .map((item) => item.model)
+      .filter((id) => id && !isNaN(Number(id)));
+
+    let modelMap = {};
+
+    if (modelIds.length > 0) {
+      try {
+        const models = await selectWithJoins(
+          "model",
+          [],
+          {
+            modelId: modelIds,
+            companyId,
+            delete: 0,
+          },
+          ["modelId", "modelName"],
+        );
+
+        modelMap = models.reduce((map, m) => {
+          map[String(m.modelId)] = m.modelName || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching models:", err.message);
+      }
+    }
     // ========================================================
     // FORMAT RESPONSE
     // ========================================================
@@ -751,14 +781,14 @@ const getSalesOrderList = async (req, res) => {
         soNo:
           salesOrder.soNo || "",
         //   salesOrder.salesOrderNo ||
-         
+
 
         quotationId:
           String(salesOrder.quotationId || ""),
 
         qNo:
           quotationMap[
-            String(salesOrder.quotationId)
+          String(salesOrder.quotationId)
           ] || "",
 
         leadId: salesOrder.leadId,
@@ -779,9 +809,8 @@ const getSalesOrderList = async (req, res) => {
 
         city:
           salesOrder.city || "",
-
         model:
-          salesOrder.model || "",
+          modelMap[String(salesOrder.model)] || salesOrder.model || "",
 
         remark:
           salesOrder.remark || "",
@@ -939,7 +968,28 @@ const getSalesOrderById = async (req, res) => {
         qNo = quotationRows[0].qNo || "";
       }
     }
+    // ========================================================
+    // GET MODEL NAME
+    // ========================================================
 
+    let modelName = "";
+
+    if (salesOrder.model && !isNaN(Number(salesOrder.model))) {
+      const modelRows = await selectWithJoins(
+        "model",
+        [],
+        {
+          modelId: salesOrder.model,
+          companyId,
+          delete: 0,
+        },
+        ["modelId", "modelName"],
+      );
+
+      if (modelRows.length) {
+        modelName = modelRows[0].modelName || "";
+      }
+    }
     return successResponse(
       res,
       {
@@ -949,9 +999,9 @@ const getSalesOrderById = async (req, res) => {
           salesOrder.financialYearId,
 
         soNo:
-          salesOrder.soNo ||"",
+          salesOrder.soNo || "",
         //   salesOrder.salesOrderNo ||
-          
+
 
         quotationId:
           String(salesOrder.quotationId || ""),
@@ -980,7 +1030,7 @@ const getSalesOrderById = async (req, res) => {
           salesOrder.city || "",
 
         model:
-          salesOrder.model || "",
+          modelName || salesOrder.model || "",
 
         remark:
           salesOrder.remark || "",
@@ -1115,7 +1165,7 @@ const updateSalesOrder = async (req, res) => {
     } = req.body;
 
 
-        // ========================================================
+    // ========================================================
     // IMAGE UPLOADS (multer via req.files) — keep existing file
     // if no new one was uploaded
     // ========================================================
@@ -1313,7 +1363,7 @@ const updateSalesOrder = async (req, res) => {
       unitPrice: finalUnitPrice,
       totalAmount: finalTotalAmount,
 
-           aadharNumber: aadharNumber || null,
+      aadharNumber: aadharNumber || null,
       aadharImage,
       panNumber: panNumber || null,
       panImage,
