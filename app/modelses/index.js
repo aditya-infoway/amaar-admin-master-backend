@@ -54,6 +54,7 @@ db.createpricing = require("./createpricing.js")(sequelize, Sequelize);
 db.salesorder = require("./salesorder.js")(sequelize, Sequelize);
 db.location = require("./location.js")(sequelize, Sequelize);
 
+db.workorder = require("./workorder.js")(sequelize, Sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 

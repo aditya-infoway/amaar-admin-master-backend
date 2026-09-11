@@ -39,7 +39,7 @@ const createLead = async (req, res) => {
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
     const {
-      leadCode, name, number, email, address, city, model, remark, nextFollowupDate, financialYearId,createdBy,createdType,
+      leadCode, name, number, email, address, city, model, remark, nextFollowupDate, financialYearId, createdBy, createdType,
     } = req.body;
 
     const payload = {
@@ -102,7 +102,38 @@ const getLeadList = async (req, res) => {
       [["leadId", "DESC"]]
     );
 
-    return successResponse(res, list, "Enquiry list fetched successfully");
+    // ========================================================
+    // GET MODEL NAMES
+    // ========================================================
+
+    const modelIds = list.map((item) => item.model).filter((id) => id);
+
+    let modelMap = {};
+
+    if (modelIds.length > 0) {
+      try {
+        const models = await selectWithJoins(
+          "itemmaster",
+          [],
+          { itemId: modelIds },
+          ["itemId", "itemName"],
+        );
+
+        modelMap = models.reduce((map, m) => {
+          map[String(m.itemId)] = m.itemName || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching models:", err.message);
+      }
+    }
+
+    const data = list.map((item) => ({
+      ...item,
+      modelName: modelMap[String(item.model)] || "",
+    }));
+
+    return successResponse(res, data, "Enquiry list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -126,7 +157,25 @@ const getLeadById = async (req, res) => {
     );
 
     if (rows.length === 0) return requiredmessage(res, "Enquiry not found");
-    return successResponse(res, rows[0], "Enquiry fetched successfully");
+
+    const lead = rows[0];
+
+    let modelName = "";
+
+    if (lead.model) {
+      const modelRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: lead.model },
+        ["itemId", "itemName"],
+      );
+
+      if (modelRows.length) {
+        modelName = modelRows[0].itemName || "";
+      }
+    }
+
+    return successResponse(res, { ...lead, modelName }, "Enquiry fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }

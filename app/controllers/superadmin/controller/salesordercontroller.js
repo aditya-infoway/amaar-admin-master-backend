@@ -723,31 +723,29 @@ const getSalesOrderList = async (req, res) => {
         );
       }
     }
+    
+
     // ========================================================
     // GET MODEL NAMES
     // ========================================================
 
     const modelIds = salesOrders
       .map((item) => item.model)
-      .filter((id) => id && !isNaN(Number(id)));
+      .filter((id) => id);
 
     let modelMap = {};
 
     if (modelIds.length > 0) {
       try {
         const models = await selectWithJoins(
-          "model",
+          "itemmaster",
           [],
-          {
-            modelId: modelIds,
-            companyId,
-            delete: 0,
-          },
-          ["modelId", "modelName"],
+          { itemId: modelIds },
+          ["itemId", "itemName"],
         );
 
         modelMap = models.reduce((map, m) => {
-          map[String(m.modelId)] = m.modelName || "";
+          map[String(m.itemId)] = m.itemName || "";
           return map;
         }, {});
       } catch (err) {
@@ -810,7 +808,9 @@ const getSalesOrderList = async (req, res) => {
         city:
           salesOrder.city || "",
         model:
-          modelMap[String(salesOrder.model)] || salesOrder.model || "",
+          salesOrder.model || "",
+        modelName:
+          modelMap[String(salesOrder.model)] || "",
 
         remark:
           salesOrder.remark || "",
@@ -974,20 +974,16 @@ const getSalesOrderById = async (req, res) => {
 
     let modelName = "";
 
-    if (salesOrder.model && !isNaN(Number(salesOrder.model))) {
+    if (salesOrder.model) {
       const modelRows = await selectWithJoins(
-        "model",
+        "itemmaster",
         [],
-        {
-          modelId: salesOrder.model,
-          companyId,
-          delete: 0,
-        },
-        ["modelId", "modelName"],
+        { itemId: salesOrder.model },
+        ["itemId", "itemName"],
       );
 
       if (modelRows.length) {
-        modelName = modelRows[0].modelName || "";
+        modelName = modelRows[0].itemName || "";
       }
     }
     return successResponse(
@@ -1030,7 +1026,8 @@ const getSalesOrderById = async (req, res) => {
           salesOrder.city || "",
 
         model:
-          modelName || salesOrder.model || "",
+          salesOrder.model || "",
+        modelName: modelName || "",
 
         remark:
           salesOrder.remark || "",

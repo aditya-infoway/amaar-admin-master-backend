@@ -339,38 +339,96 @@ const getWorkOrderList = async (req, res) => {
       [["workOrderId", "DESC"]],
     );
 
-    if (!workOrders.length) {
-      return successResponse(res, [], "Work Order list fetched successfully");
-    }
+   if (!workOrders.length) {
+  return successResponse(res, [], "Work Order list fetched successfully");
+}
 
-    const data = workOrders.map((workOrder) => ({
-      id: String(workOrder.workOrderId),
+// ========================================================
+// GET SALES ORDER NUMBERS
+// ========================================================
 
-      financialYearId: workOrder.financialYearId,
+const salesOrderIds = workOrders
+  .map((item) => item.salesOrderId)
+  .filter((id) => id);
 
-      workOrderNo: workOrder.workOrderNo || "",
-      salesOrderId: workOrder.salesOrderId,
+let salesOrderMap = {};
 
-      customerName: workOrder.customerName || "",
-      mobile: workOrder.mobile || "",
-      email: workOrder.email || "",
-      address: workOrder.address || "",
-      city: workOrder.city || "",
-      model: workOrder.model || "",
+if (salesOrderIds.length > 0) {
+  try {
+    const salesOrders = await selectWithJoins(
+      "salesorder",
+      [],
+      { salesOrderId: salesOrderIds, companyId, delete: 0 },
+      ["salesOrderId", "soNo"],
+    );
 
-      qty: Number(workOrder.qty) || 0,
-      totalPrice: Number(workOrder.totalPrice) || 0,
-      gst: Number(workOrder.gst) || 0,
-      grandTotal: Number(workOrder.grandTotal) || 0,
+    salesOrderMap = salesOrders.reduce((map, so) => {
+      map[String(so.salesOrderId)] = so.soNo || "";
+      return map;
+    }, {});
+  } catch (err) {
+    console.error("Error fetching sales orders:", err.message);
+  }
+}
 
-      createdBy: workOrder.createdBy || "",
-      createdType: workOrder.createdtype || "",
+// ========================================================
+// GET MODEL NAMES
+// ========================================================
 
-      createdAt: workOrder.created,
-      updatedAt: workOrder.updated,
-    }));
+const modelIds = workOrders
+  .map((item) => item.model)
+  .filter((id) => id);
 
-    return successResponse(res, data, "Work Order list fetched successfully");
+let modelMap = {};
+
+if (modelIds.length > 0) {
+  try {
+    const models = await selectWithJoins(
+      "itemmaster",
+      [],
+      { itemId: modelIds },
+      ["itemId", "itemName"],
+    );
+
+    modelMap = models.reduce((map, m) => {
+      map[String(m.itemId)] = m.itemName || "";
+      return map;
+    }, {});
+  } catch (err) {
+    console.error("Error fetching models:", err.message);
+  }
+}
+
+const data = workOrders.map((workOrder) => ({
+  id: String(workOrder.workOrderId),
+
+  financialYearId: workOrder.financialYearId,
+
+  workOrderNo: workOrder.workOrderNo || "",
+  salesOrderId: workOrder.salesOrderId,
+  salesOrderNo: salesOrderMap[String(workOrder.salesOrderId)] || "",
+
+  customerName: workOrder.customerName || "",
+  mobile: workOrder.mobile || "",
+  email: workOrder.email || "",
+  address: workOrder.address || "",
+  city: workOrder.city || "",
+  model: workOrder.model || "",
+  modelName: modelMap[String(workOrder.model)] || "",
+
+  qty: Number(workOrder.qty) || 0,
+  totalPrice: Number(workOrder.totalPrice) || 0,
+  gst: Number(workOrder.gst) || 0,
+  grandTotal: Number(workOrder.grandTotal) || 0,
+
+  createdBy: workOrder.createdBy || "",
+  createdType: workOrder.createdtype || "",
+
+  createdAt: workOrder.created,
+  updatedAt: workOrder.updated,
+}));
+
+return successResponse(res, data, "Work Order list fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
