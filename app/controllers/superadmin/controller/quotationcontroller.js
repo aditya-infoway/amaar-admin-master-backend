@@ -604,90 +604,116 @@ const getQuotationList = async (req, res) => {
       [["quotationId", "DESC"]],
     );
 
-    if (!quotations.length) {
-      return successResponse(res, [], "Quotation list fetched successfully");
-    }
+  if (!quotations.length) {
+  return successResponse(res, [], "Quotation list fetched successfully");
+}
 
-    // ✅ Get employee IDs - only numeric values (skip "Admin")
-    const employeeIds = quotations
-      .map(q => q.createdBy)
-      .filter(id => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
+// ✅ Get employee IDs - only numeric values (skip "Admin")
+const employeeIds = quotations
+  .map(q => q.createdBy)
+  .filter(id => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
 
-    let employeeMap = {};
+let employeeMap = {};
 
-    if (employeeIds.length > 0) {
-      try {
-        const employees = await selectWithJoins(
-          "employee",
-          [],
-          { employeeId: employeeIds },
-          ["employeeId", "employeeName"],
-        );
-        
-        employeeMap = employees.reduce((map, emp) => {
-          map[String(emp.employeeId)] = emp.employeeName || String(emp.employeeId);
-          return map;
-        }, {});
-      } catch (err) {
-        console.error("Error fetching employees:", err.message);
-      }
-    }
+if (employeeIds.length > 0) {
+  try {
+    const employees = await selectWithJoins(
+      "employee",
+      [],
+      { employeeId: employeeIds },
+      ["employeeId", "employeeName"],
+    );
 
-    const data = quotations.map((quotation) => {
-      // ✅ Handle different createdBy values
-      let createdByName = quotation.createdBy || "";
-      
-      if (createdByName === "Admin") {
-        createdByName = "Admin";
-      } else if (!isNaN(Number(createdByName)) && employeeMap[String(createdByName)]) {
-        createdByName = employeeMap[String(createdByName)];
-      }
-      
-      return {
-        id: String(quotation.quotationId),
-        financialYearId: quotation.financialYearId,
-        qNo: quotation.qNo,
-        leadId: quotation.leadId,
-        customerName: quotation.customerName || "",
-        mobile: quotation.mobile || "",
-        email: quotation.email || "",
-        address: quotation.address || "",
-        city: quotation.city || "",
-        model: quotation.model || "",
-        remark: quotation.remark || "",
-        vehicleType: quotation.vehicleType,
-        trailer: quotation.trailer,
-        chassis: quotation.chassis,
-        body: quotation.body,
-        hydraulic: quotation.hydraulic,
-        axle: quotation.axle,
-        suspension: quotation.suspension,
-        tyre: quotation.tyre,
-        rim: quotation.rim,
-        kingPin: quotation.kingPin,
-        landingLeg: quotation.landingLeg,
-        brakeSystem: quotation.brakeSystem,
-        mudguard: quotation.mudguard,
-        color: quotation.color,
-        electricalTapes: quotation.electricalTapes,
-        supdRupd: quotation.supdRupd,
-        box: quotation.box,
-        spareWheelCarrier: quotation.spareWheelCarrier,
-        warranty: quotation.warranty || "",
-        discountType: quotation.discountType,
-        discountValue: String(quotation.discountValue || 0),
-        basicCost: String(quotation.basicCost || 0),
-        gstAmount: String(quotation.gstAmount || 0),
-        finalPrice: String(quotation.finalPrice || 0),
-        position: quotation.position || "",
-        createdBy: createdByName,  // ✅ Now shows "Admin" or employee name
-        createdType: quotation.createdtype || "",
-        createdAt: quotation.created,
-        updatedAt: quotation.updated,
-      };
-    });
+    employeeMap = employees.reduce((map, emp) => {
+      map[String(emp.employeeId)] = emp.employeeName || String(emp.employeeId);
+      return map;
+    }, {});
+  } catch (err) {
+    console.error("Error fetching employees:", err.message);
+  }
+}
 
-    return successResponse(res, data, "Quotation list fetched successfully");
+// ✅ Get lead codes — same pattern as employeeMap above
+const leadIds = quotations
+  .map(q => q.leadId)
+  .filter(id => id !== null && id !== undefined && !isNaN(Number(id)));
+
+let leadCodeMap = {};
+
+if (leadIds.length > 0) {
+  try {
+    const leads = await selectWithJoins(
+      "lead",
+      [],
+      { leadId: leadIds, companyId, delete: 0 },
+      ["leadId", "leadCode"],
+    );
+
+    leadCodeMap = leads.reduce((map, lead) => {
+      map[String(lead.leadId)] = lead.leadCode || "";
+      return map;
+    }, {});
+  } catch (err) {
+    console.error("Error fetching lead codes:", err.message);
+  }
+}
+
+const data = quotations.map((quotation) => {
+  // ✅ Handle different createdBy values
+  let createdByName = quotation.createdBy || "";
+
+  if (createdByName === "Admin") {
+    createdByName = "Admin";
+  } else if (!isNaN(Number(createdByName)) && employeeMap[String(createdByName)]) {
+    createdByName = employeeMap[String(createdByName)];
+  }
+
+  return {
+    id: String(quotation.quotationId),
+    financialYearId: quotation.financialYearId,
+    qNo: quotation.qNo,
+    leadId: quotation.leadId,
+    leadCode: leadCodeMap[String(quotation.leadId)] || "",   // 👈 added
+    customerName: quotation.customerName || "",
+    mobile: quotation.mobile || "",
+    email: quotation.email || "",
+    address: quotation.address || "",
+    city: quotation.city || "",
+    model: quotation.model || "",
+    remark: quotation.remark || "",
+    vehicleType: quotation.vehicleType,
+    trailer: quotation.trailer,
+    chassis: quotation.chassis,
+    body: quotation.body,
+    hydraulic: quotation.hydraulic,
+    axle: quotation.axle,
+    suspension: quotation.suspension,
+    tyre: quotation.tyre,
+    rim: quotation.rim,
+    kingPin: quotation.kingPin,
+    landingLeg: quotation.landingLeg,
+    brakeSystem: quotation.brakeSystem,
+    mudguard: quotation.mudguard,
+    color: quotation.color,
+    electricalTapes: quotation.electricalTapes,
+    supdRupd: quotation.supdRupd,
+    box: quotation.box,
+    spareWheelCarrier: quotation.spareWheelCarrier,
+    warranty: quotation.warranty || "",
+    discountType: quotation.discountType,
+    discountValue: String(quotation.discountValue || 0),
+    basicCost: String(quotation.basicCost || 0),
+    gstAmount: String(quotation.gstAmount || 0),
+    finalPrice: String(quotation.finalPrice || 0),
+    position: quotation.position || "",
+    createdBy: createdByName,
+    createdType: quotation.createdtype || "",
+    createdAt: quotation.created,
+    updatedAt: quotation.updated,
+  };
+});
+
+return successResponse(res, data, "Quotation list fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
