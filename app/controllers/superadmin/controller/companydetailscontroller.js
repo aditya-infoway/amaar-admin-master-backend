@@ -37,29 +37,69 @@ const CATEGORY_MASTER_LIST = [
 ];
 
 const syncDefaultItemCategories = async (companyId) => {
-  const existingRows = await selectWithJoins(
-    "itemcategory",
-    [],
-    { companyId, categoryType: "default", delete: 0 },
-    ["categoryName"]
-  );
+  try {
+    console.log("========================================");
+    console.log("SYNC DEFAULT ITEM CATEGORIES START");
+    console.log("companyId:", companyId);
+    console.log("========================================");
 
-  const existingNames = new Set(existingRows.map((r) => r.categoryName));
-  const missingCategories = CATEGORY_MASTER_LIST.filter(
-    (name) => !existingNames.has(name)
-  );
+    const existingRows = await selectWithJoins(
+      "itemcategory",
+      [],
+      {
+        companyId,
+        categoryType: "default",
+        delete: 0,
+      },
+      ["itemCategoryId", "categoryName", "categoryType"]
+    );
 
-  for (const categoryName of missingCategories) {
-    await saveModel("itemcategory", {
-      companyId,
-      categoryName,
-      categoryType: "default",
-      status: "active",
-      delete: 0,
-    });
+    console.log("Existing default categories:", existingRows.length);
+    console.log("Existing rows:", existingRows);
+
+    const existingNames = new Set(
+      existingRows.map((r) => r.categoryName)
+    );
+
+    const missingCategories = CATEGORY_MASTER_LIST.filter(
+      (name) => !existingNames.has(name)
+    );
+
+    console.log("Master category count:", CATEGORY_MASTER_LIST.length);
+    console.log("Missing category count:", missingCategories.length);
+    console.log("Missing categories:", missingCategories);
+
+    for (const categoryName of missingCategories) {
+      console.log("Creating category:", categoryName);
+
+      await saveModel("itemcategory", {
+        companyId,
+        categoryName,
+        categoryType: "default",
+        status: "active",
+        delete: 0,
+      });
+
+      console.log("Created category:", categoryName);
+    }
+
+    console.log("========================================");
+    console.log("SYNC DEFAULT ITEM CATEGORIES SUCCESS");
+    console.log("========================================");
+
+    return missingCategories;
+  } catch (error) {
+    console.error("========================================");
+    console.error("SYNC DEFAULT ITEM CATEGORIES ERROR");
+    console.error("Error name:", error?.name);
+    console.error("Error message:", error?.message);
+    console.error("Error stack:", error?.stack);
+    console.error("Full error:", error);
+    console.error("companyId:", companyId);
+    console.error("========================================");
+
+    throw error;
   }
-
-  return missingCategories;
 };
 
 

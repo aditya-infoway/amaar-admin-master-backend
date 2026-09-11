@@ -38,49 +38,52 @@ const getNextSalesOrderNo = async (req, res) => {
     const companyId = req.companyId;
     const { financialYearId } = req.query;
 
-    if (!companyId) {
-      return requiredmessage(res, "Unauthorized. Please login again.");
-    }
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId) return errorResponse(res, "Financial Year not found. Please select a company year.");
 
-    if (!financialYearId) {
-      return errorResponse(
-        res,
-        "Financial Year not found. Please select a company year.",
-      );
-    }
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year.");
 
-    const fy = await getFinancialYearById(
-      financialYearId,
-      companyId,
-    );
+    // Retry a few times in case of a collision with another concurrent request
+    let billNo, fyLabel;
+    let attempts = 0;
+    const maxAttempts = 5;
 
-    if (!fy) {
-      return errorResponse(res, "Invalid Financial Year.");
-    }
-
-    const { billNo, fyLabel } = await generateVoucherNo({
-      companyId,
-      financialYearId: fy.financialYearId,
-      tableName: "salesorder",
-      idColumn: "salesOrderId",
-      prefixFor: "SALESORDER",
-    });
-
-    return successResponse(
-      res,
-      {
-        soNo: billNo,
-        fyLabel,
+    while (attempts < maxAttempts) {
+      attempts++;
+      const result = await generateVoucherNo({
+        companyId,
         financialYearId: fy.financialYearId,
-      },
-      "Sales Order number generated successfully",
-    );
+        tableName: "salesorder",
+        idColumn: "salesOrderId",
+        prefixFor: "SALES ORDER",
+      });
+
+      // Check if this number is already taken
+      const existing = await selectWithJoins(
+        "salesorder",
+        [],
+        { companyId, financialYearId: fy.financialYearId, soNo: result.billNo, delete: 0 },
+        ["salesOrderId"],
+      );
+
+      if (existing.length === 0) {
+        billNo = result.billNo;
+        fyLabel = result.fyLabel;
+        break;
+      }
+      // else: collision, loop and try again (a tiny delay helps under real load)
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    if (!billNo) {
+      return errorResponse(res, "Could not generate a unique Sales Order number. Please try again.");
+    }
+
+    return successResponse(res, { soNo: billNo, fyLabel, financialYearId: fy.financialYearId }, "Sales Order number generated successfully");
   } catch (error) {
-    return errorResponse(
-      res,
-      error.message || "Something Went Wrong",
-      error,
-    );
+    console.error("getNextSalesOrderNo error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 
@@ -230,7 +233,7 @@ const createSalesOrder = async (req, res) => {
     } = req.body;
 
 
-        // ========================================================
+    // ========================================================
     // IMAGE UPLOADS (multer via req.files)
     // ========================================================
 
@@ -399,7 +402,7 @@ const createSalesOrder = async (req, res) => {
       financialYearId: fy.financialYearId,
       tableName: "salesorder",
       idColumn: "salesOrderId",
-      prefixFor: "SALESORDER",
+      prefixFor: "SALES ORDER",
     });
 
     const soNo = billNo;
@@ -457,7 +460,7 @@ const createSalesOrder = async (req, res) => {
         unitPrice: finalUnitPrice,
         totalAmount: finalTotalAmount,
 
-               aadharNumber: aadharNumber || null,
+        aadharNumber: aadharNumber || null,
         aadharImage,
         panNumber: panNumber || null,
         panImage,
@@ -720,7 +723,35 @@ const getSalesOrderList = async (req, res) => {
         );
       }
     }
+    
 
+    // ========================================================
+    // GET MODEL NAMES
+    // ========================================================
+
+    const modelIds = salesOrders
+      .map((item) => item.model)
+      .filter((id) => id);
+
+    let modelMap = {};
+
+    if (modelIds.length > 0) {
+      try {
+        const models = await selectWithJoins(
+          "itemmaster",
+          [],
+          { itemId: modelIds },
+          ["itemId", "itemName"],
+        );
+
+        modelMap = models.reduce((map, m) => {
+          map[String(m.itemId)] = m.itemName || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching models:", err.message);
+      }
+    }
     // ========================================================
     // FORMAT RESPONSE
     // ========================================================
@@ -748,14 +779,14 @@ const getSalesOrderList = async (req, res) => {
         soNo:
           salesOrder.soNo || "",
         //   salesOrder.salesOrderNo ||
-         
+
 
         quotationId:
           String(salesOrder.quotationId || ""),
 
         qNo:
           quotationMap[
-            String(salesOrder.quotationId)
+          String(salesOrder.quotationId)
           ] || "",
 
         leadId: salesOrder.leadId,
@@ -776,9 +807,10 @@ const getSalesOrderList = async (req, res) => {
 
         city:
           salesOrder.city || "",
-
         model:
           salesOrder.model || "",
+        modelName:
+          modelMap[String(salesOrder.model)] || "",
 
         remark:
           salesOrder.remark || "",
@@ -936,7 +968,24 @@ const getSalesOrderById = async (req, res) => {
         qNo = quotationRows[0].qNo || "";
       }
     }
+    // ========================================================
+    // GET MODEL NAME
+    // ========================================================
 
+    let modelName = "";
+
+    if (salesOrder.model) {
+      const modelRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: salesOrder.model },
+        ["itemId", "itemName"],
+      );
+
+      if (modelRows.length) {
+        modelName = modelRows[0].itemName || "";
+      }
+    }
     return successResponse(
       res,
       {
@@ -946,9 +995,9 @@ const getSalesOrderById = async (req, res) => {
           salesOrder.financialYearId,
 
         soNo:
-          salesOrder.soNo ||"",
+          salesOrder.soNo || "",
         //   salesOrder.salesOrderNo ||
-          
+
 
         quotationId:
           String(salesOrder.quotationId || ""),
@@ -978,6 +1027,7 @@ const getSalesOrderById = async (req, res) => {
 
         model:
           salesOrder.model || "",
+        modelName: modelName || "",
 
         remark:
           salesOrder.remark || "",
@@ -1112,7 +1162,7 @@ const updateSalesOrder = async (req, res) => {
     } = req.body;
 
 
-        // ========================================================
+    // ========================================================
     // IMAGE UPLOADS (multer via req.files) — keep existing file
     // if no new one was uploaded
     // ========================================================
@@ -1310,7 +1360,7 @@ const updateSalesOrder = async (req, res) => {
       unitPrice: finalUnitPrice,
       totalAmount: finalTotalAmount,
 
-           aadharNumber: aadharNumber || null,
+      aadharNumber: aadharNumber || null,
       aadharImage,
       panNumber: panNumber || null,
       panImage,

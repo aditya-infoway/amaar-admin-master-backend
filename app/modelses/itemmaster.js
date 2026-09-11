@@ -22,6 +22,8 @@ module.exports = sequelize => {
     width: { type: DataTypes.DECIMAL(12, 3), allowNull: true, defaultValue: 0, field: "width" },
     weight: { type: DataTypes.DECIMAL(12, 3), allowNull: true, field: "weight" },
     taxSlab: { type: DataTypes.STRING(50), allowNull: false, field: "taxSlab" },
+    openingStock: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0, field: "openingStock" },
+    stockValue: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0, field: "stockValue" },
     stockMapping: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: "stockMapping" },
     minQty: { type: DataTypes.DECIMAL(12, 2), allowNull: true, field: "minQty" },
     maxQty: { type: DataTypes.DECIMAL(12, 2), allowNull: true, field: "maxQty" },
