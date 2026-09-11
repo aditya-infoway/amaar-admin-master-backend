@@ -52,6 +52,7 @@ db.bom = require("./bom.js")(sequelize, Sequelize);
 db.bomItem = require("./bomItem.js")(sequelize, Sequelize);
 db.createpricing = require("./createpricing.js")(sequelize, Sequelize);
 db.salesorder = require("./salesorder.js")(sequelize, Sequelize);
+db.location = require("./location.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;

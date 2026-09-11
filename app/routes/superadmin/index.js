@@ -34,4 +34,5 @@ module.exports = (app) => {
     require("./createpricing.routes")(app);
     require("./salesorder.routes")(app);
      require("./workorder.routes")(app);
+     require("./location.routes")(app);
 };

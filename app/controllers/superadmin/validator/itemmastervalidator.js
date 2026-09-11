@@ -34,6 +34,17 @@ const baseSchema = {
   taxSlab: Joi.string().trim().required().messages({
     "string.empty": "Tax Slab is required",
   }),
+  openingStock: Joi.number().required().min(0).messages({
+  "any.required": "Opening Stock is required",
+  "number.base": "Opening Stock must be a number",
+  "number.min": "Opening Stock cannot be negative",
+}),
+
+stockValue: Joi.number().required().min(0).messages({
+  "any.required": "Stock Value is required",
+  "number.base": "Stock Value must be a number",
+  "number.min": "Stock Value cannot be negative",
+}),
 
  thickness: Joi.number().allow(null, "").min(0).messages({
   "number.base": "Thickness must be a number",

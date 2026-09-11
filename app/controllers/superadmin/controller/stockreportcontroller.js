@@ -10,101 +10,221 @@ const {
 const getStockReportList = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
-    // ---- Sirf verified purchase detail rows hi stock me count honge ----
-    const details = await selectWithJoins(
-      "purchasedetails",
-      [],
-      { companyId, verified: true, delete: 0 },
-      ["itemId", "currentStock"],
-    );
-
-    // ---- Item-wise currentStock ka sum ----
-    const stockMap = {};
-    details.forEach((d) => {
-      const qty = Number(d.currentStock) || 0;
-      stockMap[d.itemId] = (stockMap[d.itemId] || 0) + qty;
-    });
-
-    const itemIds = Object.keys(stockMap)
-      .map((id) => Number(id))
-      .filter((id) => stockMap[id] > 0);
-
-    if (itemIds.length === 0) {
-      return successResponse(res, [], "Stock report fetched successfully");
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    // ✅ CHANGED — array filter (IN clause) selectWithJoinsV2 me support nahi hota,
-    // isliye selectWithJoins use kiya (jo array value ko IN clause bana deta hai)
+    // ---------------------------------------------------------
+    // ALL ITEM MASTER ITEMS
+    // ---------------------------------------------------------
     const items = await selectWithJoins(
       "itemmaster",
       [],
-      { itemId: itemIds, companyId, delete: 0 },
-      ["itemId", "itemCode", "itemName", "hsnCode", "unit", "itemCategoryId", "groupId", "purchasePrice", "salesPrice", "taxSlab"],
+      {
+        companyId,
+        delete: 0,
+      },
+      [
+        "itemId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "unit",
+        "itemCategoryId",
+        "groupId",
+        "taxSlab",
+        "openingStock",
+        "stockValue",
+      ],
     );
 
-    // ---- Category names — alag lookup + map (selectWithJoinsV2 ki jagah) ----
-    const categoryIds = [...new Set(items.map((i) => i.itemCategoryId).filter(Boolean))];
+    // ---------------------------------------------------------
+    // VERIFIED PURCHASE STOCK
+    // ---------------------------------------------------------
+    const details = await selectWithJoins(
+      "purchasedetails",
+      [],
+      {
+        companyId,
+        verified: true,
+        delete: 0,
+      },
+      ["itemId", "currentStock"],
+    );
+
+    // ---------------------------------------------------------
+    // ITEM-WISE PURCHASE CURRENT STOCK
+    // ---------------------------------------------------------
+    const stockMap = {};
+
+    details.forEach((d) => {
+      const qty = Number(d.currentStock) || 0;
+
+      stockMap[d.itemId] =
+        (stockMap[d.itemId] || 0) + qty;
+    });
+
+    // ---------------------------------------------------------
+    // CATEGORY MAP
+    // ---------------------------------------------------------
+    const categoryIds = [
+      ...new Set(
+        items
+          .map((i) => i.itemCategoryId)
+          .filter(Boolean)
+      ),
+    ];
+
     let categoryMap = {};
+
     if (categoryIds.length) {
       const categories = await selectWithJoins(
-        "itemcategory", [], { itemCategoryId: categoryIds, companyId, delete: 0 }, ["itemCategoryId", "categoryName"],
+        "itemcategory",
+        [],
+        {
+          itemCategoryId: categoryIds,
+          companyId,
+          delete: 0,
+        },
+        [
+          "itemCategoryId",
+          "categoryName",
+        ],
       );
-      categories.forEach((c) => { categoryMap[c.itemCategoryId] = c.categoryName; });
+
+      categories.forEach((c) => {
+        categoryMap[c.itemCategoryId] = c.categoryName;
+      });
     }
 
-    // ---- Group names — alag lookup + map ----
-    const groupIds = [...new Set(items.map((i) => i.groupId).filter(Boolean))];
+    // ---------------------------------------------------------
+    // GROUP MAP
+    // ---------------------------------------------------------
+    const groupIds = [
+      ...new Set(
+        items
+          .map((i) => i.groupId)
+          .filter(Boolean)
+      ),
+    ];
+
     let groupMap = {};
+
     if (groupIds.length) {
       const groups = await selectWithJoins(
-        "itemgroup", [], { itemGroupId: groupIds, companyId, delete: 0 }, ["itemGroupId", "groupName"],
+        "itemgroup",
+        [],
+        {
+          itemGroupId: groupIds,
+          companyId,
+          delete: 0,
+        },
+        [
+          "itemGroupId",
+          "groupName",
+        ],
       );
-      groups.forEach((g) => { groupMap[g.itemGroupId] = g.groupName; });
+
+      groups.forEach((g) => {
+        groupMap[g.itemGroupId] = g.groupName;
+      });
     }
 
-    const data = items.map((item) => ({
-      id: String(item.itemId),
-      itemCode: item.itemCode || "",
-      itemName: item.itemName || "",
-      hsnCode: item.hsnCode || "",
-      unit: item.unit || "",
-      categoryName: categoryMap[item.itemCategoryId] || "",
-      groupName: groupMap[item.groupId] || "",
-      purchasePrice: String(item.purchasePrice ?? "0"),
-      salesPrice: String(item.salesPrice ?? "0"),
-      taxSlab: String(item.taxSlab ?? "0"),
-      currentStock: String(stockMap[item.itemId] || 0),
-    }));
+    // ---------------------------------------------------------
+    // FINAL STOCK REPORT DATA
+    // ---------------------------------------------------------
+   // FINAL STOCK REPORT DATA
+const data = items.map((item) => {
+  // Opening stock from Item Master
+  const openingStock = Number(item.openingStock) || 0;
 
-    return successResponse(res, data, "Stock report fetched successfully");
+  // Purchase stock from Purchase Details
+  const purchaseStock = Number(stockMap[item.itemId]) || 0;
+
+  // Final current stock
+  const currentStock = openingStock + purchaseStock;
+
+  return {
+    id: String(item.itemId),
+
+    itemCode: item.itemCode || "",
+    itemName: item.itemName || "",
+    hsnCode: item.hsnCode || "",
+    unit: item.unit || "",
+
+    categoryName:
+      categoryMap[item.itemCategoryId] || "",
+
+    groupName:
+      groupMap[item.groupId] || "",
+
+    taxSlab:
+      String(item.taxSlab ?? "0"),
+
+    // Item Master
+    openingStock: String(openingStock),
+
+    stockValue:
+      String(item.stockValue ?? "0"),
+
+    // Opening Stock + Purchase Stock
+    currentStock:
+      String(currentStock),
+  };
+});
+
+    return successResponse(
+      res,
+      data,
+      "Stock report fetched successfully"
+    );
+
   } catch (error) {
-    return errorResponse(res, error.message || "Something Went Wrong", error);
+    return errorResponse(
+      res,
+      error.message || "Something Went Wrong",
+      error
+    );
   }
 };
 
-// ---------------- STOCK REPORT DETAILS (item ki purchase history) ----------------
+
+// ---------------- STOCK REPORT DETAILS ----------------
+// ---------------- STOCK REPORT DETAILS ----------------
 const getStockReportDetails = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
 
     const { itemId } = req.params;
 
-    // ---- itemId se hi itemCode/itemName + category/group left join ----
+    // ---------------------------------------------------------
+    // 1. ITEM MASTER + CATEGORY + GROUP
+    // ---------------------------------------------------------
     const itemRows = await selectWithJoinsV2(
       "itemmaster",
       [
         {
           table: "itemcategory",
           alias: "ic",
-          onClause: { 'ic."itemCategoryId"': { "=": 'itemmaster."itemCategoryId"' } },
+          onClause: {
+            'ic."itemCategoryId"': {
+              "=": 'itemmaster."itemCategoryId"',
+            },
+          },
         },
         {
           table: "itemgroup",
           alias: "ig",
-          onClause: { 'ig."itemGroupId"': { "=": 'itemmaster."groupId"' } },
+          onClause: {
+            'ig."itemGroupId"': {
+              "=": 'itemmaster."groupId"',
+            },
+          },
         },
       ],
       {
@@ -118,6 +238,8 @@ const getStockReportDetails = async (req, res) => {
         'itemmaster."itemName"',
         'itemmaster."hsnCode"',
         'itemmaster."unit"',
+        'itemmaster."openingStock"',
+        'itemmaster."stockValue"',
         'ic."categoryName" AS "categoryName"',
         'ig."groupName" AS "groupName"',
       ],
@@ -126,70 +248,161 @@ const getStockReportDetails = async (req, res) => {
       0
     );
 
-    if (itemRows.length === 0) return requiredmessage(res, "Item not found.");
-    const item = itemRows[0];
+    if (itemRows.length === 0) {
+      return requiredmessage(res, "Item not found.");
+    }
 
-    // ---- Verified rows hi, aur jinme stock abhi bhi bacha ho ----
-    const details = await selectWithJoins(
+    const item = itemRows[0];
+    const openingStock = Number(item.openingStock) || 0;
+    const stockValue = Number(item.stockValue) || 0;
+
+    // ---------------------------------------------------------
+    // 2. ALL VERIFIED PURCHASE DETAILS
+    // ---------------------------------------------------------
+    const purchaseDetails = await selectWithJoins(
       "purchasedetails",
       [],
-      { itemId, companyId, verified: true, delete: 0 },
-      ["purchaseDetailsId", "purchaseId", "qty", "rate", "total", "currentStock", "created"],
+      {
+        itemId,
+        companyId,
+        verified: true,
+        delete: 0,
+      },
+      [
+        "purchaseDetailsId",
+        "purchaseId",
+        "qty",
+        "rate",
+        "total",
+        "currentStock",
+        "created",
+      ]
     );
 
-    // ✅ current stock 0 ho gaya ho to wo row list me show nahi hogi
-    const remainingDetails = details.filter((d) => Number(d.currentStock) > 0);
+    // ---------------------------------------------------------
+    // 3. PURCHASE HEADER MAP
+    // ---------------------------------------------------------
+    const purchaseIds = [
+      ...new Set(purchaseDetails.map((d) => d.purchaseId).filter(Boolean)),
+    ];
 
-    const purchaseIds = [...new Set(remainingDetails.map((d) => d.purchaseId))];
     let purchaseMap = {};
     if (purchaseIds.length) {
       const purchases = await selectWithJoins(
-        "purchase", [], { purchaseId: purchaseIds, companyId, delete: 0 },
-        ["purchaseId", "purchaseBillNo", "purchaseDate", "accountId"],
+        "purchase",
+        [],
+        {
+          purchaseId: purchaseIds,
+          companyId,
+          delete: 0,
+        },
+        ["purchaseId", "purchaseBillNo", "purchaseDate", "accountId"]
       );
-      purchases.forEach((p) => { purchaseMap[p.purchaseId] = p; });
+
+      purchases.forEach((p) => {
+        purchaseMap[p.purchaseId] = p;
+      });
     }
 
-    const accountIds = [...new Set(Object.values(purchaseMap).map((p) => p.accountId).filter(Boolean))];
-    let accountMap = {};
-    if (accountIds.length) {
-      const accounts = await selectWithJoins(
-        "account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName"],
-      );
-      accounts.forEach((a) => { accountMap[a.id] = a; });
-    }
+    // ---------------------------------------------------------
+    // 4. CURRENT STOCK + AVG PURCHASE PRICE
+    // ---------------------------------------------------------
+    let totalPurchaseQty = 0;
+    let totalPurchaseValue = 0;
 
-    const rows = remainingDetails.map((d) => {
-      const purchase = purchaseMap[d.purchaseId] || {};
-      const account = accountMap[purchase.accountId] || {};
-      return {
-        id: String(d.purchaseDetailsId),
-        date: purchase.purchaseDate || "",
-        partyName: account.accountName || "",
-        billNo: purchase.purchaseBillNo || "",
-        qty: String(d.qty),
-        billAmount: String(d.total),
-        currentStock: String(d.currentStock),
-      };
+    purchaseDetails.forEach((d) => {
+      const qty = Number(d.qty) || 0;
+      const rate = Number(d.rate) || 0;
+      totalPurchaseQty += qty;
+      totalPurchaseValue += qty * rate;
     });
 
+    const currentStock = openingStock + totalPurchaseQty;
+
+    // Average purchase price from verified purchases
+    let purchasePrice = 0;
+    if (totalPurchaseQty > 0) {
+      purchasePrice = totalPurchaseValue / totalPurchaseQty;
+    }
+
+    // ---------------------------------------------------------
+    // 5. HISTORY ROWS
+    // ---------------------------------------------------------
+    const rows = [];
+
+    // Opening entry (always first)
+    // qty     = openingStock
+    // balance = stockValue
+    rows.push({
+      id: "opening",
+      date: "",
+      type: "Opening",
+      qty: String(openingStock),
+      balance: String(stockValue),
+    });
+
+    // Running quantity balance
+    let runningQtyBalance = openingStock;
+
+    // Sort purchases oldest → newest
+    const sortedPurchases = [...purchaseDetails].sort((a, b) => {
+      const dateA = purchaseMap[a.purchaseId]?.purchaseDate || "";
+      const dateB = purchaseMap[b.purchaseId]?.purchaseDate || "";
+      return dateA.localeCompare(dateB);
+    });
+
+    sortedPurchases.forEach((d) => {
+      const purchase = purchaseMap[d.purchaseId] || {};
+      const qty = Number(d.qty) || 0;
+
+      runningQtyBalance += qty;
+
+      rows.push({
+        id: String(d.purchaseDetailsId),
+        date: purchase.purchaseDate || "",
+        type: "Purchase",
+        qty: String(qty),
+        balance: String(runningQtyBalance),
+      });
+    });
+
+    // ---------------------------------------------------------
+    // 6. FINAL RESPONSE
+    // ---------------------------------------------------------
     return successResponse(
       res,
       {
         itemId: String(item.itemId),
         itemCode: item.itemCode || "",
         itemName: item.itemName || "",
-        hsnCode: item.hsnCode || "",
+
+        // Cards
+        currentStock: String(currentStock),
+        purchasePrice: purchasePrice.toFixed(2),
         unit: item.unit || "",
-        categoryName: item.categoryName || "",
-        groupName: item.groupName || "",
+
+        // Item Details
+        hsnCode: item.hsnCode || "",
+        brand: "",                         // no brand column → empty
+        category: item.categoryName || "",
+        group: item.groupName || "",
+
+        // History
         rows,
       },
-      "Stock report details fetched successfully",
+      "Stock report details fetched successfully"
     );
   } catch (error) {
-    return errorResponse(res, error.message || "Something Went Wrong", error);
+    return errorResponse(
+      res,
+      error.message || "Something Went Wrong",
+      error
+    );
   }
 };
 
-module.exports = { getStockReportList, getStockReportDetails };
+
+module.exports = {
+  getStockReportList,
+  getStockReportDetails,
+};
