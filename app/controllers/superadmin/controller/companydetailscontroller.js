@@ -6,7 +6,7 @@ const {
   updateModel,
   selectWithJoins,
   selectWithJoinsV2,
-  getBlobTempPublicUrl
+  getBlobTempPublicUrl,
 } = require("../../../helper/index.js");
 
 const fs = require("fs");
@@ -31,9 +31,7 @@ const CATEGORY_MASTER_LIST = [
   "SUPD & RUPD",
   "Tool Box",
   "Spare Wheel Carrier",
-    "Finished Goods",
-  
- 
+  "Finished Goods",
 ];
 
 const syncDefaultItemCategories = async (companyId) => {
@@ -43,36 +41,73 @@ const syncDefaultItemCategories = async (companyId) => {
     console.log("companyId:", companyId);
     console.log("========================================");
 
+    // Get ALL categories of this company.
+    // Important: do NOT filter categoryType/delete here.
     const existingRows = await selectWithJoins(
       "itemcategory",
       [],
       {
         companyId,
-        categoryType: "default",
-        delete: 0,
       },
-      ["itemCategoryId", "categoryName", "categoryType"]
+      ["itemCategoryId", "categoryName", "categoryType", "status", "delete"],
     );
 
-    console.log("Existing default categories:", existingRows.length);
-    console.log("Existing rows:", existingRows);
+    console.log("Existing categories count:", existingRows.length);
 
-    const existingNames = new Set(
-      existingRows.map((r) => r.categoryName)
-    );
+    for (const categoryName of CATEGORY_MASTER_LIST) {
+      const existing = existingRows.find(
+        (row) =>
+          String(row.categoryName || "")
+            .trim()
+            .toLowerCase() === categoryName.trim().toLowerCase(),
+      );
 
-    const missingCategories = CATEGORY_MASTER_LIST.filter(
-      (name) => !existingNames.has(name)
-    );
+      // ==========================================
+      // CASE 1 / CASE 2
+      // Category exists
+      // ==========================================
+      if (existing) {
+        console.log(`Category exists: ${categoryName}`, {
+          id: existing.itemCategoryId,
+          categoryType: existing.categoryType,
+          status: existing.status,
+          delete: existing.delete,
+        });
 
-    console.log("Master category count:", CATEGORY_MASTER_LIST.length);
-    console.log("Missing category count:", missingCategories.length);
-    console.log("Missing categories:", missingCategories);
+        const isCorrectDefault =
+          String(existing.categoryType || "").toLowerCase() === "default" &&
+          Number(existing.delete) === 0;
 
-    for (const categoryName of missingCategories) {
-      console.log("Creating category:", categoryName);
+        if (!isCorrectDefault) {
+          console.log(`Repairing category: ${categoryName}`);
 
-      await saveModel("itemcategory", {
+          const updateResult = await updateModel(
+            "itemcategory",
+            {
+              categoryType: "default",
+              status: "active",
+              delete: 0,
+              updated: new Date(),
+            },
+            {
+              itemCategoryId: existing.itemCategoryId,
+              companyId,
+            },
+          );
+
+          console.log(`Category repaired: ${categoryName}`, updateResult);
+        }
+
+        continue;
+      }
+
+      // ==========================================
+      // CASE 3
+      // Category does NOT exist
+      // ==========================================
+      console.log(`Category missing. Creating: ${categoryName}`);
+
+      const created = await saveModel("itemcategory", {
         companyId,
         categoryName,
         categoryType: "default",
@@ -80,29 +115,25 @@ const syncDefaultItemCategories = async (companyId) => {
         delete: 0,
       });
 
-      console.log("Created category:", categoryName);
+      console.log(`Category created: ${categoryName}`, created);
     }
 
     console.log("========================================");
     console.log("SYNC DEFAULT ITEM CATEGORIES SUCCESS");
     console.log("========================================");
 
-    return missingCategories;
+    return true;
   } catch (error) {
     console.error("========================================");
     console.error("SYNC DEFAULT ITEM CATEGORIES ERROR");
     console.error("Error name:", error?.name);
     console.error("Error message:", error?.message);
     console.error("Error stack:", error?.stack);
-    console.error("Full error:", error);
-    console.error("companyId:", companyId);
     console.error("========================================");
 
     throw error;
   }
 };
-
-
 
 // ---- Create Company Details + Financial Year ----
 const createCompanyDetails = async (req, res) => {
@@ -177,7 +208,10 @@ const createCompanyDetails = async (req, res) => {
       delete: 0,
     };
 
-    const companyDetailsData = await saveModel("companydetails", companyDetailsPayload);
+    const companyDetailsData = await saveModel(
+      "companydetails",
+      companyDetailsPayload,
+    );
     const companyDetailsId = companyDetailsData?.companyDetailsId;
 
     if (!companyDetailsId) {
@@ -193,19 +227,22 @@ const createCompanyDetails = async (req, res) => {
       delete: 0,
     };
 
-    const financialYearData = await saveModel("financialyear", financialYearPayload);
+    const financialYearData = await saveModel(
+      "financialyear",
+      financialYearPayload,
+    );
     const financialYearId = financialYearData?.financialYearId;
 
     if (!financialYearId) {
       return errorResponse(res, "Failed to save financial year details");
     }
 
-             await syncDefaultItemCategories(companyId);
+    await syncDefaultItemCategories(companyId);
 
     return successResponse(
       res,
       { companyDetailsId, financialYearId },
-      "Company details saved successfully."
+      "Company details saved successfully.",
     );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -224,7 +261,7 @@ const getCompanyIdFromToken = async (req) => {
     "company",
     [],
     { token, delete: 0 },
-    ["companyId"]
+    ["companyId"],
   );
 
   if (companyRows.length === 0) {
@@ -240,7 +277,10 @@ const getFinancialYears = async (req, res) => {
     const companyId = await getCompanyIdFromToken(req);
 
     if (!companyId) {
-      return requiredmessage(res, "Invalid or expired session. Please login again.");
+      return requiredmessage(
+        res,
+        "Invalid or expired session. Please login again.",
+      );
     }
 
     const tableName = "financialyear";
@@ -249,7 +289,9 @@ const getFinancialYears = async (req, res) => {
         table: "companydetails",
         alias: "cd",
         onClause: {
-          '"cd"."companyDetailsId"': { "=": '"financialyear"."companyDetailsId"' },
+          '"cd"."companyDetailsId"': {
+            "=": '"financialyear"."companyDetailsId"',
+          },
         },
       },
     ];
@@ -275,7 +317,7 @@ const getFinancialYears = async (req, res) => {
       attributes,
       order,
       null,
-      0
+      0,
     );
 
     return successResponse(res, rows, "Financial years fetched successfully.");
@@ -290,7 +332,10 @@ const getCompanyDetails = async (req, res) => {
     const companyId = await getCompanyIdFromToken(req);
 
     if (!companyId) {
-      return requiredmessage(res, "Invalid or expired session. Please login again.");
+      return requiredmessage(
+        res,
+        "Invalid or expired session. Please login again.",
+      );
     }
 
     const companyDetailsId = req.query.companyDetailsId;
@@ -337,8 +382,8 @@ const getCompanyDetails = async (req, res) => {
         "bankAccountNo",
         "branchName",
         "ifscCode",
-        "logo",   // 👈 add karo
-      ]
+        "logo", // 👈 add karo
+      ],
     );
 
     if (rows.length === 0) {
@@ -398,7 +443,7 @@ const updateCompanyDetails = async (req, res) => {
       "companydetails",
       [],
       { companyDetailsId, companyId, delete: 0 },
-      ["companyDetailsId", "logo"]
+      ["companyDetailsId", "logo"],
     );
 
     if (existing.length === 0) {
@@ -449,11 +494,10 @@ const updateCompanyDetails = async (req, res) => {
       }
     }
 
-    await updateModel(
-      "companydetails",
-      updatePayload,
-      { companyDetailsId, companyId }
-    );
+    await updateModel("companydetails", updatePayload, {
+      companyDetailsId,
+      companyId,
+    });
 
     return successResponse(res, {}, "Company details updated successfully.");
   } catch (error) {
