@@ -1,0 +1,71 @@
+const { errorResponse } = require("../../helper/index.js");
+const itemmaster = require("../../controllers/superadmin/controller/itemmastercontroller.js");
+const itemmasterValidation = require("../../controllers/superadmin/validator/itemmastervalidator.js");
+const { employeeAuth } = require("../../helper/employeeAuth.js");
+
+var routes = require("express").Router();
+
+const validate = (schema) => (req, res, next) => {
+  const { error } = schema.validate(req.body);
+  if (error) {
+    const message = error.details.map((i) => i.message).join(",");
+    console.log("error", message);
+    return errorResponse(res, message);
+  }
+  next();
+};
+
+module.exports = (app) => {
+  routes.use(employeeAuth);
+
+  // ───── Static / named GET routes — hamesha "/:id" se PEHLE ─────
+  routes.get("/list", itemmaster.getItemMasterList);
+  routes.get("/finished-goods/list", itemmaster.getFinishedGoodsItemList);
+  routes.get("/vehicle-list", itemmaster.getVehicleItemList);
+  routes.get("/generate-barcode", itemmaster.getNextBarcode);
+  routes.get("/barcode/:barcode", itemmaster.getItemByBarcode);
+  routes.get("/purchase-list", itemmaster.getPurchaseItemList);
+
+  // ───── POST / PUT / DELETE routes (method alag hai, order matter nahi karta) ─────
+  routes.post(
+    "/create",
+    validate(itemmasterValidation.createItemMaster),
+    itemmaster.createItemMaster
+  );
+  routes.put(
+    "/update",
+    validate(itemmasterValidation.updateItemMaster),
+    itemmaster.updateItemMaster
+  );
+  routes.delete(
+    "/delete",
+    validate(itemmasterValidation.deleteItemMaster),
+    itemmaster.deleteItemMaster
+  );
+  routes.put(
+    "/set-barcode",
+    validate(itemmasterValidation.setItemBarcode),
+    itemmaster.setItemBarcode
+  );
+  routes.post(
+    "/auto-generate",
+    validate(itemmasterValidation.autoGenerateItemBarcode),
+    itemmaster.autoGenerateItemBarcode
+  );
+  routes.post(
+    "/bulk-generate",
+    validate(itemmasterValidation.bulkAutoGenerateBarcode),
+    itemmaster.bulkAutoGenerateBarcode
+  );
+  routes.post(
+    "/bulk-import",
+    validate(itemmasterValidation.bulkImportItemMaster),
+    itemmaster.bulkImportItemMaster
+  );
+
+  // ───── Generic dynamic GET route — hamesha SABSE AAKHIR me ─────
+  routes.get("/:id", itemmaster.getItemMasterById);
+
+  // ⭐ YAHI FIX HAI — employee ke frontend calls isi base path se match karenge
+  app.use("/employee/sales-executive", routes);
+};
