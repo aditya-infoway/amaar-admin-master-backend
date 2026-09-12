@@ -35,4 +35,5 @@ module.exports = (app) => {
     require("./salesorder.routes")(app);
      require("./workorder.routes")(app);
      require("./location.routes")(app);
+     require("./materialavailability.routes")(app);
 };

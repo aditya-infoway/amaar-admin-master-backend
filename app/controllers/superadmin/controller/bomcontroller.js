@@ -169,7 +169,7 @@ const createBom = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { bomName, bomCode, status, items } = req.body;
+    const { bomName, bomCode, status, items, finishedGoodsItemId } = req.body;
 
     // duplicate bomCode check (company level)
     const existing = await Bom.findOne({
@@ -198,6 +198,7 @@ const createBom = async (req, res) => {
     const header = await Bom.create(
       {
         companyId,
+           finishedGoodsItemId: finishedGoodsItemId || null,
         bomName,
         bomCode,
         status: status || "active",
@@ -324,7 +325,7 @@ const updateBom = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { bomId, bomName, bomCode, status, items } = req.body;
+    const { bomId, bomName, bomCode, status, items, finishedGoodsItemId } = req.body;
 
     const header = await Bom.findOne({
       where: { bomId, companyId, delete: 0 },
@@ -350,7 +351,7 @@ const updateBom = async (req, res) => {
     }
 
     await header.update(
-      { bomName, bomCode, status: status || "active", updated: new Date() },
+      { bomName, bomCode, status: status || "active",  finishedGoodsItemId: finishedGoodsItemId ?? header.finishedGoodsItemId, updated: new Date() },
       { transaction: t },
     );
 
