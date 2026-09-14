@@ -1,6 +1,6 @@
 const Joi = require("joi");
 
-const departmentValues = ["sale", "production", "security"];
+const departmentValues = ["sale", "production", "security","hrms"];
 
 const createEmployee = Joi.object().keys({
   department: Joi.string().valid(...departmentValues).required().messages({
