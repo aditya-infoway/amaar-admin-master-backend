@@ -139,7 +139,7 @@ const getMaterialAvailability = async (req, res) => {
       "itemmaster",
       [],
       { itemId: itemIds, companyId, delete: 0 },
-      ["itemId", "itemCode", "itemName", "itemLocation", "unit", "openingStock", "itemCategoryId"],
+      ["itemId", "itemCode", "itemName", "itemLocation", "unit", "openingStock", "itemCategoryId", "hsnCode", "taxSlab"],
     );
 
     const categoryIds = [...new Set(itemDetails.map((i) => i.itemCategoryId).filter(Boolean))];
@@ -179,6 +179,8 @@ const getMaterialAvailability = async (req, res) => {
         itemLocation: item ? item.itemLocation || "" : "",
         category: item ? item.categoryName || "" : "",
         unit: item ? item.unit || "" : "",
+        hsnCode: item ? item.hsnCode || "" : "",
+        taxSlab: item ? item.taxSlab || "" : "",
         availableStock,
         requiredStock,
         purchaseRequired, // 0 = nothing to buy, >0 = qty still short

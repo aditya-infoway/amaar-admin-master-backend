@@ -33,59 +33,37 @@ const getItemSupplierInfo = async (req, res) => {
     const { itemId } = req.params;
     if (!itemId) return errorResponse(res, "Item id is required.");
 
-    // ---- purchase (bill) history se: is item ko jitne suppliers se kharida he wo sab, latest-first ----
-    const rows = await selectWithJoinsV2(
-      "purchasedetails",
-      [
-        { table: "purchase", alias: "p", onClause: { 'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' } } },
-        { table: "account", alias: "a", onClause: { "a.id": { "=": 'p."accountId"' } } },
-      ],
+    // ---- directly list Sundry Creditor / Supplier accounts (groupId 30, 34) ----
+    const supplierRows = await selectWithJoinsV2(
+      "account",
+      [],
       {
-        'purchasedetails."itemId"': itemId,
-        'purchasedetails."companyId"': companyId,
-        'purchasedetails."delete"': 0,
-        'p."delete"': 0,
+        'account."companyId"': companyId,
+        'account."groupId"': { IN: "(30,34)" },
+        'account."delete"': 0,
       },
       [
-        'a.id AS "supplierId"',
-        'a."accountName" AS "supplierName"',
-        "purchasedetails.rate AS \"rate\"",
-        "purchasedetails.qty AS \"qty\"",
-        'p."purchaseDate" AS "purchaseDate"',
-        'p."purchaseBillNo" AS "purchaseBillNo"',
-        'p."purchaseId" AS "purchaseId"',
+        "account.id AS \"supplierId\"",
+        'account."accountName" AS "supplierName"',
+        'account."mobileNo"',
+        'account."stateName"',
       ],
-      [['p."purchaseId"', "DESC"]],
+      [['account."accountName"', "ASC"]],
       0, 0
     );
 
-    // ---- har supplier ka sirf LAST (latest) purchase record — rows already DESC he, isliye pehla match hi rakho ----
-    const seen = new Set();
-    const supplierRows = [];
-    rows.forEach((row) => {
-      if (!seen.has(row.supplierId)) {
-        seen.add(row.supplierId);
-        supplierRows.push(row);
-      }
-    });
-
-    // ---- lowest rate wala supplier sabse upar => Recommended ----
-    supplierRows.sort((x, y) => Number(x.rate) - Number(y.rate));
-
     // ---- koi purchase history nahi mili to itemmaster se fallback rate ----
     let fallback = null;
-    if (supplierRows.length === 0) {
-      const itemRows = await selectWithJoins(
-        "itemmaster", [], { itemId, companyId, delete: 0 }, ["purchasePrice", "taxSlab", "unit", "hsnCode"]
-      );
-      if (itemRows.length > 0) fallback = itemRows[0];
-    }
+    const itemRows = await selectWithJoins(
+      "itemmaster", [], { itemId, companyId, delete: 0 }, ["taxSlab", "unit", "hsnCode"]
+    );
+    if (itemRows.length > 0) fallback = itemRows[0];
 
     return successResponse(
       res,
       {
-        suppliers: supplierRows,       // lowest-rate-first, sorted
-        lastPurchase: rows[0] || null, // is item ki sabse recent purchase (kisi bhi supplier se)
+        suppliers: supplierRows,   // all Sundry Creditor / Supplier accounts
+        lastPurchase: null,
         fallback,
       },
       "Item supplier info fetched successfully"
@@ -129,7 +107,7 @@ const createPurchaseOrder = async (req, res) => {
 
     for (const row of items) {
       if (!row.itemId) return errorResponse(res, `Item id missing for "${row.itemName || "an item"}".`);
-      if (!row.qty || row.qty <= 0) return errorResponse(res, `Invalid quantity for "${row.itemName}".`);
+      if (row.qty === undefined || row.qty === null || row.qty < 0) return errorResponse(res, `Invalid quantity for "${row.itemName}".`);
 
       const itemRows = await selectWithJoins("itemmaster", [], { itemId: row.itemId, companyId, delete: 0 }, ["itemId"]);
       if (itemRows.length === 0) return errorResponse(res, `Item "${row.itemName}" not found or invalid.`);
@@ -293,7 +271,85 @@ const getPurchaseOrderById = async (req, res) => {
   }
 };
 
+
+
+// ---------------- GET INDENT ITEMS FOR PO (Indent Details tab) ----------------
+const getIndentItemsForPO = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { indentId } = req.params;
+    if (!indentId) return errorResponse(res, "Indent id is required.");
+
+    const indentRows = await selectWithJoins(
+      "indent",
+      [],
+      { indentId, companyId, delete: 0 },
+      ["indentId", "indentNo"]
+    );
+    if (indentRows.length === 0) {
+      return errorResponse(res, "Indent not found.");
+    }
+
+    const items = await selectWithJoins(
+      "indentitem",
+      [],
+      { indentId, companyId },
+      [
+        "indentItemId",
+        "itemId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "taxSlab",
+        "unit",
+        "purchaseRequired",
+        "requiredStock",
+        "availableStock",
+      ]
+    );
+
+    // ★ Fix: if itemId is null, try to find it from itemmaster using itemCode
+    const data = [];
+    for (const item of items) {
+      let finalItemId = item.itemId;
+
+      if (!finalItemId && item.itemCode) {
+        const master = await selectWithJoins(
+          "itemmaster",
+          [],
+          { itemCode: item.itemCode, companyId, delete: 0 },
+          ["itemId"]
+        );
+        if (master.length > 0) {
+          finalItemId = master[0].itemId;
+        }
+      }
+
+      data.push({
+        id: item.indentItemId,
+        itemId: finalItemId,                    // ← now will have value
+        itemCode: item.itemCode || "",
+        itemName: item.itemName || "",
+        hsn: item.hsnCode || "",
+        hsnCode: item.hsnCode || "",
+        unit: item.unit || "",
+        qty: Number(item.purchaseRequired) || 0,
+        rate: 0,
+        gstPct: parseFloat(item.taxSlab) || 0,
+        taxSlab: item.taxSlab || "",
+      });
+    }
+
+    return successResponse(res, data, "Indent items fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextPoNumber, getItemSupplierInfo,
   createPurchaseOrder, getPurchaseOrderList, getPurchaseOrderById,
+  getIndentItemsForPO,
 };

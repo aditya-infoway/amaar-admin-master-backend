@@ -34,13 +34,9 @@ const CATEGORY_MASTER_LIST = [
   "Finished Goods",
 ];
 
+
 const syncDefaultItemCategories = async (companyId) => {
   try {
-    console.log("========================================");
-    console.log("SYNC DEFAULT ITEM CATEGORIES START");
-    console.log("companyId:", companyId);
-    console.log("========================================");
-
     // Get ALL categories of this company.
     // Important: do NOT filter categoryType/delete here.
     const existingRows = await selectWithJoins(
@@ -52,8 +48,6 @@ const syncDefaultItemCategories = async (companyId) => {
       ["itemCategoryId", "categoryName", "categoryType", "status", "delete"],
     );
 
-    console.log("Existing categories count:", existingRows.length);
-
     for (const categoryName of CATEGORY_MASTER_LIST) {
       const existing = existingRows.find(
         (row) =>
@@ -62,26 +56,14 @@ const syncDefaultItemCategories = async (companyId) => {
             .toLowerCase() === categoryName.trim().toLowerCase(),
       );
 
-      // ==========================================
-      // CASE 1 / CASE 2
       // Category exists
-      // ==========================================
       if (existing) {
-        console.log(`Category exists: ${categoryName}`, {
-          id: existing.itemCategoryId,
-          categoryType: existing.categoryType,
-          status: existing.status,
-          delete: existing.delete,
-        });
-
         const isCorrectDefault =
           String(existing.categoryType || "").toLowerCase() === "default" &&
           Number(existing.delete) === 0;
 
         if (!isCorrectDefault) {
-          console.log(`Repairing category: ${categoryName}`);
-
-          const updateResult = await updateModel(
+          await updateModel(
             "itemcategory",
             {
               categoryType: "default",
@@ -94,46 +76,28 @@ const syncDefaultItemCategories = async (companyId) => {
               companyId,
             },
           );
-
-          console.log(`Category repaired: ${categoryName}`, updateResult);
         }
 
         continue;
       }
 
-      // ==========================================
-      // CASE 3
       // Category does NOT exist
-      // ==========================================
-      console.log(`Category missing. Creating: ${categoryName}`);
-
-      const created = await saveModel("itemcategory", {
+      await saveModel("itemcategory", {
         companyId,
         categoryName,
         categoryType: "default",
         status: "active",
         delete: 0,
       });
-
-      console.log(`Category created: ${categoryName}`, created);
     }
-
-    console.log("========================================");
-    console.log("SYNC DEFAULT ITEM CATEGORIES SUCCESS");
-    console.log("========================================");
 
     return true;
   } catch (error) {
-    console.error("========================================");
-    console.error("SYNC DEFAULT ITEM CATEGORIES ERROR");
-    console.error("Error name:", error?.name);
-    console.error("Error message:", error?.message);
-    console.error("Error stack:", error?.stack);
-    console.error("========================================");
-
     throw error;
   }
 };
+
+
 
 // ---- Create Company Details + Financial Year ----
 const createCompanyDetails = async (req, res) => {
