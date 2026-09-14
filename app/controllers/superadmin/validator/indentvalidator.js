@@ -22,6 +22,8 @@ const validateIndent = Joi.object().keys({
         itemId: Joi.number().allow(null),
         itemCode: Joi.string().trim().allow("", null),
         itemName: Joi.string().trim().allow("", null),
+        hsnCode: Joi.string().trim().allow("", null),
+        taxSlab: Joi.string().trim().allow("", null),
         itemLocation: Joi.string().trim().allow("", null),
         category: Joi.string().trim().allow("", null),
         unit: Joi.string().trim().allow("", null),

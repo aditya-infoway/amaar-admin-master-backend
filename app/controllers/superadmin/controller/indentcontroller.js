@@ -18,8 +18,13 @@ const getNextIndentNo = async (req, res) => {
   try {
     const companyId = req.companyId;
     const { financialYearId } = req.query;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
-    if (!financialYearId) return errorResponse(res, "Financial Year not found. Please select a company year.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId)
+      return errorResponse(
+        res,
+        "Financial Year not found. Please select a company year.",
+      );
 
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) return errorResponse(res, "Invalid Financial Year.");
@@ -48,7 +53,8 @@ const getNextIndentNo = async (req, res) => {
 const checkIndentForWorkOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { workOrderId } = req.params;
     if (!workOrderId) return errorResponse(res, "Work Order id is required.");
@@ -61,7 +67,11 @@ const checkIndentForWorkOrder = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return successResponse(res, { exists: false }, "No indent found for this work order");
+      return successResponse(
+        res,
+        { exists: false },
+        "No indent found for this work order",
+      );
     }
 
     return successResponse(
@@ -85,11 +95,15 @@ const createIndent = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { financialYearId, workOrderId, modelItemId, modelName, items } = req.body;
+    const { financialYearId, workOrderId, modelItemId, modelName, items } =
+      req.body;
 
     if (!financialYearId) {
       await t.rollback();
-      return errorResponse(res, "Financial Year not found. Please select a company year.");
+      return errorResponse(
+        res,
+        "Financial Year not found. Please select a company year.",
+      );
     }
     if (!workOrderId) {
       await t.rollback();
@@ -127,7 +141,10 @@ const createIndent = async (req, res) => {
     );
     if (existing.length > 0) {
       await t.rollback();
-      return errorResponse(res, `Indent already generated for this Work Order (${existing[0].indentNo}).`);
+      return errorResponse(
+        res,
+        `Indent already generated for this Work Order (${existing[0].indentNo}).`,
+      );
     }
 
     // ---- indent number, same voucher-style numbering as Work Order / PO ----
@@ -163,6 +180,8 @@ const createIndent = async (req, res) => {
           itemId: row.itemId || null,
           itemCode: row.itemCode || "",
           itemName: row.itemName || "",
+          hsnCode: row.hsnCode || "",
+          taxSlab: row.taxSlab || "",
           itemLocation: row.itemLocation || "",
           category: row.category || "",
           unit: row.unit || "",
@@ -183,7 +202,10 @@ const createIndent = async (req, res) => {
   } catch (error) {
     await t.rollback();
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "Indent already generated for this Work Order.");
+      return errorResponse(
+        res,
+        "Indent already generated for this Work Order.",
+      );
     }
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
@@ -193,7 +215,8 @@ const createIndent = async (req, res) => {
 const getIndentList = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { financialYearId } = req.query;
     const where = { companyId, delete: 0 };
@@ -206,7 +229,8 @@ const getIndentList = async (req, res) => {
       ["indentId", "indentNo", "workOrderId", "modelName", "created"],
       [["indentId", "DESC"]],
     );
-    if (!indents.length) return successResponse(res, [], "Indent list fetched successfully");
+    if (!indents.length)
+      return successResponse(res, [], "Indent list fetched successfully");
 
     const workOrderIds = [...new Set(indents.map((i) => i.workOrderId))];
     const workOrders = await selectWithJoins(
@@ -215,7 +239,9 @@ const getIndentList = async (req, res) => {
       { workOrderId: workOrderIds, companyId, delete: 0 },
       ["workOrderId", "workOrderNo"],
     );
-    const woMap = new Map(workOrders.map((w) => [w.workOrderId, w.workOrderNo]));
+    const woMap = new Map(
+      workOrders.map((w) => [w.workOrderId, w.workOrderNo]),
+    );
 
     const data = indents.map((i) => ({
       id: String(i.indentId),
@@ -236,7 +262,8 @@ const getIndentList = async (req, res) => {
 const getIndentById = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { id } = req.params;
 
@@ -256,6 +283,8 @@ const getIndentById = async (req, res) => {
         "indentItemId",
         "itemCode",
         "itemName",
+        "hsnCode",
+        "taxSlab",
         "itemLocation",
         "category",
         "unit",
@@ -286,10 +315,47 @@ const getIndentById = async (req, res) => {
   }
 };
 
+
+
+
+
+// ---------------- GET INDENTS FOR PO DROPDOWN ----------------
+const getIndentsForPO = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { financialYearId } = req.query;
+    const where = { companyId, delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const indents = await selectWithJoins(
+      "indent",
+      [],
+      where,
+      ["indentId", "indentNo", "workOrderId", "modelName", "created"],
+      [["indentId", "DESC"]]
+    );
+
+    const data = indents.map((i) => ({
+      id: i.indentId,
+      indentId: i.indentId,
+      indentNo: i.indentNo,
+      label: i.indentNo,           // for Combobox display
+      modelName: i.modelName || "",
+    }));
+
+    return successResponse(res, data, "Indents fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextIndentNo,
   checkIndentForWorkOrder,
   createIndent,
   getIndentList,
   getIndentById,
+  getIndentsForPO,
 };

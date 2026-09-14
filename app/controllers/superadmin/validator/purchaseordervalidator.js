@@ -19,7 +19,7 @@ const createPurchaseOrder = Joi.object().keys({
       itemName: Joi.string().required(),
       hsnCode: Joi.string().allow("", null),
       uom: Joi.string().allow("", null),
-      qty: Joi.number().greater(0).required().messages({ "number.greater": "Qty must be greater than 0" }),
+      qty: Joi.number().allow(null, "").required().messages({ "any.required": "Quantity is required" }),
       rate: Joi.number().min(0).required(),
       discount: Joi.number().min(0).max(100).allow(null, "").default(0),
       gstPct: Joi.number().min(0).required(),

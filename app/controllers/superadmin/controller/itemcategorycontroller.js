@@ -54,15 +54,9 @@ const createItemCategory = async (req, res) => {
 // ---------------- LIST ----------------
 const getItemCategoryList = async (req, res) => {
   try {
-    console.log("========================================");
-    console.log("GET ITEM CATEGORY LIST START");
-    console.log("req.companyId:", req.companyId);
-    console.log("========================================");
-
     const companyId = req.companyId;
 
     if (!companyId) {
-      console.error("ITEM CATEGORY ERROR: companyId missing");
       return requiredmessage(
         res,
         "Unauthorized. Please login again."
@@ -72,16 +66,9 @@ const getItemCategoryList = async (req, res) => {
     try {
       await syncDefaultItemCategories(companyId);
     } catch (syncError) {
-      console.error("DEFAULT CATEGORY SYNC FAILED");
-      console.error("sync error name:", syncError?.name);
-      console.error("sync error message:", syncError?.message);
-      console.error("sync error stack:", syncError?.stack);
-
       // TEMPORARY:
       // Don't stop category listing if sync fails.
     }
-
-    console.log("Fetching item categories for company:", companyId);
 
     const list = await selectWithJoins(
       "itemcategory",
@@ -101,13 +88,6 @@ const getItemCategoryList = async (req, res) => {
       [["itemCategoryId", "DESC"]]
     );
 
-    console.log("Item category DB result count:", list.length);
-    console.log("Item category DB result:", list);
-
-    console.log("========================================");
-    console.log("GET ITEM CATEGORY LIST SUCCESS");
-    console.log("========================================");
-
     return successResponse(
       res,
       list,
@@ -115,15 +95,6 @@ const getItemCategoryList = async (req, res) => {
     );
 
   } catch (error) {
-    console.error("========================================");
-    console.error("GET ITEM CATEGORY LIST ERROR");
-    console.error("Error name:", error?.name);
-    console.error("Error message:", error?.message);
-    console.error("Error stack:", error?.stack);
-    console.error("Full error:", error);
-    console.error("req.companyId:", req.companyId);
-    console.error("========================================");
-
     return errorResponse(
       res,
       "Something Went Wrong",

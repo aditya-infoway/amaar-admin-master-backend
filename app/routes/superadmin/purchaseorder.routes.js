@@ -17,6 +17,7 @@ module.exports = (app) => {
   routes.get("/next-po-no", purchaseOrder.getNextPoNumber);
   routes.get("/item-suppliers/:itemId", purchaseOrder.getItemSupplierInfo);
   routes.get("/list", purchaseOrder.getPurchaseOrderList);
+  routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
   routes.get("/:id", purchaseOrder.getPurchaseOrderById);
 
   routes.post("/create", validate(purchaseOrderValidation.createPurchaseOrder), purchaseOrder.createPurchaseOrder);

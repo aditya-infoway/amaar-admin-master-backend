@@ -562,6 +562,242 @@ const getBankBook = async (req, res) => {
   }
 };
 
+
+
+
+// ---------------- CREATE CASH RECEIPT (Manual mode only) ----------------
+const createCashReceipt = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const {
+      cashAccountId, voucherNo, date, oppAccountId, amount, narration, financialYearId,
+      createdBy, createdType,
+    } = req.body;
+
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year in session.");
+
+    // ---- Voucher No duplicate protection ----
+    const dupCheck = await selectWithJoins(
+      "payment", [],
+      { companyId, financialYearId: fy.financialYearId, voucherType: "CASH RECEIPT", voucherNo, delete: 0 },
+      ["paymentId"]
+    );
+    if (dupCheck.length > 0) {
+      return errorResponse(res, "This voucher number already exists for this financial year.");
+    }
+
+    // ---- Cash account validate ----
+    const cashRows = await selectWithJoins("account", [], { id: cashAccountId, companyId, delete: 0 }, ["id"]);
+    if (cashRows.length === 0) return errorResponse(res, "Selected cash account is invalid.");
+
+    // ---- Opp account validate ----
+    const oppRows = await selectWithJoins("account", [], { id: oppAccountId, companyId, delete: 0 }, ["id"]);
+    if (oppRows.length === 0) return errorResponse(res, "Selected opp. account is invalid.");
+
+    // ---- Cash Receipt logic: Cash Account DR (paisa andar aaya), Opp Account CR ----
+    const payment = await saveModel("payment", {
+      companyId,
+      financialYearId: fy.financialYearId,
+      voucherType: "CASH RECEIPT",
+      paymentCollectedByModules: "CR",
+      voucherNo,
+      date,
+      selfAccountId: cashAccountId,
+      selfDrOrCr: "DR",
+      accountId: oppAccountId,
+      accountDrOrCr: "CR",
+      amount: Number(amount),
+      narration: narration || "",
+      paymentMode: "CASH",
+      createdBy: createdBy != null ? Number(createdBy) : companyId,
+      createdType: createdType || "Super Admin",
+      status: "active",
+      delete: 0,
+    });
+
+    // ---- Balance update — dono accounts ----
+    await updateAccountBalance(cashAccountId, amount, "DR", companyId);
+    await updateAccountBalance(oppAccountId, amount, "CR", companyId);
+
+    return successResponse(res, { id: payment.paymentId, voucherNo }, "Cash receipt saved successfully");
+  } catch (error) {
+    if (error?.name === "SequelizeUniqueConstraintError") {
+      return errorResponse(res, "This voucher number already exists for this financial year.");
+    }
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// ---------------- CREATE BANK RECEIPT (Manual mode only) ----------------
+const createBankReceipt = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const {
+      bankAccountId, voucherNo, date, oppAccountId, amount, transactionMode,
+      chequeNo, chequeDate, chequeClearDate, narration, financialYearId,
+      createdBy, createdType,
+    } = req.body;
+
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year in session.");
+
+    // ---- Voucher No duplicate protection ----
+    const dupCheck = await selectWithJoins(
+      "payment", [],
+      { companyId, financialYearId: fy.financialYearId, voucherType: "BANK RECEIPT", voucherNo, delete: 0 },
+      ["paymentId"]
+    );
+    if (dupCheck.length > 0) {
+      return errorResponse(res, "This voucher number already exists for this financial year.");
+    }
+
+    // ---- Bank account validate ----
+    const bankRows = await selectWithJoins("account", [], { id: bankAccountId, companyId, delete: 0 }, ["id"]);
+    if (bankRows.length === 0) return errorResponse(res, "Selected bank account is invalid.");
+
+    // ---- Opp account validate ----
+    const oppRows = await selectWithJoins("account", [], { id: oppAccountId, companyId, delete: 0 }, ["id"]);
+    if (oppRows.length === 0) return errorResponse(res, "Selected opp. account is invalid.");
+
+    // ---- Cheque mode ho to cheque fields double-check server side ----
+    const modeUpper = String(transactionMode || "").toUpperCase();
+    if (modeUpper === "CHEQUE" && (!chequeNo || !chequeDate)) {
+      return errorResponse(res, "Cheque number and cheque date are required for cheque mode.");
+    }
+
+    // ---- Bank Receipt logic: Bank Account DR (paisa andar aaya), Opp Account CR ----
+    const payment = await saveModel("payment", {
+      companyId,
+      financialYearId: fy.financialYearId,
+      voucherType: "BANK RECEIPT",
+      voucherNo,
+      paymentCollectedByModules: "BR",
+      date,
+      selfAccountId: bankAccountId,
+      selfDrOrCr: "DR",
+      accountId: oppAccountId,
+      accountDrOrCr: "CR",
+      amount: Number(amount),
+      narration: narration || "",
+      paymentMode: modeUpper,
+      chequeNo: modeUpper === "CHEQUE" ? chequeNo : null,
+      chequeDate: modeUpper === "CHEQUE" ? chequeDate : null,
+      chequeClearDate: modeUpper === "CHEQUE" ? (chequeClearDate || null) : null,
+      createdBy: createdBy != null ? Number(createdBy) : companyId,
+      createdType: createdType || "Super Admin",
+      status: "active",
+      delete: 0,
+    });
+
+    // ---- Balance update — dono accounts ----
+    await updateAccountBalance(bankAccountId, amount, "DR", companyId);
+    await updateAccountBalance(oppAccountId, amount, "CR", companyId);
+
+    return successResponse(res, { id: payment.paymentId, voucherNo }, "Bank receipt saved successfully");
+  } catch (error) {
+    if (error?.name === "SequelizeUniqueConstraintError") {
+      return errorResponse(res, "This voucher number already exists for this financial year.");
+    }
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// ---------------- LIST (Cash Receipt only) ----------------
+const getCashReceiptList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const { financialYearId } = req.query;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const where = { companyId, voucherType: "CASH RECEIPT", delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const rows = await selectWithJoins(
+      "payment", [], where,
+      [
+        "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
+        "amount", "narration", "createdBy", "createdType",
+      ]
+    );
+
+    if (!rows.length) return successResponse(res, [], "Cash receipt list fetched successfully");
+
+    const accountIds = [...new Set([...rows.map(r => r.selfAccountId), ...rows.map(r => r.accountId)])];
+    const accounts = await selectWithJoins("account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName"]);
+    const accMap = {};
+    accounts.forEach(a => { accMap[a.id] = a.accountName; });
+
+    const createdByMap = await resolveCreatedByNames(rows);
+
+    const data = rows.map(r => ({
+      id: String(r.paymentId),
+      voucherNo: r.voucherNo,
+      date: r.date,
+      cashAccount: accMap[r.selfAccountId] || "",
+      oppAccount: accMap[r.accountId] || "",
+      amount: String(r.amount),
+      narration: r.narration || "",
+      createdBy: getCreatedByName(createdByMap, r.createdType, r.createdBy),
+      createdType: r.createdType || "",
+    }));
+
+    return successResponse(res, data, "Cash receipt list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// ---------------- LIST (Bank Receipt only) ----------------
+const getBankReceiptList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const { financialYearId } = req.query;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const where = { companyId, voucherType: "BANK RECEIPT", delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const rows = await selectWithJoins(
+      "payment", [], where,
+      [
+        "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
+        "amount", "paymentMode", "narration", "createdBy", "createdType",
+      ]
+    );
+
+    if (!rows.length) return successResponse(res, [], "Bank receipt list fetched successfully");
+
+    const accountIds = [...new Set([...rows.map(r => r.selfAccountId), ...rows.map(r => r.accountId)])];
+    const accounts = await selectWithJoins("account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName"]);
+    const accMap = {};
+    accounts.forEach(a => { accMap[a.id] = a.accountName; });
+
+    const createdByMap = await resolveCreatedByNames(rows);
+
+    const data = rows.map(r => ({
+      id: String(r.paymentId),
+      voucherNo: r.voucherNo,
+      date: r.date,
+      bankAccount: accMap[r.selfAccountId] || "",
+      oppAccount: accMap[r.accountId] || "",
+      amount: String(r.amount),
+      transactionMode: (r.paymentMode || "").toLowerCase(),
+      narration: r.narration || "",
+      createdBy: getCreatedByName(createdByMap, r.createdType, r.createdBy),
+      createdType: r.createdType || "",
+    }));
+
+    return successResponse(res, data, "Bank receipt list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextVoucherNo,
   createCashPayment,
@@ -570,4 +806,8 @@ module.exports = {
   getBankPaymentList,
   getCashBook,
   getBankBook,
+   createCashReceipt,
+  getCashReceiptList,
+  createBankReceipt,
+  getBankReceiptList,
 };
