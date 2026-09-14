@@ -608,7 +608,7 @@ const getPurchaseItemList = async (req, res) => {
       [
         'itemmaster."itemId"', 'itemmaster."itemCode"', 'itemmaster."itemName"',
         'itemmaster."hsnCode"', 'itemmaster."unit"', 'itemmaster."taxSlab"',
-        'itemmaster."purchasePrice"',
+        // 'itemmaster."purchasePrice"',
       ],
       [['itemmaster."itemId"', "DESC"]], 0, 0
     );
