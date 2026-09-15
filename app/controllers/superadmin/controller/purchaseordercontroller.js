@@ -1,6 +1,10 @@
 const {
-  successResponse, errorResponse, requiredmessage,
-  saveModel, selectWithJoins, selectWithJoinsV2,
+  successResponse,
+  errorResponse,
+  requiredmessage,
+  saveModel,
+  selectWithJoins,
+  selectWithJoinsV2,
 } = require("../../../helper/index.js");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
@@ -10,15 +14,27 @@ const getNextPoNumber = async (req, res) => {
   try {
     const companyId = req.companyId;
     const { financialYearId } = req.query;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
-    if (!financialYearId) return errorResponse(res, "Financial Year not found in session. Please select a company year.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId)
+      return errorResponse(
+        res,
+        "Financial Year not found in session. Please select a company year.",
+      );
 
     const { billNo, fyLabel } = await generateVoucherNo({
-      companyId, financialYearId,
-      tableName: "purchaseorder", idColumn: "purchaseOrderId", prefixFor: "PURCHASE ORDER",
+      companyId,
+      financialYearId,
+      tableName: "purchaseorder",
+      idColumn: "purchaseOrderId",
+      prefixFor: "PURCHASE ORDER",
     });
 
-    return successResponse(res, { poNumber: billNo, fyLabel, financialYearId }, "PO number generated successfully");
+    return successResponse(
+      res,
+      { poNumber: billNo, fyLabel, financialYearId },
+      "PO number generated successfully",
+    );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
@@ -28,7 +44,8 @@ const getNextPoNumber = async (req, res) => {
 const getItemSupplierInfo = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { itemId } = req.params;
     if (!itemId) return errorResponse(res, "Item id is required.");
@@ -37,8 +54,18 @@ const getItemSupplierInfo = async (req, res) => {
     const rows = await selectWithJoinsV2(
       "purchasedetails",
       [
-        { table: "purchase", alias: "p", onClause: { 'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' } } },
-        { table: "account", alias: "a", onClause: { "a.id": { "=": 'p."accountId"' } } },
+        {
+          table: "purchase",
+          alias: "p",
+          onClause: {
+            'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' },
+          },
+        },
+        {
+          table: "account",
+          alias: "a",
+          onClause: { "a.id": { "=": 'p."accountId"' } },
+        },
       ],
       {
         'purchasedetails."itemId"': itemId,
@@ -49,14 +76,15 @@ const getItemSupplierInfo = async (req, res) => {
       [
         'a.id AS "supplierId"',
         'a."accountName" AS "supplierName"',
-        "purchasedetails.rate AS \"rate\"",
-        "purchasedetails.qty AS \"qty\"",
+        'purchasedetails.rate AS "rate"',
+        'purchasedetails.qty AS "qty"',
         'p."purchaseDate" AS "purchaseDate"',
         'p."purchaseBillNo" AS "purchaseBillNo"',
         'p."purchaseId" AS "purchaseId"',
       ],
       [['p."purchaseId"', "DESC"]],
-      0, 0
+      0,
+      0,
     );
 
     // ---- har supplier ka sirf LAST (latest) purchase record — rows already DESC he, isliye pehla match hi rakho ----
@@ -76,7 +104,10 @@ const getItemSupplierInfo = async (req, res) => {
     let fallback = null;
     if (supplierRows.length === 0) {
       const itemRows = await selectWithJoins(
-        "itemmaster", [], { itemId, companyId, delete: 0 }, ["purchasePrice", "taxSlab", "unit", "hsnCode"]
+        "itemmaster",
+        [],
+        { itemId, companyId, delete: 0 },
+        ["taxSlab", "unit", "hsnCode"],
       );
       if (itemRows.length > 0) fallback = itemRows[0];
     }
@@ -84,11 +115,11 @@ const getItemSupplierInfo = async (req, res) => {
     return successResponse(
       res,
       {
-        suppliers: supplierRows,       // lowest-rate-first, sorted
+        suppliers: supplierRows, // lowest-rate-first, sorted
         lastPurchase: rows[0] || null, // is item ki sabse recent purchase (kisi bhi supplier se)
         fallback,
       },
-      "Item supplier info fetched successfully"
+      "Item supplier info fetched successfully",
     );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -99,106 +130,175 @@ const getItemSupplierInfo = async (req, res) => {
 const createPurchaseOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
-    const { financialYearId } = req.body;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
-    if (!financialYearId) return errorResponse(res, "Financial Year not found in session. Please select a company year.");
-
     const {
-      poNumber, poDate, requiredDate, branchId, narration,
-      discountAmount, roundAmount, status, items,
+      financialYearId,
+      poDate,
+      requiredDate,
+      branchId,
+      narration,
+      discountAmount,
+      roundAmount,
+      status,
+      items,
     } = req.body;
-
-    if (!Array.isArray(items) || items.length === 0) {
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId)
+      return errorResponse(res, "Financial Year not found in session.");
+    if (!Array.isArray(items) || items.length === 0)
       return errorResponse(res, "Please add at least one item.");
-    }
 
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) return errorResponse(res, "Invalid Financial Year in session.");
 
-    // ---- poNumber uniqueness — company + FY wise ----
-    const dupCheck = await selectWithJoins(
-      "purchaseorder", [], { companyId, financialYearId: fy.financialYearId, poNumber, delete: 0 }, ["purchaseOrderId"]
-    );
-    if (dupCheck.length > 0) {
-      return errorResponse(res, "This PO Number already exists for this financial year.");
-    }
-
-    let taxableValue = 0;
-    let totalGst = 0;
-    const cleanItems = [];
-
+    const groups = {};
     for (const row of items) {
-      if (!row.itemId) return errorResponse(res, `Item id missing for "${row.itemName || "an item"}".`);
-      if (!row.qty || row.qty <= 0) return errorResponse(res, `Invalid quantity for "${row.itemName}".`);
-
-      const itemRows = await selectWithJoins("itemmaster", [], { itemId: row.itemId, companyId, delete: 0 }, ["itemId"]);
-      if (itemRows.length === 0) return errorResponse(res, `Item "${row.itemName}" not found or invalid.`);
-
-      if (row.supplierId) {
-        const supRows = await selectWithJoins("account", [], { id: row.supplierId, companyId, delete: 0 }, ["id"]);
-        if (supRows.length === 0) return errorResponse(res, `Selected supplier for "${row.itemName}" is invalid.`);
-      }
-
-      const qty = Number(row.qty) || 0;
-      const rate = Number(row.rate) || 0;
-      const discount = Number(row.discount) || 0;
-      const gstPct = Number(row.gstPct) || 0;
-
-      const taxable = qty * rate * (1 - discount / 100);
-      const gstAmt = taxable * gstPct / 100;
-      const total = taxable + gstAmt;
-
-      taxableValue += taxable;
-      totalGst += gstAmt;
-
-      cleanItems.push({
-        itemId: row.itemId,
-        supplierId: row.supplierId || null,
-        itemCode: row.itemCode || "",
-        itemName: row.itemName,
-        hsnCode: row.hsnCode || "",
-        uom: row.uom || "",
-        qty, rate, discount, taxable, gstPct, gstAmt, total,
-      });
+      if (!row.itemId)
+        return errorResponse(
+          res,
+          `Item id missing for "${row.itemName || "an item"}".`,
+        );
+      if (!row.qty || row.qty <= 0)
+        return errorResponse(res, `Invalid quantity for "${row.itemName}".`);
+      if (!row.supplierId)
+        return errorResponse(res, `Supplier missing for "${row.itemName}".`);
+      (groups[row.supplierId] ||= []).push(row);
     }
 
-    const grandTotal = taxableValue + totalGst - (Number(discountAmount) || 0) + (Number(roundAmount) || 0);
-    const finalStatus = status === "Generated" ? "Generated" : "Draft";
-
-    const po = await saveModel("purchaseorder", {
+    const { billNo } = await generateVoucherNo({
       companyId,
       financialYearId: fy.financialYearId,
-      poNumber, poDate, requiredDate: requiredDate || null,
-      branchId: branchId || null,
-      narration: narration || "",
-      taxableValue: Number(taxableValue.toFixed(2)),
-      gstAmount: Number(totalGst.toFixed(2)),
-      discountAmount: Number(discountAmount) || 0,
-      roundAmount: Number(roundAmount) || 0,
-      grandTotal: Number(grandTotal.toFixed(2)),
-      status: finalStatus,
+      tableName: "purchaseorder",
+      idColumn: "purchaseOrderId",
+      prefixFor: "PURCHASE ORDER",
+    });
+
+   const orders = [];
+for (const supplierId of Object.keys(groups)) {
+  // IMPORTANT: generate a NEW PO number for EACH supplier
+  const { billNo } = await generateVoucherNo({
+    companyId,
+    financialYearId: fy.financialYearId,
+    tableName: "purchaseorder",
+    idColumn: "purchaseOrderId",
+    prefixFor: "PURCHASE ORDER",
+  });
+
+  const supRows = await selectWithJoins(
+    "account",
+    [],
+    { id: supplierId, companyId, delete: 0 },
+    ["id", "accountName", "mobileNo", "email", "cityName"],
+  );
+  if (supRows.length === 0)
+    return errorResponse(res, "Selected supplier is invalid.");
+  const supplier = supRows[0];
+
+  let taxableValue = 0,
+    totalGst = 0;
+  const cleanItems = [];
+  for (const row of groups[supplierId]) {
+    const itemRows = await selectWithJoins(
+      "itemmaster",
+      [],
+      { itemId: row.itemId, companyId, delete: 0 },
+      ["itemId"],
+    );
+    if (itemRows.length === 0)
+      return errorResponse(
+        res,
+        `Item "${row.itemName}" not found or invalid.`,
+      );
+
+    const qty = Number(row.qty) || 0,
+      rate = Number(row.rate) || 0,
+      discount = Number(row.discount) || 0,
+      gstPct = Number(row.gstPct) || 0;
+    const taxable = qty * rate * (1 - discount / 100);
+    const gstAmt = (taxable * gstPct) / 100;
+    taxableValue += taxable;
+    totalGst += gstAmt;
+    cleanItems.push({
+      itemId: row.itemId,
+      supplierId,
+      itemCode: row.itemCode || "",
+      itemName: row.itemName,
+      hsnCode: row.hsnCode || "",
+      uom: row.uom || "",
+      qty,
+      rate,
+      discount,
+      taxable,
+      gstPct,
+      gstAmt,
+      total: taxable + gstAmt,
+    });
+  }
+
+  const grandTotal =
+    taxableValue +
+    totalGst -
+    (Number(discountAmount) || 0) +
+    (Number(roundAmount) || 0);
+  const finalStatus = status === "Generated" ? "Generated" : "Draft";
+
+  // Take serial from the first item of this group (frontend already sent it)
+  const serialForThisSupplier = groups[supplierId][0]?.serialNo ?? null;
+
+  const po = await saveModel("purchaseorder", {
+    companyId,
+    financialYearId: fy.financialYearId,
+    poNumber: billNo,                    // unique per supplier
+    // serialNo: serialForThisSupplier,  // uncomment only if you add the column in DB
+    poDate,
+    requiredDate: requiredDate || null,
+    branchId: branchId || null,
+    narration: narration || "",
+    taxableValue: Number(taxableValue.toFixed(2)),
+    gstAmount: Number(totalGst.toFixed(2)),
+    discountAmount: Number(discountAmount) || 0,
+    roundAmount: Number(roundAmount) || 0,
+    grandTotal: Number(grandTotal.toFixed(2)),
+    status: finalStatus,
+    delete: 0,
+  });
+
+  for (const row of cleanItems)
+    await saveModel("purchaseorderdetails", {
+      purchaseOrderId: po.purchaseOrderId,
+      companyId,
+      ...row,
       delete: 0,
     });
 
-    for (const row of cleanItems) {
-      await saveModel("purchaseorderdetails", {
-        purchaseOrderId: po.purchaseOrderId,
-        companyId,
-        ...row,
-        delete: 0,
-      });
-    }
+  orders.push({
+    purchaseOrderId: po.purchaseOrderId,
+    poNumber: billNo,
+    serialNo: serialForThisSupplier,
+    grandTotal: Number(grandTotal.toFixed(2)),
+    supplierId: supplier.id,
+    supplierName: supplier.accountName,
+    supplierNumber: supplier.mobileNo,
+    supplierEmail: supplier.email,
+    supplierCity: supplier.cityName,
+    items: cleanItems.map((i) => ({
+      itemCode: i.itemCode,
+      itemName: i.itemName,
+      uom: i.uom,
+      qty: i.qty,
+      rate: i.rate,
+      total: i.total,
+    })),
+  });
+}
 
-    return successResponse(
-      res,
-      { purchaseOrderId: po.purchaseOrderId, status: finalStatus, grandTotal },
-      `Purchase order ${finalStatus === "Draft" ? "saved as draft" : "generated"} successfully`
-    );
+return successResponse(
+  res,
+  { orders },
+  "Purchase order(s) generated successfully",
+);
   } catch (error) {
-    if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "This PO Number already exists for this financial year.");
-    }
-    return errorResponse(res, "Something Went Wrong", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 
@@ -206,44 +306,80 @@ const createPurchaseOrder = async (req, res) => {
 const getPurchaseOrderList = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { financialYearId } = req.query;
     const where = { companyId, delete: 0 };
     if (financialYearId) where.financialYearId = financialYearId;
 
-    const pos = await selectWithJoins(
-      "purchaseorder", [], where,
-      ["purchaseOrderId", "poNumber", "poDate", "branchId", "taxableValue", "gstAmount", "grandTotal", "status"]
-    );
-    if (!pos.length) return successResponse(res, [], "Purchase order list fetched successfully");
+    const pos = await selectWithJoins("purchaseorder", [], where, [
+      "purchaseOrderId",
+      "poNumber",
+      "poDate",
+      "branchId",
+      "taxableValue",
+      "gstAmount",
+      "grandTotal",
+      "status",
+    ]);
+    if (!pos.length)
+      return successResponse(
+        res,
+        [],
+        "Purchase order list fetched successfully",
+      );
 
     const poIds = pos.map((p) => p.purchaseOrderId);
     const details = await selectWithJoins(
-      "purchaseorderdetails", [], { purchaseOrderId: poIds, companyId, delete: 0 }, ["purchaseOrderId", "supplierId"]
+      "purchaseorderdetails",
+      [],
+      { purchaseOrderId: poIds, companyId, delete: 0 },
+      ["purchaseOrderId", "supplierId"],
     );
 
     const branchIds = [...new Set(pos.map((p) => p.branchId).filter(Boolean))];
     let branchMap = {};
     if (branchIds.length) {
       try {
-        const branches = await selectWithJoins("branch", [], { branchId: branchIds, companyId, delete: 0 }, ["branchId", "branchName"]);
-        branches.forEach((b) => { branchMap[b.branchId] = b; });
-      } catch (e) { branchMap = {}; }
+        const branches = await selectWithJoins(
+          "branch",
+          [],
+          { branchId: branchIds, companyId, delete: 0 },
+          ["branchId", "branchName"],
+        );
+        branches.forEach((b) => {
+          branchMap[b.branchId] = b;
+        });
+      } catch (e) {
+        branchMap = {};
+      }
     }
 
-    const supplierIds = [...new Set(details.map((d) => d.supplierId).filter(Boolean))];
+    const supplierIds = [
+      ...new Set(details.map((d) => d.supplierId).filter(Boolean)),
+    ];
     let accountMap = {};
     if (supplierIds.length) {
-      const accounts = await selectWithJoins("account", [], { id: supplierIds, companyId, delete: 0 }, ["id", "accountName"]);
-      accounts.forEach((a) => { accountMap[a.id] = a; });
+      const accounts = await selectWithJoins(
+        "account",
+        [],
+        { id: supplierIds, companyId, delete: 0 },
+        ["id", "accountName"],
+      );
+      accounts.forEach((a) => {
+        accountMap[a.id] = a;
+      });
     }
 
     const supplierNamesByPo = {};
     details.forEach((d) => {
       if (!d.supplierId || !accountMap[d.supplierId]) return;
-      if (!supplierNamesByPo[d.purchaseOrderId]) supplierNamesByPo[d.purchaseOrderId] = new Set();
-      supplierNamesByPo[d.purchaseOrderId].add(accountMap[d.supplierId].accountName);
+      if (!supplierNamesByPo[d.purchaseOrderId])
+        supplierNamesByPo[d.purchaseOrderId] = new Set();
+      supplierNamesByPo[d.purchaseOrderId].add(
+        accountMap[d.supplierId].accountName,
+      );
     });
 
     const data = pos.map((p) => {
@@ -261,7 +397,11 @@ const getPurchaseOrderList = async (req, res) => {
       };
     });
 
-    return successResponse(res, data, "Purchase order list fetched successfully");
+    return successResponse(
+      res,
+      data,
+      "Purchase order list fetched successfully",
+    );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
@@ -271,29 +411,196 @@ const getPurchaseOrderList = async (req, res) => {
 const getPurchaseOrderById = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
     const { id } = req.params;
 
     const rows = await selectWithJoins(
-      "purchaseorder", [], { purchaseOrderId: id, companyId, delete: 0 },
-      ["purchaseOrderId", "poNumber", "poDate", "requiredDate", "branchId", "narration",
-        "taxableValue", "gstAmount", "discountAmount", "roundAmount", "grandTotal", "status"]
+      "purchaseorder",
+      [],
+      { purchaseOrderId: id, companyId, delete: 0 },
+      [
+        "purchaseOrderId",
+        "poNumber",
+        "poDate",
+        "requiredDate",
+        "branchId",
+        "narration",
+        "taxableValue",
+        "gstAmount",
+        "discountAmount",
+        "roundAmount",
+        "grandTotal",
+        "status",
+      ],
     );
-    if (rows.length === 0) return requiredmessage(res, "Purchase order not found");
+    if (rows.length === 0)
+      return requiredmessage(res, "Purchase order not found");
 
     const items = await selectWithJoins(
-      "purchaseorderdetails", [], { purchaseOrderId: id, companyId, delete: 0 },
-      ["purchaseOrderDetailsId", "itemId", "supplierId", "itemCode", "itemName", "hsnCode", "uom",
-        "qty", "rate", "discount", "taxable", "gstPct", "gstAmt", "total"]
+      "purchaseorderdetails",
+      [],
+      { purchaseOrderId: id, companyId, delete: 0 },
+      [
+        "purchaseOrderDetailsId",
+        "itemId",
+        "supplierId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "uom",
+        "qty",
+        "rate",
+        "discount",
+        "taxable",
+        "gstPct",
+        "gstAmt",
+        "total",
+      ],
     );
 
-    return successResponse(res, { ...rows[0], items }, "Purchase order fetched successfully");
+    return successResponse(
+      res,
+      { ...rows[0], items },
+      "Purchase order fetched successfully",
+    );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 
+const getIndentItemsForPO = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { indentId } = req.params;
+    if (!indentId) return errorResponse(res, "Indent id is required.");
+
+    const rows = await selectWithJoins(
+      "indentitem",
+      [],
+      { indentId, companyId },
+      [
+        "indentItemId",
+        "itemId",
+        "itemCode",
+        "itemName",
+        "unit",
+        "hsnCode",
+        "taxSlab",
+        "purchaseRequired",
+      ],
+    );
+
+    const items = rows.map((r) => ({
+      id: r.indentItemId,
+      itemId: r.itemId,
+      itemCode: r.itemCode,
+      itemName: r.itemName,
+      unit: r.unit,
+      hsn: r.hsnCode || "",
+      qty: Number(r.purchaseRequired) || 0,
+      rate: 0,
+      gstPct: Number(r.taxSlab) || 0,
+    }));
+
+    return successResponse(res, items, "Indent items fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// ---------------- GET NEXT SERIAL NO (preview only, shown on Create page) ----------------
+const getNextSerialNo = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const { financialYearId } = req.query;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId)
+      return errorResponse(
+        res,
+        "Financial Year not found in session. Please select a company year.",
+      );
+
+    const existingPOs = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { companyId, financialYearId, delete: 0 },
+      ["purchaseOrderId"],
+    );
+
+    return successResponse(
+      res,
+      { serialNo: existingPOs.length + 1 },
+      "Next serial no fetched successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+const getVendorHistory = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    const { supplierId } = req.params;
+    if (!supplierId) return errorResponse(res, "Supplier id is required.");
+
+    const details = await selectWithJoinsV2(
+      "purchaseorderdetails",
+      [
+        {
+          table: "purchaseorder",
+          alias: "po",
+          onClause: {
+            'po."purchaseOrderId"': {
+              "=": 'purchaseorderdetails."purchaseOrderId"',
+            },
+          },
+        },
+      ],
+      {
+        'purchaseorderdetails."supplierId"': supplierId,
+        'purchaseorderdetails."companyId"': companyId,
+        'purchaseorderdetails."delete"': 0,
+        'po."delete"': 0,
+      },
+      [
+        'po."poNumber" AS "poNumber"',
+        'po."poDate" AS "poDate"',
+        'purchaseorderdetails."itemCode" AS "itemCode"',
+        'purchaseorderdetails."itemName" AS "itemName"',
+        'purchaseorderdetails."uom" AS "uom"',
+        'purchaseorderdetails."qty" AS "qty"',
+        'purchaseorderdetails."rate" AS "rate"',
+        'purchaseorderdetails."total" AS "total"',
+      ],
+      [['po."purchaseOrderId"', "DESC"]],
+      0,
+      0,
+    );
+    return successResponse(
+      res,
+      details,
+      "Vendor purchase history fetched successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
 module.exports = {
-  getNextPoNumber, getItemSupplierInfo,
-  createPurchaseOrder, getPurchaseOrderList, getPurchaseOrderById,
+  getNextPoNumber,
+  getItemSupplierInfo,
+  createPurchaseOrder,
+  getPurchaseOrderList,
+  getPurchaseOrderById,
+  getIndentItemsForPO,
+  getNextSerialNo,
+  getVendorHistory,
 };

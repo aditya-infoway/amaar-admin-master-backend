@@ -64,6 +64,18 @@ module.exports = (sequelize) => {
       field: "unit",
     },
 
+      hsnCode: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "hsnCode",
+    },
+
+    taxSlab: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "taxSlab",
+    },
+
     availableStock: {
       type: DataTypes.DECIMAL(12, 2),
       allowNull: false,

@@ -25,7 +25,8 @@ const validateIndent = Joi.object().keys({
         itemLocation: Joi.string().trim().allow("", null),
         category: Joi.string().trim().allow("", null),
         unit: Joi.string().trim().allow("", null),
-
+        hsnCode: Joi.string().trim().allow("", null),
+        taxSlab: Joi.string().trim().allow("", null),
         availableStock: Joi.number().min(0).required().messages({
           "number.base": "Available stock must be a number",
           "any.required": "Available stock is required",

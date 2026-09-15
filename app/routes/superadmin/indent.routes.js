@@ -33,6 +33,8 @@ module.exports = (app) => {
   // Save-button state: does an Indent already exist for this Work Order?
   routes.get("/check/:workOrderId", indent.checkIndentForWorkOrder);
 
+  routes.get("/for-po", indent.getIndentsForPO); 
+
   // View drawer — header + full items table
   routes.get("/:id", indent.getIndentById);
 

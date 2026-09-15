@@ -15,7 +15,10 @@ module.exports = (app) => {
   routes.use(superAdminAuth);
 
   routes.get("/next-po-no", purchaseOrder.getNextPoNumber);
+  routes.get("/next-serial-no", purchaseOrder.getNextSerialNo);
   routes.get("/item-suppliers/:itemId", purchaseOrder.getItemSupplierInfo);
+   routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
+   routes.get("/vendor-history/:vendorId", purchaseOrder.getVendorHistory);
   routes.get("/list", purchaseOrder.getPurchaseOrderList);
   routes.get("/:id", purchaseOrder.getPurchaseOrderById);
 
