@@ -345,7 +345,19 @@ const getIndentsForPO = async (req, res) => {
       [["indentId", "DESC"]],
     );
 
-    return successResponse(res, rows, "Indents fetched successfully");
+    if (!rows.length) return successResponse(res, [], "Indents fetched successfully");
+
+    // NEW: pull indentIds already used on a saved PO, exclude them
+    const usedPOs = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { indentId: rows.map((r) => r.indentId), companyId, delete: 0 },
+      ["indentId"],
+    );
+    const usedIndentIds = new Set(usedPOs.map((p) => p.indentId));
+    const available = rows.filter((r) => !usedIndentIds.has(r.indentId));
+
+    return successResponse(res, available, "Indents fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }

@@ -2,10 +2,11 @@ const Joi = require("joi");
 
 const createPurchaseOrder = Joi.object().keys({
   financialYearId: Joi.number().required().messages({ "any.required": "financial Year Id is required" }),
-  poNumber: Joi.string().required(),
-  poDate: Joi.string().required(),
+
+  poDate: Joi.string().allow("", null),
   requiredDate: Joi.string().allow("", null),
   branchId: Joi.number().allow(null, ""),
+  indentId: Joi.number().allow(null, ""),
   narration: Joi.string().allow("", null),
   discountAmount: Joi.number().min(0).allow(null, "").default(0),
   roundAmount: Joi.number().allow(null, "").default(0),
@@ -15,6 +16,10 @@ const createPurchaseOrder = Joi.object().keys({
     Joi.object({
       itemId: Joi.number().required().messages({ "any.required": "Item id is required" }),
       supplierId: Joi.number().allow(null, ""),
+       supplierName: Joi.string().allow("", null),
+      supplierNumber: Joi.string().allow("", null),
+      supplierEmail: Joi.string().allow("", null),
+      supplierCity: Joi.string().allow("", null),
       itemCode: Joi.string().allow("", null),
       itemName: Joi.string().required(),
       hsnCode: Joi.string().allow("", null),

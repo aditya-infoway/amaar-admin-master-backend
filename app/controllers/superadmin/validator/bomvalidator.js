@@ -17,7 +17,7 @@ const itemNode = Joi.object({
 
   quantity: Joi.string().trim().allow("", null),
   unit: Joi.string().trim().allow("", null),
-
+  source: Joi.string().trim().valid("child", "subbom").allow("", null),
   serialNo: Joi.string().trim().allow("", null),
   asslyQty: Joi.string().trim().allow("", null),
   ldDay: Joi.string().trim().allow("", null),

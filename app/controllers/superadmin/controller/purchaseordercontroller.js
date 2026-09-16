@@ -50,16 +50,14 @@ const getItemSupplierInfo = async (req, res) => {
     const { itemId } = req.params;
     if (!itemId) return errorResponse(res, "Item id is required.");
 
-    // ---- purchase (bill) history se: is item ko jitne suppliers se kharida he wo sab, latest-first ----
-    const rows = await selectWithJoinsV2(
+    // ---- purchase (bill) history ----
+    const billRows = await selectWithJoinsV2(
       "purchasedetails",
       [
         {
           table: "purchase",
           alias: "p",
-          onClause: {
-            'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' },
-          },
+          onClause: { 'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' } },
         },
         {
           table: "account",
@@ -80,14 +78,54 @@ const getItemSupplierInfo = async (req, res) => {
         'purchasedetails.qty AS "qty"',
         'p."purchaseDate" AS "purchaseDate"',
         'p."purchaseBillNo" AS "purchaseBillNo"',
-        'p."purchaseId" AS "purchaseId"',
       ],
       [['p."purchaseId"', "DESC"]],
       0,
       0,
     );
 
-    // ---- har supplier ka sirf LAST (latest) purchase record — rows already DESC he, isliye pehla match hi rakho ----
+    // NEW: same join shape as getVendorHistory (purchaseorderdetails -> purchaseorder),
+    // just filtered by itemId instead of supplierId
+    const poRows = await selectWithJoinsV2(
+      "purchaseorderdetails",
+      [
+        {
+          table: "purchaseorder",
+          alias: "po",
+          onClause: {
+            'po."purchaseOrderId"': { "=": 'purchaseorderdetails."purchaseOrderId"' },
+          },
+        },
+        {
+          table: "account",
+          alias: "a",
+          onClause: { "a.id": { "=": 'purchaseorderdetails."supplierId"' } },
+        },
+      ],
+      {
+        'purchaseorderdetails."itemId"': itemId,
+        'purchaseorderdetails."companyId"': companyId,
+        'purchaseorderdetails."delete"': 0,
+        'po."delete"': 0,
+      },
+      [
+        'a.id AS "supplierId"',
+        'a."accountName" AS "supplierName"',
+        'purchaseorderdetails.rate AS "rate"',
+        'purchaseorderdetails.qty AS "qty"',
+        'po."poDate" AS "purchaseDate"',
+        'po."poNumber" AS "purchaseBillNo"',
+      ],
+      [['po."purchaseOrderId"', "DESC"]],
+      0,
+      0,
+    );
+
+    // NEW: merge both sources, most recent first
+    const rows = [...billRows, ...poRows].sort(
+      (a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime(),
+    );
+
     const seen = new Set();
     const supplierRows = [];
     rows.forEach((row) => {
@@ -97,10 +135,8 @@ const getItemSupplierInfo = async (req, res) => {
       }
     });
 
-    // ---- lowest rate wala supplier sabse upar => Recommended ----
     supplierRows.sort((x, y) => Number(x.rate) - Number(y.rate));
 
-    // ---- koi purchase history nahi mili to itemmaster se fallback rate ----
     let fallback = null;
     if (supplierRows.length === 0) {
       const itemRows = await selectWithJoins(
@@ -115,8 +151,8 @@ const getItemSupplierInfo = async (req, res) => {
     return successResponse(
       res,
       {
-        suppliers: supplierRows, // lowest-rate-first, sorted
-        lastPurchase: rows[0] || null, // is item ki sabse recent purchase (kisi bhi supplier se)
+        suppliers: supplierRows,
+        lastPurchase: rows[0] || null,
         fallback,
       },
       "Item supplier info fetched successfully",
@@ -140,6 +176,7 @@ const createPurchaseOrder = async (req, res) => {
       roundAmount,
       status,
       items,
+      indentId, 
     } = req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
@@ -165,17 +202,30 @@ const createPurchaseOrder = async (req, res) => {
       (groups[row.supplierId] ||= []).push(row);
     }
 
-    const { billNo } = await generateVoucherNo({
-      companyId,
-      financialYearId: fy.financialYearId,
-      tableName: "purchaseorder",
-      idColumn: "purchaseOrderId",
-      prefixFor: "PURCHASE ORDER",
-    });
+  
 
-   const orders = [];
+    // NEW: figure out the next serial number to continue from, scoped to
+    // this company + financial year (same idea as getNextSerialNo, but done
+    // here at save time so it's authoritative and race-safe-ish per request)
+    const existingForSerial = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { companyId, financialYearId: fy.financialYearId, delete: 0 },
+      ["serialNo"],
+    );
+  const maxExistingSerial = existingForSerial.reduce(
+  (max, row) => Math.max(max, Number(row.serialNo) || 0),
+  0,
+);
+
+// Same serial number for every supplier in this batch
+const batchSerialNo = maxExistingSerial + 1;
+
+ const orders = [];
+
 for (const supplierId of Object.keys(groups)) {
-  // IMPORTANT: generate a NEW PO number for EACH supplier
+
+  // Generate a UNIQUE PO NUMBER for this supplier
   const { billNo } = await generateVoucherNo({
     companyId,
     financialYearId: fy.financialYearId,
@@ -184,119 +234,120 @@ for (const supplierId of Object.keys(groups)) {
     prefixFor: "PURCHASE ORDER",
   });
 
-  const supRows = await selectWithJoins(
-    "account",
-    [],
-    { id: supplierId, companyId, delete: 0 },
-    ["id", "accountName", "mobileNo", "email", "cityName"],
-  );
-  if (supRows.length === 0)
-    return errorResponse(res, "Selected supplier is invalid.");
-  const supplier = supRows[0];
+  // Same serial number for ALL suppliers in this batch
+  const serialForThisSupplier = batchSerialNo;
 
-  let taxableValue = 0,
-    totalGst = 0;
-  const cleanItems = [];
-  for (const row of groups[supplierId]) {
-    const itemRows = await selectWithJoins(
-      "itemmaster",
-      [],
-      { itemId: row.itemId, companyId, delete: 0 },
-      ["itemId"],
-    );
-    if (itemRows.length === 0)
-      return errorResponse(
-        res,
-        `Item "${row.itemName}" not found or invalid.`,
+      const supRows = await selectWithJoins(
+        "account",
+        [],
+        { id: supplierId, companyId, delete: 0 },
+        ["id", "accountName", "mobileNo", "email", "cityName"],
       );
+      if (supRows.length === 0)
+        return errorResponse(res, "Selected supplier is invalid.");
+      const supplier = supRows[0];
 
-    const qty = Number(row.qty) || 0,
-      rate = Number(row.rate) || 0,
-      discount = Number(row.discount) || 0,
-      gstPct = Number(row.gstPct) || 0;
-    const taxable = qty * rate * (1 - discount / 100);
-    const gstAmt = (taxable * gstPct) / 100;
-    taxableValue += taxable;
-    totalGst += gstAmt;
-    cleanItems.push({
-      itemId: row.itemId,
-      supplierId,
-      itemCode: row.itemCode || "",
-      itemName: row.itemName,
-      hsnCode: row.hsnCode || "",
-      uom: row.uom || "",
-      qty,
-      rate,
-      discount,
-      taxable,
-      gstPct,
-      gstAmt,
-      total: taxable + gstAmt,
-    });
-  }
+      let taxableValue = 0,
+        totalGst = 0;
+      const cleanItems = [];
+      for (const row of groups[supplierId]) {
+        const itemRows = await selectWithJoins(
+          "itemmaster",
+          [],
+          { itemId: row.itemId, companyId, delete: 0 },
+          ["itemId"],
+        );
+        if (itemRows.length === 0)
+          return errorResponse(
+            res,
+            `Item "${row.itemName}" not found or invalid.`,
+          );
 
-  const grandTotal =
-    taxableValue +
-    totalGst -
-    (Number(discountAmount) || 0) +
-    (Number(roundAmount) || 0);
-  const finalStatus = status === "Generated" ? "Generated" : "Draft";
+        const qty = Number(row.qty) || 0,
+          rate = Number(row.rate) || 0,
+          discount = Number(row.discount) || 0,
+          gstPct = Number(row.gstPct) || 0;
+        const taxable = qty * rate * (1 - discount / 100);
+        const gstAmt = (taxable * gstPct) / 100;
+        taxableValue += taxable;
+        totalGst += gstAmt;
+        cleanItems.push({
+          itemId: row.itemId,
+          supplierId,
+          itemCode: row.itemCode || "",
+          itemName: row.itemName,
+          hsnCode: row.hsnCode || "",
+          uom: row.uom || "",
+          qty,
+          rate,
+          discount,
+          taxable,
+          gstPct,
+          gstAmt,
+          total: taxable + gstAmt,
+        });
+      }
 
-  // Take serial from the first item of this group (frontend already sent it)
-  const serialForThisSupplier = groups[supplierId][0]?.serialNo ?? null;
+      const grandTotal =
+        taxableValue +
+        totalGst -
+        (Number(discountAmount) || 0) +
+        (Number(roundAmount) || 0);
+      const finalStatus = status === "Generated" ? "Generated" : "Draft";
 
-  const po = await saveModel("purchaseorder", {
-    companyId,
-    financialYearId: fy.financialYearId,
-    poNumber: billNo,                    // unique per supplier
-    // serialNo: serialForThisSupplier,  // uncomment only if you add the column in DB
-    poDate,
-    requiredDate: requiredDate || null,
-    branchId: branchId || null,
-    narration: narration || "",
-    taxableValue: Number(taxableValue.toFixed(2)),
-    gstAmount: Number(totalGst.toFixed(2)),
-    discountAmount: Number(discountAmount) || 0,
-    roundAmount: Number(roundAmount) || 0,
-    grandTotal: Number(grandTotal.toFixed(2)),
-    status: finalStatus,
-    delete: 0,
-  });
+      const po = await saveModel("purchaseorder", {
+        companyId,
+        financialYearId: fy.financialYearId,
+        poDate,
+        poNumber: billNo, // shared across all suppliers in this batch
+        serialNo: serialForThisSupplier, // unique per supplier
+        requiredDate: requiredDate || null,
+        branchId: branchId || null,
+        indentId: indentId || null,   
+        narration: narration || "",
+        taxableValue: Number(taxableValue.toFixed(2)),
+        gstAmount: Number(totalGst.toFixed(2)),
+        discountAmount: Number(discountAmount) || 0,
+        roundAmount: Number(roundAmount) || 0,
+        grandTotal: Number(grandTotal.toFixed(2)),
+        status: finalStatus,
+        delete: 0,
+      });
 
-  for (const row of cleanItems)
-    await saveModel("purchaseorderdetails", {
-      purchaseOrderId: po.purchaseOrderId,
-      companyId,
-      ...row,
-      delete: 0,
-    });
+      for (const row of cleanItems)
+        await saveModel("purchaseorderdetails", {
+          purchaseOrderId: po.purchaseOrderId,
+          companyId,
+          ...row,
+          delete: 0,
+        });
 
-  orders.push({
-    purchaseOrderId: po.purchaseOrderId,
-    poNumber: billNo,
-    serialNo: serialForThisSupplier,
-    grandTotal: Number(grandTotal.toFixed(2)),
-    supplierId: supplier.id,
-    supplierName: supplier.accountName,
-    supplierNumber: supplier.mobileNo,
-    supplierEmail: supplier.email,
-    supplierCity: supplier.cityName,
-    items: cleanItems.map((i) => ({
-      itemCode: i.itemCode,
-      itemName: i.itemName,
-      uom: i.uom,
-      qty: i.qty,
-      rate: i.rate,
-      total: i.total,
-    })),
-  });
-}
+      orders.push({
+        purchaseOrderId: po.purchaseOrderId,
+        poNumber: billNo,
+        serialNo: serialForThisSupplier,
+        grandTotal: Number(grandTotal.toFixed(2)),
+        supplierId: supplier.id,
+        supplierName: supplier.accountName,
+        supplierNumber: supplier.mobileNo,
+        supplierEmail: supplier.email,
+        supplierCity: supplier.cityName,
+        items: cleanItems.map((i) => ({
+          itemCode: i.itemCode,
+          itemName: i.itemName,
+          uom: i.uom,
+          qty: i.qty,
+          rate: i.rate,
+          total: i.total,
+        })),
+      });
+    }
 
-return successResponse(
-  res,
-  { orders },
-  "Purchase order(s) generated successfully",
-);
+    return successResponse(
+      res,
+      { orders },
+      "Purchase order(s) generated successfully",
+    );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
@@ -318,6 +369,7 @@ const getPurchaseOrderList = async (req, res) => {
       "poNumber",
       "poDate",
       "branchId",
+      "serialNo",
       "taxableValue",
       "gstAmount",
       "grandTotal",
@@ -390,6 +442,7 @@ const getPurchaseOrderList = async (req, res) => {
         id: String(p.purchaseOrderId),
         poNumber: p.poNumber,
         poDate: p.poDate,
+        serialNo: p.serialNo ?? null,
         supplierName,
         deliveryLocation: branch.branchName || "Main Branch",
         totalAmount: String(p.grandTotal),
@@ -529,12 +582,17 @@ const getNextSerialNo = async (req, res) => {
       "purchaseorder",
       [],
       { companyId, financialYearId, delete: 0 },
-      ["purchaseOrderId"],
+      ["serialNo"],   // CHANGED: fetch serialNo instead of purchaseOrderId
+    );
+
+    const maxExistingSerial = existingPOs.reduce(
+      (max, row) => Math.max(max, Number(row.serialNo) || 0),
+      0,
     );
 
     return successResponse(
       res,
-      { serialNo: existingPOs.length + 1 },
+      { serialNo: maxExistingSerial + 1 },   // CHANGED
       "Next serial no fetched successfully",
     );
   } catch (error) {
@@ -592,7 +650,6 @@ const getVendorHistory = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 
 module.exports = {
   getNextPoNumber,
