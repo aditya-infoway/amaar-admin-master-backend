@@ -49,6 +49,7 @@ const createBom = Joi.object().keys({
     "string.empty": "BOM Code is required",
   }),
   status: Joi.string().trim().valid("active", "inactive").default("active"),
+  finishedGoodsItemId: Joi.number().integer().positive().allow(null).optional(),
   items: Joi.array().items(itemNode).min(1).required().messages({
     "array.min": "Please add at least one item to BOM",
   }),
