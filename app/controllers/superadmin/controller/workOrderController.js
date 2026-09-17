@@ -37,8 +37,13 @@ const getNextWorkOrderNo = async (req, res) => {
     const companyId = req.companyId;
     const { financialYearId } = req.query;
 
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
-    if (!financialYearId) return errorResponse(res, "Financial Year not found. Please select a company year.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId)
+      return errorResponse(
+        res,
+        "Financial Year not found. Please select a company year.",
+      );
 
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) return errorResponse(res, "Invalid Financial Year.");
@@ -60,7 +65,12 @@ const getNextWorkOrderNo = async (req, res) => {
       const existing = await selectWithJoins(
         "workorder",
         [],
-        { companyId, financialYearId: fy.financialYearId, workOrderNo: result.billNo, delete: 0 },
+        {
+          companyId,
+          financialYearId: fy.financialYearId,
+          workOrderNo: result.billNo,
+          delete: 0,
+        },
         ["workOrderId"],
       );
 
@@ -74,7 +84,10 @@ const getNextWorkOrderNo = async (req, res) => {
     }
 
     if (!billNo) {
-      return errorResponse(res, "Could not generate a unique Work Order number. Please try again.");
+      return errorResponse(
+        res,
+        "Could not generate a unique Work Order number. Please try again.",
+      );
     }
 
     return successResponse(
@@ -126,7 +139,10 @@ const createWorkOrder = async (req, res) => {
     // ========================================================
 
     if (!financialYearId) {
-      return errorResponse(res, "Financial Year not found. Please select a company year.");
+      return errorResponse(
+        res,
+        "Financial Year not found. Please select a company year.",
+      );
     }
 
     if (!normalizeId(salesOrderId)) {
@@ -215,12 +231,37 @@ const createWorkOrder = async (req, res) => {
     const duplicateNo = await selectWithJoins(
       "workorder",
       [],
-      { companyId, financialYearId: fy.financialYearId, workOrderNo: finalWorkOrderNo, delete: 0 },
+      {
+        companyId,
+        financialYearId: fy.financialYearId,
+        workOrderNo: finalWorkOrderNo,
+        delete: 0,
+      },
       ["workOrderId"],
     );
 
     if (duplicateNo.length > 0) {
       return errorResponse(res, "This Work Order No already exists.");
+    }
+
+    // ========================================================
+    // CHECK MODEL (PRODUCT) BELONGS TO THIS COMPANY
+    // ========================================================
+
+    if (model) {
+      const modelRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: normalizeId(model), companyId, delete: 0 },
+        ["itemId"],
+      );
+
+      if (!modelRows.length) {
+        return errorResponse(
+          res,
+          "Selected product was not found for this company.",
+        );
+      }
     }
 
     // ========================================================
@@ -339,96 +380,94 @@ const getWorkOrderList = async (req, res) => {
       [["workOrderId", "DESC"]],
     );
 
-   if (!workOrders.length) {
-  return successResponse(res, [], "Work Order list fetched successfully");
-}
+    if (!workOrders.length) {
+      return successResponse(res, [], "Work Order list fetched successfully");
+    }
 
-// ========================================================
-// GET SALES ORDER NUMBERS
-// ========================================================
+    // ========================================================
+    // GET SALES ORDER NUMBERS
+    // ========================================================
 
-const salesOrderIds = workOrders
-  .map((item) => item.salesOrderId)
-  .filter((id) => id);
+    const salesOrderIds = workOrders
+      .map((item) => item.salesOrderId)
+      .filter((id) => id);
 
-let salesOrderMap = {};
+    let salesOrderMap = {};
 
-if (salesOrderIds.length > 0) {
-  try {
-    const salesOrders = await selectWithJoins(
-      "salesorder",
-      [],
-      { salesOrderId: salesOrderIds, companyId, delete: 0 },
-      ["salesOrderId", "soNo"],
-    );
+    if (salesOrderIds.length > 0) {
+      try {
+        const salesOrders = await selectWithJoins(
+          "salesorder",
+          [],
+          { salesOrderId: salesOrderIds, companyId, delete: 0 },
+          ["salesOrderId", "soNo"],
+        );
 
-    salesOrderMap = salesOrders.reduce((map, so) => {
-      map[String(so.salesOrderId)] = so.soNo || "";
-      return map;
-    }, {});
-  } catch (err) {
-    console.error("Error fetching sales orders:", err.message);
-  }
-}
+        salesOrderMap = salesOrders.reduce((map, so) => {
+          map[String(so.salesOrderId)] = so.soNo || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching sales orders:", err.message);
+      }
+    }
 
-// ========================================================
-// GET MODEL NAMES
-// ========================================================
+    // ========================================================
+    // GET MODEL NAMES
+    // ========================================================
 
-const modelIds = workOrders
-  .map((item) => item.model)
-  .filter((id) => id);
+    const modelIds = workOrders.map((item) => item.model).filter((id) => id);
 
-let modelMap = {};
+    let modelMap = {};
 
-if (modelIds.length > 0) {
-  try {
-    const models = await selectWithJoins(
-      "itemmaster",
-      [],
-      { itemId: modelIds },
-      ["itemId", "itemName"],
-    );
+    if (modelIds.length > 0) {
+      try {
+        const models = await selectWithJoins(
+          "itemmaster",
+          [],
+          { itemId: modelIds },
+          ["itemId", "itemName"],
+        );
 
-    modelMap = models.reduce((map, m) => {
-      map[String(m.itemId)] = m.itemName || "";
-      return map;
-    }, {});
-  } catch (err) {
-    console.error("Error fetching models:", err.message);
-  }
-}
+        modelMap = models.reduce((map, m) => {
+          map[String(m.itemId)] = m.itemName || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching models:", err.message);
+      }
+    }
 
-const data = workOrders.map((workOrder) => ({
-  id: String(workOrder.workOrderId),
+    const data = workOrders.map((workOrder) => ({
+      id: String(workOrder.workOrderId),
 
-  financialYearId: workOrder.financialYearId,
+      financialYearId: workOrder.financialYearId,
 
-  workOrderNo: workOrder.workOrderNo || "",
-  salesOrderId: workOrder.salesOrderId,
-  salesOrderNo: salesOrderMap[String(workOrder.salesOrderId)] || "",
+      workOrderNo: workOrder.workOrderNo || "",
+      salesOrderId: workOrder.salesOrderId,
+      salesOrderNo: salesOrderMap[String(workOrder.salesOrderId)] || "",
 
-  customerName: workOrder.customerName || "",
-  mobile: workOrder.mobile || "",
-  email: workOrder.email || "",
-  address: workOrder.address || "",
-  city: workOrder.city || "",
-  model: workOrder.model || "",
-  modelName: modelMap[String(workOrder.model)] || "",
+      customerName: workOrder.customerName || "",
+      mobile: workOrder.mobile || "",
+      email: workOrder.email || "",
+      address: workOrder.address || "",
+      city: workOrder.city || "",
+      model: workOrder.model || "",
+      modelName: modelMap[String(workOrder.model)] || "",
 
-  qty: Number(workOrder.qty) || 0,
-  totalPrice: Number(workOrder.totalPrice) || 0,
-  gst: Number(workOrder.gst) || 0,
-  grandTotal: Number(workOrder.grandTotal) || 0,
+      qty: Number(workOrder.qty) || 0,
+      totalPrice: Number(workOrder.totalPrice) || 0,
+      gst: Number(workOrder.gst) || 0,
+      grandTotal: Number(workOrder.grandTotal) || 0,
 
-  createdBy: workOrder.createdBy || "",
-  createdType: workOrder.createdtype || "",
+      createdBy: workOrder.createdBy || "",
+      createdType: workOrder.createdtype || "",
 
-  createdAt: workOrder.created,
-  updatedAt: workOrder.updated,
-}));
+      createdAt: workOrder.created,
+      updatedAt: workOrder.updated,
+    }));
 
-return successResponse(res, data, "Work Order list fetched successfully");
+    return successResponse(res, data, "Work Order list fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
@@ -580,7 +619,10 @@ const updateWorkOrder = async (req, res) => {
     // ========================================================
 
     if (!financialYearId) {
-      return errorResponse(res, "Financial Year not found. Please select a company year.");
+      return errorResponse(
+        res,
+        "Financial Year not found. Please select a company year.",
+      );
     }
 
     if (!normalizeId(salesOrderId)) {
@@ -600,7 +642,7 @@ const updateWorkOrder = async (req, res) => {
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
     }
- const duplicate = await selectWithJoins(
+    const duplicate = await selectWithJoins(
       "workorder",
       [],
       { companyId, salesOrderId, delete: 0 },
@@ -614,9 +656,10 @@ const updateWorkOrder = async (req, res) => {
     if (conflictsWithAnother) {
       return errorResponse(
         res,
-        `Work Order already exists for this Sales Order (${duplicate.find(
-          (row) => String(row.workOrderId) !== String(id),
-        )?.workOrderNo}).`,
+        `Work Order already exists for this Sales Order (${
+          duplicate.find((row) => String(row.workOrderId) !== String(id))
+            ?.workOrderNo
+        }).`,
       );
     }
     const finalQty = Number(qty) || 0;
@@ -628,6 +671,26 @@ const updateWorkOrder = async (req, res) => {
     const finalTotalPrice = round2(totalPrice);
     const finalGst = round2(gst);
     const finalGrandTotal = round2(grandTotal);
+
+    // ========================================================
+    // CHECK MODEL (PRODUCT) BELONGS TO THIS COMPANY
+    // ========================================================
+
+    if (model) {
+      const modelRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: normalizeId(model), companyId, delete: 0 },
+        ["itemId"],
+      );
+
+      if (!modelRows.length) {
+        return errorResponse(
+          res,
+          "Selected product was not found for this company.",
+        );
+      }
+    }
 
     // ========================================================
     // UPDATE
