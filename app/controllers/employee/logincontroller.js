@@ -1,3 +1,4 @@
+const { isWithinAllowedRadius } = require("../../helper/geoDistance.js");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const {
@@ -7,6 +8,7 @@ const {
   selectWithJoins,
   selectWithJoinsV2,
   updateModel,
+    saveModel,
 } = require("../../helper/index.js");
 
 // ---------------- LOGIN ----------------
@@ -66,7 +68,42 @@ const employeeLogin = async (req, res) => {
     }
 
     const company = companyRows[0];
+      const { latitude, longitude } = req.body;
 
+    const companyDetailsRows = await selectWithJoins(
+      "companydetails",
+      [],
+      { companyId: employee.companyId, delete: 0 },
+      ["latitude", "longitude"]
+    );
+
+    const companyDetails = companyDetailsRows[0];
+
+ if (
+      companyDetails &&
+      companyDetails.latitude != null &&
+      companyDetails.longitude != null
+    ) {
+      if (latitude == null || longitude == null) {
+        return requiredmessage(
+          res,
+          "Location access is required to login. Please enable location and try again."
+        );
+      }
+
+      const { withinRange } = isWithinAllowedRadius(
+        { latitude: companyDetails.latitude, longitude: companyDetails.longitude },
+        { latitude, longitude },
+        100 // allowed radius in meters
+      );
+
+      if (!withinRange) {
+        return requiredmessage(
+          res,
+          "You must be within office premises to login."
+        );
+      }
+    }
     // ---- Step 4: company expiry date check ----
     if (company.expiryDate) {
       const expiry = new Date(company.expiryDate);
@@ -96,7 +133,7 @@ const employeeLogin = async (req, res) => {
       }
     }
 
-    // ---- Step 6: token generate & save ----
+   
     const token = crypto.randomBytes(30).toString("hex");
 
     await updateModel(
@@ -104,6 +141,32 @@ const employeeLogin = async (req, res) => {
       { token, updated: new Date() },
       { employeeId: employee.employeeId }
     );
+
+    // ---- Step 6.5: Attendance check-in (saved directly on employee row) ----
+       // ---- Step 6.5: Attendance check-in (attendance table, one row per session) ----
+    const openAttendanceRows = await selectWithJoins(
+      "attendance",
+      [],
+      { employeeId: employee.employeeId, checkoutTime: null, delete: 0 },
+      ["attendanceId"]
+    );
+
+    // agar pehle se koi open session hai (checkout nahi hua), naya row nahi banega
+       if (openAttendanceRows.length === 0) {
+      const now = new Date();
+      const checkinDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+      await saveModel("attendance", {
+        companyId: employee.companyId,
+        employeeId: employee.employeeId,
+        employeeName: employee.employeeName,
+        checkinDate,
+        checkinTime: now,
+        checkinLatitude: latitude ?? null,
+        checkinLongitude: longitude ?? null,
+        delete: 0,
+      });
+    }
 
     const responseData = {
       employeeId: employee.employeeId,
@@ -239,9 +302,47 @@ const getEmployeeProfile = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
+// ---------------- CHECK OUT ----------------
+// ---------------- CHECK OUT ----------------
+const employeeCheckout = async (req, res) => {
+  try {
+    const employeeId = req.employeeId;
 
+    if (!employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const openRows = await selectWithJoins(
+      "attendance",
+      [],
+      { employeeId, checkoutTime: null, delete: 0 },
+      ["attendanceId", "checkinTime"],
+      [["attendanceId", "DESC"]]
+    );
+
+    if (openRows.length === 0) {
+      return errorResponse(res, "No active check-in found. Please check in first.");
+    }
+
+    const record = openRows[0];
+    const checkoutTime = new Date();
+    const checkinTime = new Date(record.checkinTime);
+    const countTime = Math.floor((checkoutTime - checkinTime) / 1000); // seconds
+
+    await updateModel(
+      "attendance",
+      { checkoutTime, countTime, updated: new Date() },
+      { attendanceId: record.attendanceId }
+    );
+
+    return successResponse(res, { countTime }, "Checked out successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
 module.exports = {
   employeeLogin,
+  employeeCheckout,
   getFinancialYears,
   getEmployeeProfile,
 };

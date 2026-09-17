@@ -30,6 +30,8 @@ const createEmployee = async (req, res) => {
       alternateNumber,
       email,
       password,
+      createdBy,   
+      createdType, 
     } = req.body;
 
     // role exists aur usi department ka hona chahiye
@@ -84,8 +86,8 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-      createdBy: companyId,
-      createdType: "Super Admin",
+    createdBy,       
+      createdType, 
       delete: 0,
     };
 
@@ -158,9 +160,27 @@ const getEmployeeList = async (req, res) => {
       }, {});
     }
 
+    // ✅ NAYA: same createdByIds employee table me bhi check karo — employeeName nikal ke map karna
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
     const data = (list || []).map((row) => ({
       ...row.toJSON ? row.toJSON() : row,
-      createdBy: companyMap[String(row.createdBy)] || row.createdBy,
+      createdBy:
+        companyMap[String(row.createdBy)] ||
+        employeeMap[String(row.createdBy)] ||
+        row.createdBy,
     }));
 
     return successResponse(res, data, "Employee list fetched successfully");

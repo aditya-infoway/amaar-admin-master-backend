@@ -21,7 +21,7 @@ const validate = (schema) => (req, res, next) => {
 module.exports = (app) => {
   routes.use(checktoken);
   routes.post("/login", validate(employeeValidation.employeeLogin), employee.employeeLogin);
-
+routes.post("/checkout", employee.employeeCheckout);
   routes.get("/financial-years", employee.getFinancialYears);
 
   app.use("/employee/", routes);

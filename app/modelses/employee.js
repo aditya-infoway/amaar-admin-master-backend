@@ -138,6 +138,7 @@ module.exports = sequelize => {
     workingHoursFrom: { type: DataTypes.STRING(10), allowNull: true, field: "workingHoursFrom" },
     workingHoursTo: { type: DataTypes.STRING(10), allowNull: true, field: "workingHoursTo" },
     workingShift: { type: DataTypes.STRING(30), allowNull: true, field: "workingShift" },
+    
     createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,
