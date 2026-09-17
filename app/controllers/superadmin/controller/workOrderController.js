@@ -600,7 +600,25 @@ const updateWorkOrder = async (req, res) => {
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
     }
+ const duplicate = await selectWithJoins(
+      "workorder",
+      [],
+      { companyId, salesOrderId, delete: 0 },
+      ["workOrderId", "workOrderNo"],
+    );
 
+    const conflictsWithAnother = duplicate.some(
+      (row) => String(row.workOrderId) !== String(id),
+    );
+
+    if (conflictsWithAnother) {
+      return errorResponse(
+        res,
+        `Work Order already exists for this Sales Order (${duplicate.find(
+          (row) => String(row.workOrderId) !== String(id),
+        )?.workOrderNo}).`,
+      );
+    }
     const finalQty = Number(qty) || 0;
 
     if (finalQty <= 0) {

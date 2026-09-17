@@ -605,10 +605,9 @@ const getPurchaseItemList = async (req, res) => {
     const list = await selectWithJoinsV2(
       "itemmaster", [],
       { 'itemmaster."companyId"': companyId, 'itemmaster."delete"': 0 },
-      [
+          [
         'itemmaster."itemId"', 'itemmaster."itemCode"', 'itemmaster."itemName"',
         'itemmaster."hsnCode"', 'itemmaster."unit"', 'itemmaster."taxSlab"',
-        // 'itemmaster."purchasePrice"',
       ],
       [['itemmaster."itemId"', "DESC"]], 0, 0
     );

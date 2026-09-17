@@ -17,7 +17,7 @@ const itemNode = Joi.object({
 
   quantity: Joi.string().trim().allow("", null),
   unit: Joi.string().trim().allow("", null),
-
+  source: Joi.string().trim().valid("child", "subbom").allow("", null),
   serialNo: Joi.string().trim().allow("", null),
   asslyQty: Joi.string().trim().allow("", null),
   ldDay: Joi.string().trim().allow("", null),
@@ -49,6 +49,7 @@ const createBom = Joi.object().keys({
     "string.empty": "BOM Code is required",
   }),
   status: Joi.string().trim().valid("active", "inactive").default("active"),
+  finishedGoodsItemId: Joi.number().integer().positive().allow(null).optional(),
   items: Joi.array().items(itemNode).min(1).required().messages({
     "array.min": "Please add at least one item to BOM",
   }),

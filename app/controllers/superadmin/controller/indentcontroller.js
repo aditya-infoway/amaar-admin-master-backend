@@ -114,6 +114,18 @@ const createIndent = async (req, res) => {
       return errorResponse(res, "No material availability rows to save.");
     }
 
+    // ---- only rows that actually need purchasing go into the Indent ----
+    const itemsToIndent = items.filter(
+      (row) => (Number(row.purchaseRequired) || 0) > 0,
+    );
+    if (itemsToIndent.length === 0) {
+      await t.rollback();
+      return errorResponse(
+        res,
+        "All items are fully in stock — nothing to indent.",
+      );
+    }
+
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) {
       await t.rollback();
@@ -171,7 +183,7 @@ const createIndent = async (req, res) => {
       { transaction: t },
     );
 
-    for (const row of items) {
+    for (const row of itemsToIndent) {
       await IndentItem.create(
         {
           indentId: indent.indentId,
@@ -185,6 +197,8 @@ const createIndent = async (req, res) => {
           itemLocation: row.itemLocation || "",
           category: row.category || "",
           unit: row.unit || "",
+          hsnCode: row.hsnCode || "",
+          taxSlab: row.taxSlab || "",
           availableStock: Number(row.availableStock) || 0,
           requiredStock: Number(row.requiredStock) || 0,
           purchaseRequired: Number(row.purchaseRequired) || 0,
@@ -281,6 +295,8 @@ const getIndentById = async (req, res) => {
       { indentId: id, companyId },
       [
         "indentItemId",
+        "itemId",             
+    "bomItemId",   
         "itemCode",
         "itemName",
         "hsnCode",
@@ -288,6 +304,8 @@ const getIndentById = async (req, res) => {
         "itemLocation",
         "category",
         "unit",
+        "hsnCode",
+        "taxSlab",
         "availableStock",
         "requiredStock",
         "purchaseRequired",
@@ -317,35 +335,33 @@ const getIndentById = async (req, res) => {
 
 
 
-
-
-// ---------------- GET INDENTS FOR PO DROPDOWN ----------------
+// ---------------- LIST INDENTS AVAILABLE FOR PO CREATION ----------------
 const getIndentsForPO = async (req, res) => {
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const { financialYearId } = req.query;
-    const where = { companyId, delete: 0 };
-    if (financialYearId) where.financialYearId = financialYearId;
-
-    const indents = await selectWithJoins(
+    const rows = await selectWithJoins(
       "indent",
       [],
-      where,
-      ["indentId", "indentNo", "workOrderId", "modelName", "created"],
-      [["indentId", "DESC"]]
+      { companyId, delete: 0 },
+      ["indentId", "indentNo", "workOrderId", "modelName", "status", "created"],
+      [["indentId", "DESC"]],
     );
 
-    const data = indents.map((i) => ({
-      id: i.indentId,
-      indentId: i.indentId,
-      indentNo: i.indentNo,
-      label: i.indentNo,           // for Combobox display
-      modelName: i.modelName || "",
-    }));
+    if (!rows.length) return successResponse(res, [], "Indents fetched successfully");
 
-    return successResponse(res, data, "Indents fetched successfully");
+    // NEW: pull indentIds already used on a saved PO, exclude them
+    const usedPOs = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { indentId: rows.map((r) => r.indentId), companyId, delete: 0 },
+      ["indentId"],
+    );
+    const usedIndentIds = new Set(usedPOs.map((p) => p.indentId));
+    const available = rows.filter((r) => !usedIndentIds.has(r.indentId));
+
+    return successResponse(res, available, "Indents fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }

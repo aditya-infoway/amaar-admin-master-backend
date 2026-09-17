@@ -171,7 +171,7 @@ const getMaterialAvailability = async (req, res) => {
       const requiredStock = round2((Number(li.quantity) || 0) * productionQty);
       const purchaseRequired = round2(Math.max(requiredStock - availableStock, 0));
 
-      return {
+          return {
         bomItemId: li.bomItemId,
         itemId: li.itemId,
         itemCode: item ? item.itemCode : "(item not found)",
