@@ -171,6 +171,11 @@ const createBom = async (req, res) => {
 
     const { bomName, bomCode, status, items, finishedGoodsItemId } = req.body;
 
+    if (!finishedGoodsItemId) {
+      await t.rollback();
+      return errorResponse(res, "Finished Goods Item is required.");
+    }
+
     // duplicate bomCode check (company level)
     const existing = await Bom.findOne({
       where: { companyId, bomCode, delete: 0 },
@@ -198,7 +203,7 @@ const createBom = async (req, res) => {
     const header = await Bom.create(
       {
         companyId,
-           finishedGoodsItemId: finishedGoodsItemId || null,
+        finishedGoodsItemId: finishedGoodsItemId || null,
         bomName,
         bomCode,
         status: status || "active",
@@ -325,7 +330,13 @@ const updateBom = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { bomId, bomName, bomCode, status, items, finishedGoodsItemId } = req.body;
+    const { bomId, bomName, bomCode, status, items, finishedGoodsItemId } =
+      req.body;
+
+    if (!finishedGoodsItemId) {
+      await t.rollback();
+      return errorResponse(res, "Finished Goods Item is required.");
+    }
 
     const header = await Bom.findOne({
       where: { bomId, companyId, delete: 0 },
@@ -351,7 +362,14 @@ const updateBom = async (req, res) => {
     }
 
     await header.update(
-      { bomName, bomCode, status: status || "active",  finishedGoodsItemId: finishedGoodsItemId ?? header.finishedGoodsItemId, updated: new Date() },
+      {
+        bomName,
+        bomCode,
+        status: status || "active",
+        // finishedGoodsItemId: finishedGoodsItemId ?? header.finishedGoodsItemId,
+        finishedGoodsItemId: finishedGoodsItemId,
+        updated: new Date(),
+      },
       { transaction: t },
     );
 
@@ -435,8 +453,6 @@ const checkItemCodeExists = async (req, res) => {
   }
 };
 
-
-
 // ---------------- GET SUB BOM CHILDREN BY ITEM CODE (full nested tree) ----------------
 // Finds the given item code as a NODE anywhere inside any of this
 // company's BOM trees (it doesn't need to be a root/Finished-Goods
@@ -466,7 +482,10 @@ const getSubBomById = async (req, res) => {
     );
 
     if (itemRows.length === 0) {
-      return errorResponse(res, `Item code "${code}" not found in Item Master.`);
+      return errorResponse(
+        res,
+        `Item code "${code}" not found in Item Master.`,
+      );
     }
 
     const targetItem = itemRows[0];
@@ -482,7 +501,7 @@ const getSubBomById = async (req, res) => {
     if (bomIds.length === 0) {
       return errorResponse(
         res,
-        `Item "${code}" was not found inside any existing BOM.`
+        `Item "${code}" was not found inside any existing BOM.`,
       );
     }
 
@@ -497,7 +516,7 @@ const getSubBomById = async (req, res) => {
     if (matchingNodes.length === 0) {
       return errorResponse(
         res,
-        `Item "${code}" was not found inside any existing BOM.`
+        `Item "${code}" was not found inside any existing BOM.`,
       );
     }
 
@@ -523,7 +542,7 @@ const getSubBomById = async (req, res) => {
     if (!chosenNode) {
       return errorResponse(
         res,
-        `Item "${code}" exists in a BOM, but has no child items under it.`
+        `Item "${code}" exists in a BOM, but has no child items under it.`,
       );
     }
 
@@ -554,19 +573,13 @@ const getSubBomById = async (req, res) => {
         status: chosenNode.status || "active",
         items,
       },
-      "Sub BOM children fetched successfully"
+      "Sub BOM children fetched successfully",
     );
   } catch (error) {
     console.error("getSubBomById Error:", error);
-    return errorResponse(
-      res,
-      error.message || "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
-
 
 // ---------------- LIST SUB BOM (items that have children somewhere) ----------------
 const getSubBomList = async (req, res) => {
