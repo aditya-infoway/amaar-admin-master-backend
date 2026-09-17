@@ -438,50 +438,50 @@ const getPurchaseOrderById = async (req, res) => {
   }
 };
 
-// const getIndentItemsForPO = async (req, res) => {
-//   try {
-//     const companyId = req.companyId;
-//     if (!companyId)
-//       return requiredmessage(res, "Unauthorized. Please login again.");
+const getIndentItemsForPO = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
-//     const { indentId } = req.params;
-//     if (!indentId) return errorResponse(res, "Indent id is required.");
+    const { indentId } = req.params;
+    if (!indentId) return errorResponse(res, "Indent id is required.");
 
-//     const rows = await selectWithJoins(
-//       "indentitem",
-//       [],
-//       { indentId, companyId },
-//       [
-//         "indentItemId",
-//         "itemId",
-//         "itemCode",
-//         "itemName",
-//         "unit",
-//         "hsnCode",
-//         "taxSlab",
-//         "purchaseRequired",
-//       ],
-//     );
+    const rows = await selectWithJoins(
+      "indentitem",
+      [],
+      { indentId, companyId },
+      [
+        "indentItemId",
+        "itemId",
+        "itemCode",
+        "itemName",
+        "unit",
+        "hsnCode",
+        "taxSlab",
+        "purchaseRequired",
+      ],
+    );
 
-//     const items = rows.map((r) => ({
-//       id: r.indentItemId,
-//       itemId: r.itemId,
-//       itemCode: r.itemCode,
-//       itemName: r.itemName,
-//       unit: r.unit,
-//       hsn: r.hsnCode || "",
-//       qty: Number(r.purchaseRequired) || 0,
-//       rate: 0,
-//       gstPct: Number(r.taxSlab) || 0,
-//     }));
+    const items = rows.map((r) => ({
+      id: r.indentItemId,
+      itemId: r.itemId,
+      itemCode: r.itemCode,
+      itemName: r.itemName,
+      unit: r.unit,
+      hsn: r.hsnCode || "",
+      qty: Number(r.purchaseRequired) || 0,
+      rate: 0,
+      gstPct: Number(r.taxSlab) || 0,
+    }));
 
-//     return successResponse(res, items, "Indent items fetched successfully");
-//   } catch (error) {
-//     return errorResponse(res, error.message || "Something Went Wrong", error);
-//   }
-// };
+    return successResponse(res, items, "Indent items fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
 
-// ---------------- GET NEXT SERIAL NO (preview only, shown on Create page) ----------------
+
 const getNextSerialNo = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -576,4 +576,6 @@ module.exports = {
   getNextPoNumber, getItemSupplierInfo,
   createPurchaseOrder, getPurchaseOrderList, getPurchaseOrderById,
   getIndentItemsForPO,
+   getNextSerialNo,
+  getVendorHistory,
 };
