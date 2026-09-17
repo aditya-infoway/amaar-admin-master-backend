@@ -62,6 +62,10 @@ const updateBom = createBom.keys({
   bomId: Joi.number().required().messages({
     "number.base": "BOM id is required",
   }),
+   finishedGoodsItemId: Joi.number().integer().positive().required().messages({
+    "any.required": "Finished Goods Item is required",
+    "number.base": "Finished Goods Item is required",
+  }),
 });
 
 const deleteBom = Joi.object().keys({
