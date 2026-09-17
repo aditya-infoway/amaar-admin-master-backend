@@ -66,10 +66,9 @@ const getItemSupplierInfo = async (req, res) => {
         },
       ],
       {
-        'purchasedetails."itemId"': itemId,
-        'purchasedetails."companyId"': companyId,
-        'purchasedetails."delete"': 0,
-        'p."delete"': 0,
+        'account."companyId"': companyId,
+        'account."groupId"': { IN: "(30,34)" },
+        'account."delete"': 0,
       },
       [
         'a.id AS "supplierId"',
@@ -646,6 +645,83 @@ const getVendorHistory = async (req, res) => {
       details,
       "Vendor purchase history fetched successfully",
     );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
+
+// ---------------- GET INDENT ITEMS FOR PO (Indent Details tab) ----------------
+const getIndentItemsForPO = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { indentId } = req.params;
+    if (!indentId) return errorResponse(res, "Indent id is required.");
+
+    const indentRows = await selectWithJoins(
+      "indent",
+      [],
+      { indentId, companyId, delete: 0 },
+      ["indentId", "indentNo"]
+    );
+    if (indentRows.length === 0) {
+      return errorResponse(res, "Indent not found.");
+    }
+
+    const items = await selectWithJoins(
+      "indentitem",
+      [],
+      { indentId, companyId },
+      [
+        "indentItemId",
+        "itemId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "taxSlab",
+        "unit",
+        "purchaseRequired",
+        "requiredStock",
+        "availableStock",
+      ]
+    );
+
+    // ★ Fix: if itemId is null, try to find it from itemmaster using itemCode
+    const data = [];
+    for (const item of items) {
+      let finalItemId = item.itemId;
+
+      if (!finalItemId && item.itemCode) {
+        const master = await selectWithJoins(
+          "itemmaster",
+          [],
+          { itemCode: item.itemCode, companyId, delete: 0 },
+          ["itemId"]
+        );
+        if (master.length > 0) {
+          finalItemId = master[0].itemId;
+        }
+      }
+
+      data.push({
+        id: item.indentItemId,
+        itemId: finalItemId,                    // ← now will have value
+        itemCode: item.itemCode || "",
+        itemName: item.itemName || "",
+        hsn: item.hsnCode || "",
+        hsnCode: item.hsnCode || "",
+        unit: item.unit || "",
+        qty: Number(item.purchaseRequired) || 0,
+        rate: 0,
+        gstPct: parseFloat(item.taxSlab) || 0,
+        taxSlab: item.taxSlab || "",
+      });
+    }
+
+    return successResponse(res, data, "Indent items fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }

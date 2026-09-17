@@ -46,6 +46,18 @@ module.exports = (sequelize) => {
       field: "itemName",
     },
 
+    hsnCode: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      field: "hsnCode",
+    },
+
+    taxSlab: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "taxSlab",
+    },
+
     itemLocation: {
       type: DataTypes.STRING(150),
       allowNull: true,
@@ -117,16 +129,10 @@ module.exports = (sequelize) => {
 
     comment: "",
 
-    indexes: [
-      { fields: ["indentId"] },
-    ],
+    indexes: [{ fields: ["indentId"] }],
   };
 
-  const IndentItemModel = sequelize.define(
-    "indentItem",
-    attributes,
-    options
-  );
+  const IndentItemModel = sequelize.define("indentItem", attributes, options);
 
   return IndentItemModel;
 };

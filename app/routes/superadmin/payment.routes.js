@@ -28,5 +28,11 @@ module.exports = (app) => {
   routes.get("/cash-book", payment.getCashBook);  
   routes.get("/bank-book", payment.getBankBook);
 
+  routes.get("/cash-receipt/list", payment.getCashReceiptList);
+routes.post("/cash-receipt/create", validate(paymentValidation.createCashReceipt), payment.createCashReceipt);
+
+routes.get("/bank-receipt/list", payment.getBankReceiptList);
+routes.post("/bank-receipt/create", validate(paymentValidation.createBankReceipt), payment.createBankReceipt);
+
   app.use("/payment", routes);
 };
