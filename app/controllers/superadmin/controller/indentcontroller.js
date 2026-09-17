@@ -192,6 +192,8 @@ const createIndent = async (req, res) => {
           itemId: row.itemId || null,
           itemCode: row.itemCode || "",
           itemName: row.itemName || "",
+          hsnCode: row.hsnCode || "",
+          taxSlab: row.taxSlab || "",
           itemLocation: row.itemLocation || "",
           category: row.category || "",
           unit: row.unit || "",
@@ -297,6 +299,8 @@ const getIndentById = async (req, res) => {
     "bomItemId",   
         "itemCode",
         "itemName",
+        "hsnCode",
+        "taxSlab",
         "itemLocation",
         "category",
         "unit",
@@ -331,33 +335,35 @@ const getIndentById = async (req, res) => {
 
 
 
-// ---------------- LIST INDENTS AVAILABLE FOR PO CREATION ----------------
+
+
+// ---------------- GET INDENTS FOR PO DROPDOWN ----------------
 const getIndentsForPO = async (req, res) => {
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const rows = await selectWithJoins(
+    const { financialYearId } = req.query;
+    const where = { companyId, delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const indents = await selectWithJoins(
       "indent",
       [],
-      { companyId, delete: 0 },
-      ["indentId", "indentNo", "workOrderId", "modelName", "status", "created"],
-      [["indentId", "DESC"]],
+      where,
+      ["indentId", "indentNo", "workOrderId", "modelName", "created"],
+      [["indentId", "DESC"]]
     );
 
-    if (!rows.length) return successResponse(res, [], "Indents fetched successfully");
+    const data = indents.map((i) => ({
+      id: i.indentId,
+      indentId: i.indentId,
+      indentNo: i.indentNo,
+      label: i.indentNo,           // for Combobox display
+      modelName: i.modelName || "",
+    }));
 
-    // NEW: pull indentIds already used on a saved PO, exclude them
-    const usedPOs = await selectWithJoins(
-      "purchaseorder",
-      [],
-      { indentId: rows.map((r) => r.indentId), companyId, delete: 0 },
-      ["indentId"],
-    );
-    const usedIndentIds = new Set(usedPOs.map((p) => p.indentId));
-    const available = rows.filter((r) => !usedIndentIds.has(r.indentId));
-
-    return successResponse(res, available, "Indents fetched successfully");
+    return successResponse(res, data, "Indents fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }

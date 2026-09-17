@@ -50,109 +50,37 @@ const getItemSupplierInfo = async (req, res) => {
     const { itemId } = req.params;
     if (!itemId) return errorResponse(res, "Item id is required.");
 
-    // ---- purchase (bill) history ----
-    const billRows = await selectWithJoinsV2(
-      "purchasedetails",
-      [
-        {
-          table: "purchase",
-          alias: "p",
-          onClause: { 'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' } },
-        },
-        {
-          table: "account",
-          alias: "a",
-          onClause: { "a.id": { "=": 'p."accountId"' } },
-        },
-      ],
+    // ---- directly list Sundry Creditor / Supplier accounts (groupId 30, 34) ----
+    const supplierRows = await selectWithJoinsV2(
+      "account",
+      [],
       {
-        'purchasedetails."itemId"': itemId,
-        'purchasedetails."companyId"': companyId,
-        'purchasedetails."delete"': 0,
-        'p."delete"': 0,
+        'account."companyId"': companyId,
+        'account."groupId"': { IN: "(30,34)" },
+        'account."delete"': 0,
       },
       [
-        'a.id AS "supplierId"',
-        'a."accountName" AS "supplierName"',
-        'purchasedetails.rate AS "rate"',
-        'purchasedetails.qty AS "qty"',
-        'p."purchaseDate" AS "purchaseDate"',
-        'p."purchaseBillNo" AS "purchaseBillNo"',
+        "account.id AS \"supplierId\"",
+        'account."accountName" AS "supplierName"',
+        'account."mobileNo"',
+        'account."stateName"',
       ],
-      [['p."purchaseId"', "DESC"]],
-      0,
-      0,
+      [['account."accountName"', "ASC"]],
+      0, 0
     );
 
-    // NEW: same join shape as getVendorHistory (purchaseorderdetails -> purchaseorder),
-    // just filtered by itemId instead of supplierId
-    const poRows = await selectWithJoinsV2(
-      "purchaseorderdetails",
-      [
-        {
-          table: "purchaseorder",
-          alias: "po",
-          onClause: {
-            'po."purchaseOrderId"': { "=": 'purchaseorderdetails."purchaseOrderId"' },
-          },
-        },
-        {
-          table: "account",
-          alias: "a",
-          onClause: { "a.id": { "=": 'purchaseorderdetails."supplierId"' } },
-        },
-      ],
-      {
-        'purchaseorderdetails."itemId"': itemId,
-        'purchaseorderdetails."companyId"': companyId,
-        'purchaseorderdetails."delete"': 0,
-        'po."delete"': 0,
-      },
-      [
-        'a.id AS "supplierId"',
-        'a."accountName" AS "supplierName"',
-        'purchaseorderdetails.rate AS "rate"',
-        'purchaseorderdetails.qty AS "qty"',
-        'po."poDate" AS "purchaseDate"',
-        'po."poNumber" AS "purchaseBillNo"',
-      ],
-      [['po."purchaseOrderId"', "DESC"]],
-      0,
-      0,
-    );
-
-    // NEW: merge both sources, most recent first
-    const rows = [...billRows, ...poRows].sort(
-      (a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime(),
-    );
-
-    const seen = new Set();
-    const supplierRows = [];
-    rows.forEach((row) => {
-      if (!seen.has(row.supplierId)) {
-        seen.add(row.supplierId);
-        supplierRows.push(row);
-      }
-    });
-
-    supplierRows.sort((x, y) => Number(x.rate) - Number(y.rate));
-
+    // ---- koi purchase history nahi mili to itemmaster se fallback rate ----
     let fallback = null;
-    if (supplierRows.length === 0) {
-      const itemRows = await selectWithJoins(
-        "itemmaster",
-        [],
-        { itemId, companyId, delete: 0 },
-        ["taxSlab", "unit", "hsnCode"],
-      );
-      if (itemRows.length > 0) fallback = itemRows[0];
-    }
+    const itemRows = await selectWithJoins(
+      "itemmaster", [], { itemId, companyId, delete: 0 }, ["taxSlab", "unit", "hsnCode"]
+    );
+    if (itemRows.length > 0) fallback = itemRows[0];
 
     return successResponse(
       res,
       {
-        suppliers: supplierRows,
-        lastPurchase: rows[0] || null,
+        suppliers: supplierRows,   // all Sundry Creditor / Supplier accounts
+        lastPurchase: null,
         fallback,
       },
       "Item supplier info fetched successfully",
@@ -204,19 +132,7 @@ const createPurchaseOrder = async (req, res) => {
 
   
 
-    // NEW: figure out the next serial number to continue from, scoped to
-    // this company + financial year (same idea as getNextSerialNo, but done
-    // here at save time so it's authoritative and race-safe-ish per request)
-    const existingForSerial = await selectWithJoins(
-      "purchaseorder",
-      [],
-      { companyId, financialYearId: fy.financialYearId, delete: 0 },
-      ["serialNo"],
-    );
-  const maxExistingSerial = existingForSerial.reduce(
-  (max, row) => Math.max(max, Number(row.serialNo) || 0),
-  0,
-);
+   
 
 // Same serial number for every supplier in this batch
 const batchSerialNo = maxExistingSerial + 1;
@@ -651,13 +567,13 @@ const getVendorHistory = async (req, res) => {
   }
 };
 
+
+
+// ---------------- GET INDENT ITEMS FOR PO (Indent Details tab) ----------------
+
+
 module.exports = {
-  getNextPoNumber,
-  getItemSupplierInfo,
-  createPurchaseOrder,
-  getPurchaseOrderList,
-  getPurchaseOrderById,
+  getNextPoNumber, getItemSupplierInfo,
+  createPurchaseOrder, getPurchaseOrderList, getPurchaseOrderById,
   getIndentItemsForPO,
-  getNextSerialNo,
-  getVendorHistory,
 };
