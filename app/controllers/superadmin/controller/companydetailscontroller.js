@@ -335,6 +335,8 @@ const getCompanyDetails = async (req, res) => {
         "email",
         "website",
         "dateFormat",
+        "latitude",   // ✅ naya
+        "longitude",  // ✅ naya
         "gstNo",
         "vatNo",
         "panNo",
@@ -390,6 +392,8 @@ const updateCompanyDetails = async (req, res) => {
       email,
       website,
       dateFormat,
+      latitude,   // ✅ naya
+      longitude,  // ✅ naya
       gstNo,
       vatNo,
       panNo,
@@ -431,6 +435,8 @@ const updateCompanyDetails = async (req, res) => {
       email,
       website: website || "",
       dateFormat,
+      latitude: latitude || null,     // ✅ naya
+      longitude: longitude || null,   // ✅ naya
       gstNo: gstNo || "",
       vatNo: vatNo || "",
       panNo: panNo || "",

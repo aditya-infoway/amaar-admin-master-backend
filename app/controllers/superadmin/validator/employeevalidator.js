@@ -32,6 +32,13 @@ const createEmployee = Joi.object().keys({
     "string.empty": "Password is required",
     "string.min": "Password must be at least 6 characters",
   }),
+  createdBy: Joi.number().required().messages({
+    "number.base": "createdBy is required",
+    "any.required": "createdBy is required",
+  }),
+  createdType: Joi.string().trim().required().messages({
+    "string.empty": "createdType is required",
+  }),
 });
 
 const updateEmployee = Joi.object().keys({

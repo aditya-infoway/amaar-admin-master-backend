@@ -44,7 +44,8 @@ module.exports = sequelize => {
     dlNo1: { type: DataTypes.STRING(50), allowNull: true, field: "dlNo1" },
     dlNo2: { type: DataTypes.STRING(50), allowNull: true, field: "dlNo2" },
     dealsIn: { type: DataTypes.STRING(255), allowNull: true, field: "dealsIn" },
-
+  latitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "latitude" },
+    longitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "longitude" },
     // Bank Details
     bankHolderName: { type: DataTypes.STRING(255), allowNull: true, field: "bankHolderName" },
     bankAccountNo: { type: DataTypes.STRING(20), allowNull: true, field: "bankAccountNo" },

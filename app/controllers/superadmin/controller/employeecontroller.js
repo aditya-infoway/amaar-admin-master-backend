@@ -30,6 +30,8 @@ const createEmployee = async (req, res) => {
       alternateNumber,
       email,
       password,
+      createdBy,
+      createdType,
     } = req.body;
 
     // role exists aur usi department ka hona chahiye
@@ -84,8 +86,8 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-      createdBy: companyId,
-      createdType: "Super Admin",
+      createdBy,
+      createdType,
       delete: 0,
     };
 
@@ -158,9 +160,27 @@ const getEmployeeList = async (req, res) => {
       }, {});
     }
 
+    // ✅ NAYA: same createdByIds employee table me bhi check karo — employeeName nikal ke map karna
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
     const data = (list || []).map((row) => ({
       ...row.toJSON ? row.toJSON() : row,
-      createdBy: companyMap[String(row.createdBy)] || row.createdBy,
+      createdBy:
+        companyMap[String(row.createdBy)] ||
+        employeeMap[String(row.createdBy)] ||
+        row.createdBy,
     }));
 
     return successResponse(res, data, "Employee list fetched successfully");
@@ -519,7 +539,7 @@ const getRegisteredEmployeeList = async (req, res) => {
         "bloodGroup",
         "personalMobileNo",
         "personalEmail",
-
+        "employeePhoto",
         "aadharNumber",
         "aadharCardUpload",
         "drivingLicenceNumber",
@@ -658,7 +678,9 @@ const registerEmployee = async (req, res) => {
     const voterIdUpload = req.files?.voterIdUpload?.[0]
       ? `/Uploadimages/employee_register/${req.files.voterIdUpload[0].filename}`
       : null;
-
+    const employeePhoto = req.files?.employeePhoto?.[0]
+      ? `/Uploadimages/employee_register/${req.files.employeePhoto[0].filename}`
+      : null;
     // ---- KYC bidirectional validation ----
     const kycError = validateKycPairs(body, {
       aadharCardUpload,
@@ -721,7 +743,7 @@ const registerEmployee = async (req, res) => {
       bloodGroup: body.bloodGroup || null,
       personalMobileNo: String(body.personalMobileNo).trim(),
       personalEmail: body.personalEmail || null,
-
+      employeePhoto,
       aadharNumber: body.aadharNumber || null,
       aadharCardUpload,
       drivingLicenceNumber: body.drivingLicenceNumber || null,
@@ -750,7 +772,7 @@ const registerEmployee = async (req, res) => {
       branchLocation: body.branchLocation || null,
       employeeStatus: body.employeeStatus,
       noticePeriod: body.noticePeriod || null,
-  workingDays: body.workingDays || null,
+      workingDays: body.workingDays || null,
       weeklyOff: body.weeklyOff || null,
       workingHoursFrom: body.workingHoursFrom || null,
       workingHoursTo: body.workingHoursTo || null,
@@ -838,6 +860,7 @@ const getRegisteredEmployeeById = async (req, res) => {
         "personalEmail",
 
         // KYC
+        "employeePhoto",
         "aadharNumber",
         "aadharCardUpload",
         "drivingLicenceNumber",
@@ -869,7 +892,7 @@ const getRegisteredEmployeeById = async (req, res) => {
         "branchLocation",
         "employeeStatus",
         "noticePeriod",
-          "workingDays",
+        "workingDays",
         "weeklyOff",
         "workingHoursFrom",
         "workingHoursTo",
@@ -964,12 +987,13 @@ const updateRegisteredEmployee = async (req, res) => {
         "employeeId",
         "employeeCode",
         "isRegistered",
-  "workingDays",
+        "workingDays",
         "weeklyOff",
         "workingHoursFrom",
         "workingHoursTo",
         "workingShift",
         // Existing KYC files
+        "employeePhoto",
         "aadharCardUpload",
         "drivingLicenceUpload",
         "panUpload",
@@ -1017,7 +1041,10 @@ const updateRegisteredEmployee = async (req, res) => {
       files?.voterIdUpload?.[0]
         ? `/Uploadimages/employee_register/${files.voterIdUpload[0].filename}`
         : existing.voterIdUpload || null;
-
+    const employeePhoto =
+      files?.employeePhoto?.[0]
+        ? `/Uploadimages/employee_register/${files.employeePhoto[0].filename}`
+        : existing.employeePhoto || null;
 
     // ----------------------------------------------------------
     // KYC validation
@@ -1100,7 +1127,7 @@ const updateRegisteredEmployee = async (req, res) => {
       // --------------------------------------------------------
       // KYC
       // --------------------------------------------------------
-
+      employeePhoto,
       aadharNumber:
         body.aadharNumber || null,
 
@@ -1196,7 +1223,7 @@ const updateRegisteredEmployee = async (req, res) => {
 
       noticePeriod:
         body.noticePeriod || null,
-  workingDays:
+      workingDays:
         body.workingDays || existing.workingDays || null,
 
       weeklyOff:
@@ -1264,7 +1291,165 @@ const updateRegisteredEmployee = async (req, res) => {
     );
   }
 };
+// ============================================================
+// GET EMPLOYEE PROFILE
+// Employee Panel - General Profile
+// GET /hr/employee/profile?employeeId=123
+// ============================================================
 
+const getEmployeeProfile = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(
+        res,
+        "Unauthorized. Please login again."
+      );
+    }
+
+    // employeeId comes from query:
+    // /hr/employee/profile?employeeId=123
+    const employeeId = Number(req.query.employeeId);
+
+    if (!employeeId || Number.isNaN(employeeId)) {
+      return errorResponse(
+        res,
+        "Valid Employee ID is required."
+      );
+    }
+
+    const rows = await selectWithJoins(
+      "employee",
+      [],
+      {
+        employeeId,
+        companyId,
+        delete: 0,
+      },
+      [
+        // ------------------------------------------------------
+        // Master Employee
+        // ------------------------------------------------------
+        "employeeId",
+        "companyId",
+        "department",
+        "branch",
+        "roleId",
+        "employeeName",
+        "mobileNumber",
+        "alternateNumber",
+        "email",
+        "status",
+
+        // ------------------------------------------------------
+        // Registration
+        // ------------------------------------------------------
+        "financialYearId",
+        "employeeCode",
+        "isRegistered",
+
+        // ------------------------------------------------------
+        // Personal Details
+        // ------------------------------------------------------
+        "firstName",
+        "lastName",
+        "middleName",
+        "dateOfBirth",
+        "gender",
+        "maritalStatus",
+        "bloodGroup",
+        "personalMobileNo",
+        "personalEmail",
+
+        // ------------------------------------------------------
+        // KYC
+        // ------------------------------------------------------
+        "employeePhoto",
+        "aadharNumber",
+        "drivingLicenceNumber",
+        "panNumber",
+        "voterIdNumber",
+
+        // ------------------------------------------------------
+        // Current Address
+        // ------------------------------------------------------
+        "address",
+        "country",
+        "state",
+        "city",
+        "pincode",
+
+        // ------------------------------------------------------
+        // Permanent Address
+        // ------------------------------------------------------
+        "sameAsPermanentAddress",
+        "permanentAddress",
+        "permanentCountry",
+        "permanentState",
+        "permanentCity",
+        "permanentPincode",
+
+        // ------------------------------------------------------
+        // Employee Details
+        // ------------------------------------------------------
+        "joiningDate",
+        "employeeType",
+        "designation",
+        "branchLocation",
+        "employeeStatus",
+        "noticePeriod",
+
+        // ------------------------------------------------------
+        // Work Information
+        // ------------------------------------------------------
+        "workingDays",
+        "weeklyOff",
+        "workingHoursFrom",
+        "workingHoursTo",
+        "workingShift",
+
+        // ------------------------------------------------------
+        // Audit
+        // ------------------------------------------------------
+        "createdBy",
+        "createdType",
+        "created",
+        "updated",
+      ],
+      [["employeeId", "DESC"]]
+    );
+
+    if (!rows || rows.length === 0) {
+      return requiredmessage(
+        res,
+        "Employee profile not found."
+      );
+    }
+
+    const employee = rows[0].toJSON
+      ? rows[0].toJSON()
+      : rows[0];
+
+    return successResponse(
+      res,
+      employee,
+      "Employee profile fetched successfully"
+    );
+
+  } catch (error) {
+    console.error(
+      "getEmployeeProfile error:",
+      error
+    );
+
+    return errorResponse(
+      res,
+      "Something Went Wrong",
+      error
+    );
+  }
+};
 module.exports = {
   createEmployee,
   getEmployeeList,
@@ -1278,7 +1463,7 @@ module.exports = {
   updateRegisteredEmployee,
 
   deleteEmployee,
-
+getEmployeeProfile,
   getNextEmployeeId,
   getUnregisteredEmployeeList,
   registerEmployee,

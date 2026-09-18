@@ -528,7 +528,7 @@ const getVehicleItemList = async (req, res) => {
         'ig."groupName" AS "groupName"',
         'itemmaster."unit"',
         'itemmaster."taxSlab"',
-        'itemmaster."salesPrice"',
+        // 'itemmaster."salesPrice"',
         'itemmaster."barcode"',
       ],
       [['itemmaster."itemId"', "DESC"]],
@@ -579,7 +579,7 @@ const getItemByBarcode = async (req, res) => {
         'ig."groupName" AS "groupName"',
         'itemmaster."unit"',
         'itemmaster."taxSlab"',
-        'itemmaster."salesPrice"',
+        // 'itemmaster."salesPrice"',
         'itemmaster."barcode"',
       ],
       [],
@@ -608,6 +608,7 @@ const getPurchaseItemList = async (req, res) => {
           [
         'itemmaster."itemId"', 'itemmaster."itemCode"', 'itemmaster."itemName"',
         'itemmaster."hsnCode"', 'itemmaster."unit"', 'itemmaster."taxSlab"',
+        // 'itemmaster."purchasePrice"',
       ],
       [['itemmaster."itemId"', "DESC"]], 0, 0
     );
@@ -839,7 +840,7 @@ const bulkImportItemMaster = async (req, res) => {
         taxSlab: (row.taxSlab || "").trim(),
         purchasePrice: Number(row.purchasePrice) || 0,
         actualPurchasePrice: Number(row.actualPurchasePrice) || 0,
-        salesPrice: Number(row.salesPrice) || 0,
+        // salesPrice: Number(row.salesPrice) || 0,
         mrp: Number(row.mrp) || 0,
         barcode: barcode || null,
       });
@@ -897,7 +898,7 @@ const bulkImportItemMaster = async (req, res) => {
             maxQty: null,
             purchasePrice: row.purchasePrice,
             actualPurchasePrice: row.actualPurchasePrice,
-            salesPrice: row.salesPrice,
+            // salesPrice: row.salesPrice,
             mrp: row.mrp,
             barcodeType: "manual",
             barcode: row.barcode,
@@ -938,7 +939,7 @@ const bulkImportItemMaster = async (req, res) => {
           maxQty: null,
           purchasePrice: row.purchasePrice,
           actualPurchasePrice: row.actualPurchasePrice,
-          salesPrice: row.salesPrice,
+          // salesPrice: row.salesPrice,
           mrp: row.mrp,
           barcodeType: "manual",
           barcode: row.barcode,

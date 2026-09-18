@@ -57,7 +57,9 @@ db.location = require("./location.js")(sequelize, Sequelize);
 db.workorder = require("./workorder.js")(sequelize, Sequelize);
 db.indent = require("./indent.js")(sequelize, Sequelize);
 db.indentitem = require("./indentitem.js")(sequelize, Sequelize);
-
+db.attendance = require("./attendance.js")(sequelize, Sequelize);
+db.grr = require("./grr.js")(sequelize, Sequelize);
+db.grritem = require("./grritem.js")(sequelize, Sequelize);
 
 
 db.sequelize = sequelize;

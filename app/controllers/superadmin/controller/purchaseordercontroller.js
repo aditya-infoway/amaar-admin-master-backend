@@ -50,108 +50,41 @@ const getItemSupplierInfo = async (req, res) => {
     const { itemId } = req.params;
     if (!itemId) return errorResponse(res, "Item id is required.");
 
-    // ---- purchase (bill) history ----
-    const billRows = await selectWithJoinsV2(
-      "purchasedetails",
-      [
-        {
-          table: "purchase",
-          alias: "p",
-          onClause: { 'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' } },
-        },
-        {
-          table: "account",
-          alias: "a",
-          onClause: { "a.id": { "=": 'p."accountId"' } },
-        },
-      ],
+    // ---- directly list Sundry Creditor / Supplier accounts (groupId 30, 34) ----
+    const supplierRows = await selectWithJoinsV2(
+      "account",
+      [],
       {
         'account."companyId"': companyId,
         'account."groupId"': { IN: "(30,34)" },
         'account."delete"': 0,
       },
       [
-        'a.id AS "supplierId"',
-        'a."accountName" AS "supplierName"',
-        'purchasedetails.rate AS "rate"',
-        'purchasedetails.qty AS "qty"',
-        'p."purchaseDate" AS "purchaseDate"',
-        'p."purchaseBillNo" AS "purchaseBillNo"',
+        'account.id AS "supplierId"',
+        'account."accountName" AS "supplierName"',
+        'account."mobileNo"',
+        'account."stateName"',
       ],
-      [['p."purchaseId"', "DESC"]],
+      [['account."accountName"', "ASC"]],
       0,
       0,
     );
 
-    // NEW: same join shape as getVendorHistory (purchaseorderdetails -> purchaseorder),
-    // just filtered by itemId instead of supplierId
-    const poRows = await selectWithJoinsV2(
-      "purchaseorderdetails",
-      [
-        {
-          table: "purchaseorder",
-          alias: "po",
-          onClause: {
-            'po."purchaseOrderId"': { "=": 'purchaseorderdetails."purchaseOrderId"' },
-          },
-        },
-        {
-          table: "account",
-          alias: "a",
-          onClause: { "a.id": { "=": 'purchaseorderdetails."supplierId"' } },
-        },
-      ],
-      {
-        'purchaseorderdetails."itemId"': itemId,
-        'purchaseorderdetails."companyId"': companyId,
-        'purchaseorderdetails."delete"': 0,
-        'po."delete"': 0,
-      },
-      [
-        'a.id AS "supplierId"',
-        'a."accountName" AS "supplierName"',
-        'purchaseorderdetails.rate AS "rate"',
-        'purchaseorderdetails.qty AS "qty"',
-        'po."poDate" AS "purchaseDate"',
-        'po."poNumber" AS "purchaseBillNo"',
-      ],
-      [['po."purchaseOrderId"', "DESC"]],
-      0,
-      0,
-    );
-
-    // NEW: merge both sources, most recent first
-    const rows = [...billRows, ...poRows].sort(
-      (a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime(),
-    );
-
-    const seen = new Set();
-    const supplierRows = [];
-    rows.forEach((row) => {
-      if (!seen.has(row.supplierId)) {
-        seen.add(row.supplierId);
-        supplierRows.push(row);
-      }
-    });
-
-    supplierRows.sort((x, y) => Number(x.rate) - Number(y.rate));
-
+    // ---- koi purchase history nahi mili to itemmaster se fallback rate ----
     let fallback = null;
-    if (supplierRows.length === 0) {
-      const itemRows = await selectWithJoins(
-        "itemmaster",
-        [],
-        { itemId, companyId, delete: 0 },
-        ["taxSlab", "unit", "hsnCode"],
-      );
-      if (itemRows.length > 0) fallback = itemRows[0];
-    }
+    const itemRows = await selectWithJoins(
+      "itemmaster",
+      [],
+      { itemId, companyId, delete: 0 },
+      ["taxSlab", "unit", "hsnCode"],
+    );
+    if (itemRows.length > 0) fallback = itemRows[0];
 
     return successResponse(
       res,
       {
-        suppliers: supplierRows,
-        lastPurchase: rows[0] || null,
+        suppliers: supplierRows, // all Sundry Creditor / Supplier accounts
+        lastPurchase: null,
         fallback,
       },
       "Item supplier info fetched successfully",
@@ -175,7 +108,7 @@ const createPurchaseOrder = async (req, res) => {
       roundAmount,
       status,
       items,
-      indentId, 
+      indentId,
     } = req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
@@ -201,40 +134,23 @@ const createPurchaseOrder = async (req, res) => {
       (groups[row.supplierId] ||= []).push(row);
     }
 
-  
+    // Same serial number for every supplier in this batch
+    const batchSerialNo = maxExistingSerial + 1;
 
-    // NEW: figure out the next serial number to continue from, scoped to
-    // this company + financial year (same idea as getNextSerialNo, but done
-    // here at save time so it's authoritative and race-safe-ish per request)
-    const existingForSerial = await selectWithJoins(
-      "purchaseorder",
-      [],
-      { companyId, financialYearId: fy.financialYearId, delete: 0 },
-      ["serialNo"],
-    );
-  const maxExistingSerial = existingForSerial.reduce(
-  (max, row) => Math.max(max, Number(row.serialNo) || 0),
-  0,
-);
+    const orders = [];
 
-// Same serial number for every supplier in this batch
-const batchSerialNo = maxExistingSerial + 1;
+    for (const supplierId of Object.keys(groups)) {
+      // Generate a UNIQUE PO NUMBER for this supplier
+      const { billNo } = await generateVoucherNo({
+        companyId,
+        financialYearId: fy.financialYearId,
+        tableName: "purchaseorder",
+        idColumn: "purchaseOrderId",
+        prefixFor: "PURCHASE ORDER",
+      });
 
- const orders = [];
-
-for (const supplierId of Object.keys(groups)) {
-
-  // Generate a UNIQUE PO NUMBER for this supplier
-  const { billNo } = await generateVoucherNo({
-    companyId,
-    financialYearId: fy.financialYearId,
-    tableName: "purchaseorder",
-    idColumn: "purchaseOrderId",
-    prefixFor: "PURCHASE ORDER",
-  });
-
-  // Same serial number for ALL suppliers in this batch
-  const serialForThisSupplier = batchSerialNo;
+      // Same serial number for ALL suppliers in this batch
+      const serialForThisSupplier = batchSerialNo;
 
       const supRows = await selectWithJoins(
         "account",
@@ -302,7 +218,7 @@ for (const supplierId of Object.keys(groups)) {
         serialNo: serialForThisSupplier, // unique per supplier
         requiredDate: requiredDate || null,
         branchId: branchId || null,
-        indentId: indentId || null,   
+        indentId: indentId || null,
         narration: narration || "",
         taxableValue: Number(taxableValue.toFixed(2)),
         gstAmount: Number(totalGst.toFixed(2)),
@@ -564,7 +480,6 @@ const getIndentItemsForPO = async (req, res) => {
   }
 };
 
-// ---------------- GET NEXT SERIAL NO (preview only, shown on Create page) ----------------
 const getNextSerialNo = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -581,7 +496,7 @@ const getNextSerialNo = async (req, res) => {
       "purchaseorder",
       [],
       { companyId, financialYearId, delete: 0 },
-      ["serialNo"],   // CHANGED: fetch serialNo instead of purchaseOrderId
+      ["serialNo"], // CHANGED: fetch serialNo instead of purchaseOrderId
     );
 
     const maxExistingSerial = existingPOs.reduce(
@@ -591,7 +506,7 @@ const getNextSerialNo = async (req, res) => {
 
     return successResponse(
       res,
-      { serialNo: maxExistingSerial + 1 },   // CHANGED
+      { serialNo: maxExistingSerial + 1 }, // CHANGED
       "Next serial no fetched successfully",
     );
   } catch (error) {
@@ -650,82 +565,7 @@ const getVendorHistory = async (req, res) => {
   }
 };
 
-
-
 // ---------------- GET INDENT ITEMS FOR PO (Indent Details tab) ----------------
-const getIndentItemsForPO = async (req, res) => {
-  try {
-    const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
-
-    const { indentId } = req.params;
-    if (!indentId) return errorResponse(res, "Indent id is required.");
-
-    const indentRows = await selectWithJoins(
-      "indent",
-      [],
-      { indentId, companyId, delete: 0 },
-      ["indentId", "indentNo"]
-    );
-    if (indentRows.length === 0) {
-      return errorResponse(res, "Indent not found.");
-    }
-
-    const items = await selectWithJoins(
-      "indentitem",
-      [],
-      { indentId, companyId },
-      [
-        "indentItemId",
-        "itemId",
-        "itemCode",
-        "itemName",
-        "hsnCode",
-        "taxSlab",
-        "unit",
-        "purchaseRequired",
-        "requiredStock",
-        "availableStock",
-      ]
-    );
-
-    // ★ Fix: if itemId is null, try to find it from itemmaster using itemCode
-    const data = [];
-    for (const item of items) {
-      let finalItemId = item.itemId;
-
-      if (!finalItemId && item.itemCode) {
-        const master = await selectWithJoins(
-          "itemmaster",
-          [],
-          { itemCode: item.itemCode, companyId, delete: 0 },
-          ["itemId"]
-        );
-        if (master.length > 0) {
-          finalItemId = master[0].itemId;
-        }
-      }
-
-      data.push({
-        id: item.indentItemId,
-        itemId: finalItemId,                    // ← now will have value
-        itemCode: item.itemCode || "",
-        itemName: item.itemName || "",
-        hsn: item.hsnCode || "",
-        hsnCode: item.hsnCode || "",
-        unit: item.unit || "",
-        qty: Number(item.purchaseRequired) || 0,
-        rate: 0,
-        gstPct: parseFloat(item.taxSlab) || 0,
-        taxSlab: item.taxSlab || "",
-      });
-    }
-
-    return successResponse(res, data, "Indent items fetched successfully");
-  } catch (error) {
-    return errorResponse(res, error.message || "Something Went Wrong", error);
-  }
-};
 
 module.exports = {
   getNextPoNumber,

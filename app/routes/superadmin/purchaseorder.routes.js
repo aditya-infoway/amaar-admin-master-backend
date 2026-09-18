@@ -20,7 +20,7 @@ module.exports = (app) => {
    routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
    routes.get("/vendor-history/:vendorId", purchaseOrder.getVendorHistory);
   routes.get("/list", purchaseOrder.getPurchaseOrderList);
-  routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
+  // routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
   routes.get("/:id", purchaseOrder.getPurchaseOrderById);
 
   routes.post("/create", validate(purchaseOrderValidation.createPurchaseOrder), purchaseOrder.createPurchaseOrder);

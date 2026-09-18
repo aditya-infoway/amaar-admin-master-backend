@@ -8,6 +8,8 @@ const employeeLogin = Joi.object({
   password: Joi.string().required().messages({
     "string.empty": "Password is required",
   }),
+  latitude: Joi.number().optional(),
+  longitude: Joi.number().optional(),
 });
 
 module.exports = { employeeLogin };

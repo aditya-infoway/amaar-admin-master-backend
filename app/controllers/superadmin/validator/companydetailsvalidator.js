@@ -2,6 +2,13 @@ const Joi = require("joi");
 
 const optionalString = Joi.string().trim().allow("", null);
 
+// Latitude/Longitude — geofencing ke liye optional (purane companies ke paas
+// abhi set nahi hoga, isliye required nahi rakha). Number ya numeric string
+// dono accept karega (frontend "21.7645" jaisa string bhejta hai).
+const optionalCoordinate = Joi.alternatives()
+  .try(Joi.number(), Joi.string().trim().allow("", null))
+  .optional();
+
 const companyDetailsSchema = Joi.object({
   // Company Information
   companyName: Joi.string().trim().required().messages({
@@ -62,6 +69,10 @@ const companyDetailsSchema = Joi.object({
   dateFormat: Joi.string().trim().required().messages({
     "any.required": "Please select date format",
   }),
+
+  // Geofencing (company location) — optional at signup
+  latitude: optionalCoordinate,
+  longitude: optionalCoordinate,
 
   // Registration Details
   gstNo: optionalString,
@@ -145,6 +156,10 @@ const companyDetailsUpdateSchema = Joi.object({
   email: Joi.string().trim().email({ tlds: false }).required(),
   website: optionalString,
   dateFormat: Joi.string().trim().required(),
+
+  // Geofencing (company location) — optional
+  latitude: optionalCoordinate,
+  longitude: optionalCoordinate,
 
   gstNo: optionalString,
   vatNo: optionalString,
