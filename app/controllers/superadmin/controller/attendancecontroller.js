@@ -46,6 +46,8 @@ const getAttendanceList = async (req, res) => {
         "checkinPhoto",
         "checkinLatitude",
         "checkinLongitude",
+         "lastCheckinTime",   
+        "isCheckedIn",   
         "checkoutTime",
         "checkoutPhoto",
         "checkoutLatitude",

@@ -86,6 +86,7 @@ module.exports = (app) => {
     "/register",
 
     employeeUpload.fields([
+       { name: "employeePhoto", maxCount: 1 },
       {
         name: "aadharCardUpload",
         maxCount: 1,
@@ -142,6 +143,7 @@ module.exports = (app) => {
     "/registered/update/:id",
 
     employeeUpload.fields([
+       { name: "employeePhoto", maxCount: 1 },
       {
         name: "aadharCardUpload",
         maxCount: 1,

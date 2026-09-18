@@ -30,8 +30,8 @@ const createEmployee = async (req, res) => {
       alternateNumber,
       email,
       password,
-      createdBy,   
-      createdType, 
+      createdBy,
+      createdType,
     } = req.body;
 
     // role exists aur usi department ka hona chahiye
@@ -86,8 +86,8 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-    createdBy,       
-      createdType, 
+      createdBy,
+      createdType,
       delete: 0,
     };
 
@@ -539,7 +539,7 @@ const getRegisteredEmployeeList = async (req, res) => {
         "bloodGroup",
         "personalMobileNo",
         "personalEmail",
-
+        "employeePhoto",
         "aadharNumber",
         "aadharCardUpload",
         "drivingLicenceNumber",
@@ -678,7 +678,9 @@ const registerEmployee = async (req, res) => {
     const voterIdUpload = req.files?.voterIdUpload?.[0]
       ? `/Uploadimages/employee_register/${req.files.voterIdUpload[0].filename}`
       : null;
-
+    const employeePhoto = req.files?.employeePhoto?.[0]
+      ? `/Uploadimages/employee_register/${req.files.employeePhoto[0].filename}`
+      : null;
     // ---- KYC bidirectional validation ----
     const kycError = validateKycPairs(body, {
       aadharCardUpload,
@@ -741,7 +743,7 @@ const registerEmployee = async (req, res) => {
       bloodGroup: body.bloodGroup || null,
       personalMobileNo: String(body.personalMobileNo).trim(),
       personalEmail: body.personalEmail || null,
-
+      employeePhoto,
       aadharNumber: body.aadharNumber || null,
       aadharCardUpload,
       drivingLicenceNumber: body.drivingLicenceNumber || null,
@@ -770,7 +772,7 @@ const registerEmployee = async (req, res) => {
       branchLocation: body.branchLocation || null,
       employeeStatus: body.employeeStatus,
       noticePeriod: body.noticePeriod || null,
-  workingDays: body.workingDays || null,
+      workingDays: body.workingDays || null,
       weeklyOff: body.weeklyOff || null,
       workingHoursFrom: body.workingHoursFrom || null,
       workingHoursTo: body.workingHoursTo || null,
@@ -858,6 +860,7 @@ const getRegisteredEmployeeById = async (req, res) => {
         "personalEmail",
 
         // KYC
+        "employeePhoto",
         "aadharNumber",
         "aadharCardUpload",
         "drivingLicenceNumber",
@@ -889,7 +892,7 @@ const getRegisteredEmployeeById = async (req, res) => {
         "branchLocation",
         "employeeStatus",
         "noticePeriod",
-          "workingDays",
+        "workingDays",
         "weeklyOff",
         "workingHoursFrom",
         "workingHoursTo",
@@ -984,12 +987,13 @@ const updateRegisteredEmployee = async (req, res) => {
         "employeeId",
         "employeeCode",
         "isRegistered",
-  "workingDays",
+        "workingDays",
         "weeklyOff",
         "workingHoursFrom",
         "workingHoursTo",
         "workingShift",
         // Existing KYC files
+        "employeePhoto",
         "aadharCardUpload",
         "drivingLicenceUpload",
         "panUpload",
@@ -1037,7 +1041,10 @@ const updateRegisteredEmployee = async (req, res) => {
       files?.voterIdUpload?.[0]
         ? `/Uploadimages/employee_register/${files.voterIdUpload[0].filename}`
         : existing.voterIdUpload || null;
-
+    const employeePhoto =
+      files?.employeePhoto?.[0]
+        ? `/Uploadimages/employee_register/${files.employeePhoto[0].filename}`
+        : existing.employeePhoto || null;
 
     // ----------------------------------------------------------
     // KYC validation
@@ -1120,7 +1127,7 @@ const updateRegisteredEmployee = async (req, res) => {
       // --------------------------------------------------------
       // KYC
       // --------------------------------------------------------
-
+      employeePhoto,
       aadharNumber:
         body.aadharNumber || null,
 
@@ -1216,7 +1223,7 @@ const updateRegisteredEmployee = async (req, res) => {
 
       noticePeriod:
         body.noticePeriod || null,
-  workingDays:
+      workingDays:
         body.workingDays || existing.workingDays || null,
 
       weeklyOff:

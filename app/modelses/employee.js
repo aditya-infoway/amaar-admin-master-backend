@@ -101,6 +101,11 @@ module.exports = sequelize => {
     personalEmail: { type: DataTypes.STRING(200), allowNull: true, field: "personalEmail" },
 
     // ---- Identity & KYC ----
+    employeePhoto: {
+  type: DataTypes.TEXT,
+  allowNull: true,
+  field: "employeePhoto",
+},
     aadharNumber: { type: DataTypes.STRING(50), allowNull: true, field: "aadharNumber" },
     aadharCardUpload: { type: DataTypes.TEXT, allowNull: true, field: "aadharCardUpload" },
     drivingLicenceNumber: { type: DataTypes.STRING(50), allowNull: true, field: "drivingLicenceNumber" },
