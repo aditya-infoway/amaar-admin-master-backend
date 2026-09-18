@@ -60,26 +60,30 @@ const getItemSupplierInfo = async (req, res) => {
         'account."delete"': 0,
       },
       [
-        "account.id AS \"supplierId\"",
+        'account.id AS "supplierId"',
         'account."accountName" AS "supplierName"',
         'account."mobileNo"',
         'account."stateName"',
       ],
       [['account."accountName"', "ASC"]],
-      0, 0
+      0,
+      0,
     );
 
     // ---- koi purchase history nahi mili to itemmaster se fallback rate ----
     let fallback = null;
     const itemRows = await selectWithJoins(
-      "itemmaster", [], { itemId, companyId, delete: 0 }, ["taxSlab", "unit", "hsnCode"]
+      "itemmaster",
+      [],
+      { itemId, companyId, delete: 0 },
+      ["taxSlab", "unit", "hsnCode"],
     );
     if (itemRows.length > 0) fallback = itemRows[0];
 
     return successResponse(
       res,
       {
-        suppliers: supplierRows,   // all Sundry Creditor / Supplier accounts
+        suppliers: supplierRows, // all Sundry Creditor / Supplier accounts
         lastPurchase: null,
         fallback,
       },
@@ -104,7 +108,7 @@ const createPurchaseOrder = async (req, res) => {
       roundAmount,
       status,
       items,
-      indentId, 
+      indentId,
     } = req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
@@ -130,28 +134,23 @@ const createPurchaseOrder = async (req, res) => {
       (groups[row.supplierId] ||= []).push(row);
     }
 
-  
+    // Same serial number for every supplier in this batch
+    const batchSerialNo = maxExistingSerial + 1;
 
-   
+    const orders = [];
 
-// Same serial number for every supplier in this batch
-const batchSerialNo = maxExistingSerial + 1;
+    for (const supplierId of Object.keys(groups)) {
+      // Generate a UNIQUE PO NUMBER for this supplier
+      const { billNo } = await generateVoucherNo({
+        companyId,
+        financialYearId: fy.financialYearId,
+        tableName: "purchaseorder",
+        idColumn: "purchaseOrderId",
+        prefixFor: "PURCHASE ORDER",
+      });
 
- const orders = [];
-
-for (const supplierId of Object.keys(groups)) {
-
-  // Generate a UNIQUE PO NUMBER for this supplier
-  const { billNo } = await generateVoucherNo({
-    companyId,
-    financialYearId: fy.financialYearId,
-    tableName: "purchaseorder",
-    idColumn: "purchaseOrderId",
-    prefixFor: "PURCHASE ORDER",
-  });
-
-  // Same serial number for ALL suppliers in this batch
-  const serialForThisSupplier = batchSerialNo;
+      // Same serial number for ALL suppliers in this batch
+      const serialForThisSupplier = batchSerialNo;
 
       const supRows = await selectWithJoins(
         "account",
@@ -219,7 +218,7 @@ for (const supplierId of Object.keys(groups)) {
         serialNo: serialForThisSupplier, // unique per supplier
         requiredDate: requiredDate || null,
         branchId: branchId || null,
-        indentId: indentId || null,   
+        indentId: indentId || null,
         narration: narration || "",
         taxableValue: Number(taxableValue.toFixed(2)),
         gstAmount: Number(totalGst.toFixed(2)),
@@ -481,7 +480,6 @@ const getIndentItemsForPO = async (req, res) => {
   }
 };
 
-
 const getNextSerialNo = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -498,7 +496,7 @@ const getNextSerialNo = async (req, res) => {
       "purchaseorder",
       [],
       { companyId, financialYearId, delete: 0 },
-      ["serialNo"],   // CHANGED: fetch serialNo instead of purchaseOrderId
+      ["serialNo"], // CHANGED: fetch serialNo instead of purchaseOrderId
     );
 
     const maxExistingSerial = existingPOs.reduce(
@@ -508,7 +506,7 @@ const getNextSerialNo = async (req, res) => {
 
     return successResponse(
       res,
-      { serialNo: maxExistingSerial + 1 },   // CHANGED
+      { serialNo: maxExistingSerial + 1 }, // CHANGED
       "Next serial no fetched successfully",
     );
   } catch (error) {
@@ -567,15 +565,15 @@ const getVendorHistory = async (req, res) => {
   }
 };
 
-
-
 // ---------------- GET INDENT ITEMS FOR PO (Indent Details tab) ----------------
 
-
 module.exports = {
-  getNextPoNumber, getItemSupplierInfo,
-  createPurchaseOrder, getPurchaseOrderList, getPurchaseOrderById,
+  getNextPoNumber,
+  getItemSupplierInfo,
+  createPurchaseOrder,
+  getPurchaseOrderList,
+  getPurchaseOrderById,
   getIndentItemsForPO,
-   getNextSerialNo,
+  getNextSerialNo,
   getVendorHistory,
 };

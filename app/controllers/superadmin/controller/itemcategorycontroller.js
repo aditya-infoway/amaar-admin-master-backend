@@ -10,6 +10,14 @@ const {
 
 const { syncDefaultItemCategories } = require("./companydetailscontroller.js");
 
+
+// ---- helper: normalize for case/whitespace-insensitive comparison ----
+const normalizeCategoryName = (name) =>
+  String(name || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
 // ---------------- CREATE ----------------
 const createItemCategory = async (req, res) => {
   try {
@@ -20,22 +28,27 @@ const createItemCategory = async (req, res) => {
     }
 
     const { categoryName, status } = req.body;
+    const cleanName = categoryName.trim().replace(/\s+/g, " ");
 
-    // categoryName company-wise unique honi chahiye
-    const nameExists = await selectWithJoins(
+    // categoryName company-wise unique honi chahiye (case & spacing insensitive)
+    const existingRows = await selectWithJoins(
       "itemcategory",
       [],
-      { categoryName: categoryName.trim(), companyId, delete: 0 },
-      ["itemCategoryId"]
+      { companyId, delete: 0 },
+      ["itemCategoryId", "categoryName"]
     );
 
-    if (nameExists.length > 0) {
+    const duplicate = existingRows.some(
+      (row) => normalizeCategoryName(row.categoryName) === normalizeCategoryName(cleanName)
+    );
+
+    if (duplicate) {
       return errorResponse(res, "Item category already exists. Please enter a different name.");
     }
 
     const payload = {
       companyId,
-      categoryName: categoryName.trim(),
+      categoryName: cleanName,
       status,
       delete: 0,
     };
@@ -141,6 +154,7 @@ const updateItemCategory = async (req, res) => {
     }
 
     const { itemCategoryId, categoryName, status } = req.body;
+    const cleanName = categoryName.trim().replace(/\s+/g, " ");
 
     const existing = await selectWithJoins(
       "itemcategory",
@@ -154,15 +168,18 @@ const updateItemCategory = async (req, res) => {
     }
 
     // categoryName uniqueness check — same record ke alawa koi aur is naam se na ho
-    const nameExists = await selectWithJoins(
+    // (case & spacing insensitive)
+    const allRows = await selectWithJoins(
       "itemcategory",
       [],
-      { categoryName: categoryName.trim(), companyId, delete: 0 },
-      ["itemCategoryId"]
+      { companyId, delete: 0 },
+      ["itemCategoryId", "categoryName"]
     );
 
-    const nameTakenByOther = nameExists.some(
-      (row) => String(row.itemCategoryId) !== String(itemCategoryId)
+    const nameTakenByOther = allRows.some(
+      (row) =>
+        String(row.itemCategoryId) !== String(itemCategoryId) &&
+        normalizeCategoryName(row.categoryName) === normalizeCategoryName(cleanName)
     );
 
     if (nameTakenByOther) {
@@ -172,7 +189,7 @@ const updateItemCategory = async (req, res) => {
     await updateModelHelper(
       "itemcategory",
       {
-        categoryName: categoryName.trim(),
+        categoryName: cleanName,
         status,
         updated: new Date(),
       },

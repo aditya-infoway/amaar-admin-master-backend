@@ -1,4 +1,5 @@
 const { isWithinAllowedRadius } = require("../../helper/geoDistance.js");
+const { getDateString } = require("../../helper/dateHelper.js");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const {
@@ -144,29 +145,92 @@ const employeeLogin = async (req, res) => {
 
     // ---- Step 6.5: Attendance check-in (saved directly on employee row) ----
        // ---- Step 6.5: Attendance check-in (attendance table, one row per session) ----
-    const openAttendanceRows = await selectWithJoins(
+  const now = new Date();
+const todayDateStr = getDateString(now);
+
+const openAttendanceRows = await selectWithJoins(
+  "attendance",
+  [],
+  { employeeId: employee.employeeId, isCheckedIn: true, delete: 0 },
+  ["attendanceId", "checkinDate", "checkinTime", "lastCheckinTime", "countTime"],
+  [["attendanceId", "DESC"]]
+);
+
+const openRow = openAttendanceRows[0];
+
+if (openRow && openRow.checkinDate === todayDateStr) {
+  await updateModel(
+    "attendance",
+    { updated: now },
+    { attendanceId: openRow.attendanceId }
+  );
+} else if (openRow && openRow.checkinDate !== todayDateStr) {
+  const lastCheckin = new Date(openRow.lastCheckinTime || openRow.checkinTime);
+  const endOfThatDay = new Date(openRow.checkinDate + "T23:59:59");
+  const sessionSeconds = Math.max(0, Math.floor((endOfThatDay - lastCheckin) / 1000));
+  const finalCountTime = (openRow.countTime || 0) + sessionSeconds;
+
+  await updateModel(
+    "attendance",
+    {
+      isCheckedIn: false,
+      checkoutTime: endOfThatDay,
+      countTime: finalCountTime,
+      status: "AUTO_CLOSED",
+      updated: now,
+    },
+    { attendanceId: openRow.attendanceId }
+  );
+
+  await saveModel("attendance", {
+    companyId: employee.companyId,
+    employeeId: employee.employeeId,
+    employeeName: employee.employeeName,
+    checkinDate: todayDateStr,
+    checkinTime: now,
+    lastCheckinTime: now,
+    checkinLatitude: latitude ?? null,
+    checkinLongitude: longitude ?? null,
+    countTime: 0,
+    isCheckedIn: true,
+    delete: 0,
+  });
+} else {
+  const todayRows = await selectWithJoins(
+    "attendance",
+    [],
+    { employeeId: employee.employeeId, checkinDate: todayDateStr, delete: 0 },
+    ["attendanceId", "countTime"]
+  );
+
+  if (todayRows.length > 0) {
+    await updateModel(
       "attendance",
-      [],
-      { employeeId: employee.employeeId, checkoutTime: null, delete: 0 },
-      ["attendanceId"]
-    );
-
-    // agar pehle se koi open session hai (checkout nahi hua), naya row nahi banega
-       if (openAttendanceRows.length === 0) {
-      const now = new Date();
-      const checkinDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-
-      await saveModel("attendance", {
-        companyId: employee.companyId,
-        employeeId: employee.employeeId,
-        employeeName: employee.employeeName,
-        checkinDate,
-        checkinTime: now,
+      {
+        isCheckedIn: true,
+        lastCheckinTime: now,
         checkinLatitude: latitude ?? null,
         checkinLongitude: longitude ?? null,
-        delete: 0,
-      });
-    }
+        updated: now,
+      },
+      { attendanceId: todayRows[0].attendanceId }
+    );
+  } else {
+    await saveModel("attendance", {
+      companyId: employee.companyId,
+      employeeId: employee.employeeId,
+      employeeName: employee.employeeName,
+      checkinDate: todayDateStr,
+      checkinTime: now,
+      lastCheckinTime: now,
+      checkinLatitude: latitude ?? null,
+      checkinLongitude: longitude ?? null,
+      countTime: 0,
+      isCheckedIn: true,
+      delete: 0,
+    });
+  }
+}
 
     const responseData = {
       employeeId: employee.employeeId,
@@ -307,6 +371,7 @@ const getEmployeeProfile = async (req, res) => {
 const employeeCheckout = async (req, res) => {
   try {
     const employeeId = req.employeeId;
+    const { latitude, longitude } = req.body; // 👈 ab checkout pe bhi location lo
 
     if (!employeeId) {
       return requiredmessage(res, "Unauthorized. Please login again.");
@@ -315,8 +380,8 @@ const employeeCheckout = async (req, res) => {
     const openRows = await selectWithJoins(
       "attendance",
       [],
-      { employeeId, checkoutTime: null, delete: 0 },
-      ["attendanceId", "checkinTime"],
+      { employeeId, isCheckedIn: true, delete: 0 },
+      ["attendanceId", "checkinDate", "lastCheckinTime", "countTime"],
       [["attendanceId", "DESC"]]
     );
 
@@ -325,17 +390,72 @@ const employeeCheckout = async (req, res) => {
     }
 
     const record = openRows[0];
-    const checkoutTime = new Date();
-    const checkinTime = new Date(record.checkinTime);
-    const countTime = Math.floor((checkoutTime - checkinTime) / 1000); // seconds
+    const now = new Date();
+    const todayDateStr = getDateString(now);
+
+    // Agar checkout ke time tak date badal chuki hai, session ko us purani date ke
+    // 23:59:59 tak hi count karo (login flow anyway agle din auto-close kar dega,
+    // ye ek safety net hai agar direct checkout hi pehle aa gaya)
+    const lastCheckin = new Date(record.lastCheckinTime);
+    const cutoffTime =
+      record.checkinDate === todayDateStr
+        ? now
+        : new Date(record.checkinDate + "T23:59:59");
+
+    const sessionSeconds = Math.max(
+      0,
+      Math.floor((cutoffTime - lastCheckin) / 1000)
+    );
+    const newCountTime = (record.countTime || 0) + sessionSeconds;
 
     await updateModel(
       "attendance",
-      { checkoutTime, countTime, updated: new Date() },
+      {
+        isCheckedIn: false,
+        checkoutTime: now,
+        checkoutLatitude: latitude ?? null,
+        checkoutLongitude: longitude ?? null,
+        countTime: newCountTime,
+        status: "COMPLETED",
+        updated: now,
+      },
       { attendanceId: record.attendanceId }
     );
 
-    return successResponse(res, { countTime }, "Checked out successfully");
+    return successResponse(res, { countTime: newCountTime }, "Checked out successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+const getAttendanceStatus = async (req, res) => {
+  try {
+    const employeeId = req.employeeId;
+    if (!employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const rows = await selectWithJoins(
+      "attendance",
+      [],
+      { employeeId, isCheckedIn: true, delete: 0 },
+      ["attendanceId", "checkinDate", "lastCheckinTime", "countTime"],
+      [["attendanceId", "DESC"]]
+    );
+
+    if (rows.length === 0) {
+      return successResponse(res, { isCheckedIn: false, countTime: 0 }, "Status fetched");
+    }
+
+    const row = rows[0];
+    return successResponse(
+      res,
+      {
+        isCheckedIn: true,
+        countTime: row.countTime || 0,           // is session shuru hone se pehle ka cumulative
+        lastCheckinTime: row.lastCheckinTime,     // frontend isse live elapsed calculate karega
+      },
+      "Status fetched"
+    );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -343,6 +463,7 @@ const employeeCheckout = async (req, res) => {
 module.exports = {
   employeeLogin,
   employeeCheckout,
+    getAttendanceStatus,
   getFinancialYears,
   getEmployeeProfile,
 };

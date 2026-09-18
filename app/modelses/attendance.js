@@ -28,14 +28,17 @@ module.exports = sequelize => {
     checkinPhoto: { type: DataTypes.TEXT, allowNull: true, field: "checkinPhoto" },
     checkinLatitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "checkinLatitude" },
     checkinLongitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "checkinLongitude" },
+ lastCheckinTime: { type: DataTypes.DATE, allowNull: true, field: "lastCheckinTime" },
 
+   
+    isCheckedIn: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: "isCheckedIn" },
     checkoutTime: { type: DataTypes.DATE, allowNull: true, field: "checkoutTime" },
     checkoutPhoto: { type: DataTypes.TEXT, allowNull: true, field: "checkoutPhoto" },
     checkoutLatitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "checkoutLatitude" },
     checkoutLongitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "checkoutLongitude" },
 
     // seconds — checkout hone par checkinTime se calculate hoga
-    countTime: { type: DataTypes.INTEGER, allowNull: true, field: "countTime" },
+       countTime: { type: DataTypes.INTEGER, allowNull: true, defaultValue: 0, field: "countTime" },
 
     // abhi use nahi hoga, sirf column ready
     status: { type: DataTypes.STRING(20), allowNull: true, field: "status" },
