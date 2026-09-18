@@ -1291,7 +1291,165 @@ const updateRegisteredEmployee = async (req, res) => {
     );
   }
 };
+// ============================================================
+// GET EMPLOYEE PROFILE
+// Employee Panel - General Profile
+// GET /hr/employee/profile?employeeId=123
+// ============================================================
 
+const getEmployeeProfile = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(
+        res,
+        "Unauthorized. Please login again."
+      );
+    }
+
+    // employeeId comes from query:
+    // /hr/employee/profile?employeeId=123
+    const employeeId = Number(req.query.employeeId);
+
+    if (!employeeId || Number.isNaN(employeeId)) {
+      return errorResponse(
+        res,
+        "Valid Employee ID is required."
+      );
+    }
+
+    const rows = await selectWithJoins(
+      "employee",
+      [],
+      {
+        employeeId,
+        companyId,
+        delete: 0,
+      },
+      [
+        // ------------------------------------------------------
+        // Master Employee
+        // ------------------------------------------------------
+        "employeeId",
+        "companyId",
+        "department",
+        "branch",
+        "roleId",
+        "employeeName",
+        "mobileNumber",
+        "alternateNumber",
+        "email",
+        "status",
+
+        // ------------------------------------------------------
+        // Registration
+        // ------------------------------------------------------
+        "financialYearId",
+        "employeeCode",
+        "isRegistered",
+
+        // ------------------------------------------------------
+        // Personal Details
+        // ------------------------------------------------------
+        "firstName",
+        "lastName",
+        "middleName",
+        "dateOfBirth",
+        "gender",
+        "maritalStatus",
+        "bloodGroup",
+        "personalMobileNo",
+        "personalEmail",
+
+        // ------------------------------------------------------
+        // KYC
+        // ------------------------------------------------------
+        "employeePhoto",
+        "aadharNumber",
+        "drivingLicenceNumber",
+        "panNumber",
+        "voterIdNumber",
+
+        // ------------------------------------------------------
+        // Current Address
+        // ------------------------------------------------------
+        "address",
+        "country",
+        "state",
+        "city",
+        "pincode",
+
+        // ------------------------------------------------------
+        // Permanent Address
+        // ------------------------------------------------------
+        "sameAsPermanentAddress",
+        "permanentAddress",
+        "permanentCountry",
+        "permanentState",
+        "permanentCity",
+        "permanentPincode",
+
+        // ------------------------------------------------------
+        // Employee Details
+        // ------------------------------------------------------
+        "joiningDate",
+        "employeeType",
+        "designation",
+        "branchLocation",
+        "employeeStatus",
+        "noticePeriod",
+
+        // ------------------------------------------------------
+        // Work Information
+        // ------------------------------------------------------
+        "workingDays",
+        "weeklyOff",
+        "workingHoursFrom",
+        "workingHoursTo",
+        "workingShift",
+
+        // ------------------------------------------------------
+        // Audit
+        // ------------------------------------------------------
+        "createdBy",
+        "createdType",
+        "created",
+        "updated",
+      ],
+      [["employeeId", "DESC"]]
+    );
+
+    if (!rows || rows.length === 0) {
+      return requiredmessage(
+        res,
+        "Employee profile not found."
+      );
+    }
+
+    const employee = rows[0].toJSON
+      ? rows[0].toJSON()
+      : rows[0];
+
+    return successResponse(
+      res,
+      employee,
+      "Employee profile fetched successfully"
+    );
+
+  } catch (error) {
+    console.error(
+      "getEmployeeProfile error:",
+      error
+    );
+
+    return errorResponse(
+      res,
+      "Something Went Wrong",
+      error
+    );
+  }
+};
 module.exports = {
   createEmployee,
   getEmployeeList,
@@ -1305,7 +1463,7 @@ module.exports = {
   updateRegisteredEmployee,
 
   deleteEmployee,
-
+getEmployeeProfile,
   getNextEmployeeId,
   getUnregisteredEmployeeList,
   registerEmployee,
