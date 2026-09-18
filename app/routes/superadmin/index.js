@@ -37,4 +37,5 @@ module.exports = (app) => {
      require("./location.routes")(app);
      require("./materialavailability.routes")(app);
      require("./indent.routes")(app);
+     require("./grr.routes")(app);
 };
