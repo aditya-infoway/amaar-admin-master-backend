@@ -22,9 +22,16 @@ module.exports = (app) => {
   routes.get("/list", lead.getLeadList);
   routes.get("/:id", lead.getLeadById);
 
+  routes.post("/send-otp", lead.sendLeadOtp);
+  routes.post("/verify-otp", lead.verifyLeadOtp);
+
   routes.post("/create", validate(leadValidation.createLead), lead.createLead);
   routes.put("/update", validate(leadValidation.updateLead), lead.updateLead);
-  routes.delete("/delete", validate(leadValidation.deleteLead), lead.deleteLead);
+  routes.delete(
+    "/delete",
+    validate(leadValidation.deleteLead),
+    lead.deleteLead,
+  );
 
   app.use("/lead", routes);
 };

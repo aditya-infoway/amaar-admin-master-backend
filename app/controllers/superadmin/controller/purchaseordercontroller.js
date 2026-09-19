@@ -3,11 +3,17 @@ const {
   errorResponse,
   requiredmessage,
   saveModel,
+  updateModel,
   selectWithJoins,
   selectWithJoinsV2,
 } = require("../../../helper/index.js");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
+const {
+  getCompanyForMail,
+  buildPurchaseOrderMail,
+} = require("../../../helper/purchaseOrderMail.js");
+const { sendMail } = require("../../../helper/mail.js");
 
 // ---------------- GET NEXT PO NUMBER (purchase ki tarah hi generate) ----------------
 const getNextPoNumber = async (req, res) => {
@@ -109,6 +115,7 @@ const createPurchaseOrder = async (req, res) => {
       status,
       items,
       indentId,
+      emailSupplierIds,
     } = req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
@@ -135,22 +142,24 @@ const createPurchaseOrder = async (req, res) => {
     }
 
     // Same serial number for every supplier in this batch
-  // Get the highest existing serial number for this company + financial year
-const existingPOs = await selectWithJoins(
-  "purchaseorder",
-  [],
-  { companyId, financialYearId: fy.financialYearId, delete: 0 },
-  ["serialNo"],
-);
+    // Get the highest existing serial number for this company + financial year
+    const existingPOs = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { companyId, financialYearId: fy.financialYearId, delete: 0 },
+      ["serialNo"],
+    );
 
-const maxExistingSerial = existingPOs.reduce(
-  (max, row) => Math.max(max, Number(row.serialNo) || 0),
-  0,
-);
+    const maxExistingSerial = existingPOs.reduce(
+      (max, row) => Math.max(max, Number(row.serialNo) || 0),
+      0,
+    );
 
-// Same serial number for every supplier in this batch
-const batchSerialNo = maxExistingSerial + 1;
+    // Same serial number for every supplier in this batch
+    const batchSerialNo = maxExistingSerial + 1;
 
+    const mailSet = new Set((emailSupplierIds || []).map(String));
+    const mailQueue = [];
     const orders = [];
 
     for (const supplierId of Object.keys(groups)) {
@@ -170,7 +179,18 @@ const batchSerialNo = maxExistingSerial + 1;
         "account",
         [],
         { id: supplierId, companyId, delete: 0 },
-        ["id", "accountName", "mobileNo", "email", "cityName"],
+        [
+          "id",
+          "accountName",
+          "mobileNo",
+          "email",
+          "cityName",
+          "addressLine1",
+          "addressLine2",
+          "stateName",
+          "pincode",
+          "gstNo",
+        ],
       );
       if (supRows.length === 0)
         return errorResponse(res, "Selected supplier is invalid.");
@@ -270,6 +290,46 @@ const batchSerialNo = maxExistingSerial + 1;
           total: i.total,
         })),
       });
+      const savedOrder = orders[orders.length - 1];
+      savedOrder.mailStatus = "skipped";
+      if (mailSet.has(String(supplier.id))) {
+        mailQueue.push({ order: savedOrder, supplier, items: cleanItems });
+      }
+    }
+
+    if (mailQueue.length) {
+      const company = await getCompanyForMail(companyId);
+      for (const job of mailQueue) {
+        if (!job.supplier.email) continue; // stays null, no icon
+        try {
+          const { subject, html, attachments } = buildPurchaseOrderMail({
+            company,
+            supplier: job.supplier,
+            poNumber: job.order.poNumber,
+            poDate,
+            requiredDate,
+            items: job.items,
+          });
+          const info = await sendMail({
+            to: job.supplier.email,
+            subject,
+            html,
+            attachments,
+            fromName: company.companyName || "Autobook",
+            replyTo: company.email || undefined,
+          });
+          job.order.mailStatus = info?.accepted?.length ? "sent" : "failed";
+        } catch (e) {
+          console.error("PO mail failed:", job.supplier.email, e.message);
+          job.order.mailStatus = "failed";
+        }
+
+        await updateModel(
+          "purchaseorder",
+          { mailStatus: job.order.mailStatus },
+          { purchaseOrderId: job.order.purchaseOrderId, companyId },
+        );
+      }
     }
 
     return successResponse(
@@ -303,6 +363,7 @@ const getPurchaseOrderList = async (req, res) => {
       "gstAmount",
       "grandTotal",
       "status",
+      "mailStatus",
     ]);
     if (!pos.length)
       return successResponse(
@@ -376,6 +437,7 @@ const getPurchaseOrderList = async (req, res) => {
         deliveryLocation: branch.branchName || "Main Branch",
         totalAmount: String(p.grandTotal),
         status: p.status,
+        mailStatus: p.mailStatus || null,
       };
     });
 

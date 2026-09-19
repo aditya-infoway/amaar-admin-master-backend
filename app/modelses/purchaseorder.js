@@ -52,6 +52,8 @@ module.exports = (sequelize) => {
       defaultValue: "Draft",
     }, // Draft | Generated
 
+     mailStatus: { type: DataTypes.STRING(10), allowNull: true },
+
     created: {
       type: DataTypes.DATE,
       allowNull: false,

@@ -10,6 +10,7 @@ const createPurchaseOrder = Joi.object().keys({
   narration: Joi.string().allow("", null),
   discountAmount: Joi.number().min(0).allow(null, "").default(0),
   roundAmount: Joi.number().allow(null, "").default(0),
+  emailSupplierIds: Joi.array().items(Joi.number()).optional(),
   status: Joi.string().valid("Draft", "Generated").required(),
 
   items: Joi.array().min(1).items(
