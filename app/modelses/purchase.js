@@ -5,6 +5,7 @@ module.exports = sequelize => {
     companyId: { type: DataTypes.INTEGER, allowNull: false },
     financialYearId: { type: DataTypes.INTEGER, allowNull: false },
     date: { type: DataTypes.DATEONLY, allowNull: false },
+    purchaseOrderId: { type: DataTypes.INTEGER, allowNull: true }, 
     terms: { type: DataTypes.STRING(20), allowNull: false }, // Credit, Cash, Bank
     accountId: { type: DataTypes.INTEGER, allowNull: false }, // Supplier/Party
     branchId: { type: DataTypes.INTEGER, allowNull: true },

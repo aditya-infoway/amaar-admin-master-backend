@@ -43,26 +43,16 @@ const getStockReportList = async (req, res) => {
     // VERIFIED PURCHASE STOCK
     // ---------------------------------------------------------
     const details = await selectWithJoins(
-      "purchasedetails",
-      [],
-      {
-        companyId,
-        verified: true,
-        delete: 0,
-      },
-      ["itemId", "currentStock"],
+      "purchasedetails", [],
+      { companyId, delete: 0 },
+      ["itemId", "qty"],
     );
 
-    // ---------------------------------------------------------
-    // ITEM-WISE PURCHASE CURRENT STOCK
-    // ---------------------------------------------------------
+    // 2. itemId ke hisaab se sab qty sum karo — chahe wo item kisi bhi category/group ka ho
     const stockMap = {};
-
     details.forEach((d) => {
-      const qty = Number(d.currentStock) || 0;
-
-      stockMap[d.itemId] =
-        (stockMap[d.itemId] || 0) + qty;
+      const qty = Number(d.qty) || 0;
+      stockMap[d.itemId] = (stockMap[d.itemId] || 0) + qty;   // ✅ per-itemId aggregation
     });
 
     // ---------------------------------------------------------
@@ -134,45 +124,45 @@ const getStockReportList = async (req, res) => {
     // ---------------------------------------------------------
     // FINAL STOCK REPORT DATA
     // ---------------------------------------------------------
-   // FINAL STOCK REPORT DATA
-const data = items.map((item) => {
-  // Opening stock from Item Master
-  const openingStock = Number(item.openingStock) || 0;
+    // FINAL STOCK REPORT DATA
+    const data = items.map((item) => {
+      // Opening stock from Item Master
+      const openingStock = Number(item.openingStock) || 0;
 
-  // Purchase stock from Purchase Details
-  const purchaseStock = Number(stockMap[item.itemId]) || 0;
+      // Purchase stock from Purchase Details
+      const purchaseStock = Number(stockMap[item.itemId]) || 0;
 
-  // Final current stock
-  const currentStock = openingStock + purchaseStock;
+      // Final current stock
+      const currentStock = openingStock + purchaseStock;
 
-  return {
-    id: String(item.itemId),
+      return {
+        id: String(item.itemId),
 
-    itemCode: item.itemCode || "",
-    itemName: item.itemName || "",
-    hsnCode: item.hsnCode || "",
-    unit: item.unit || "",
+        itemCode: item.itemCode || "",
+        itemName: item.itemName || "",
+        hsnCode: item.hsnCode || "",
+        unit: item.unit || "",
 
-    categoryName:
-      categoryMap[item.itemCategoryId] || "",
+        categoryName:
+          categoryMap[item.itemCategoryId] || "",
 
-    groupName:
-      groupMap[item.groupId] || "",
+        groupName:
+          groupMap[item.groupId] || "",
 
-    taxSlab:
-      String(item.taxSlab ?? "0"),
+        taxSlab:
+          String(item.taxSlab ?? "0"),
 
-    // Item Master
-    openingStock: String(openingStock),
+        // Item Master
+        openingStock: String(openingStock),
 
-    stockValue:
-      String(item.stockValue ?? "0"),
+        stockValue:
+          String(item.stockValue ?? "0"),
 
-    // Opening Stock + Purchase Stock
-    currentStock:
-      String(currentStock),
-  };
-});
+        // Opening Stock + Purchase Stock
+        currentStock:
+          String(currentStock),
+      };
+    });
 
     return successResponse(
       res,
@@ -195,121 +185,58 @@ const data = items.map((item) => {
 const getStockReportDetails = async (req, res) => {
   try {
     const companyId = req.companyId;
-
-    if (!companyId) {
-      return requiredmessage(res, "Unauthorized. Please login again.");
-    }
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { itemId } = req.params;
 
-    // ---------------------------------------------------------
-    // 1. ITEM MASTER + CATEGORY + GROUP
-    // ---------------------------------------------------------
     const itemRows = await selectWithJoinsV2(
       "itemmaster",
       [
-        {
-          table: "itemcategory",
-          alias: "ic",
-          onClause: {
-            'ic."itemCategoryId"': {
-              "=": 'itemmaster."itemCategoryId"',
-            },
-          },
-        },
-        {
-          table: "itemgroup",
-          alias: "ig",
-          onClause: {
-            'ig."itemGroupId"': {
-              "=": 'itemmaster."groupId"',
-            },
-          },
-        },
+        { table: "itemcategory", alias: "ic", onClause: { 'ic."itemCategoryId"': { "=": 'itemmaster."itemCategoryId"' } } },
+        { table: "itemgroup", alias: "ig", onClause: { 'ig."itemGroupId"': { "=": 'itemmaster."groupId"' } } },
       ],
-      {
-        'itemmaster."itemId"': itemId,
-        'itemmaster."companyId"': companyId,
-        'itemmaster."delete"': 0,
-      },
+      { 'itemmaster."itemId"': itemId, 'itemmaster."companyId"': companyId, 'itemmaster."delete"': 0 },
       [
-        'itemmaster."itemId"',
-        'itemmaster."itemCode"',
-        'itemmaster."itemName"',
-        'itemmaster."hsnCode"',
-        'itemmaster."unit"',
-        'itemmaster."openingStock"',
-        'itemmaster."stockValue"',
-        'ic."categoryName" AS "categoryName"',
-        'ig."groupName" AS "groupName"',
+        'itemmaster."itemId"', 'itemmaster."itemCode"', 'itemmaster."itemName"',
+        'itemmaster."hsnCode"', 'itemmaster."unit"', 'itemmaster."openingStock"',
+        'itemmaster."stockValue"', 'ic."categoryName" AS "categoryName"', 'ig."groupName" AS "groupName"',
       ],
-      [],
-      1,
-      0
+      [], 1, 0
     );
 
-    if (itemRows.length === 0) {
-      return requiredmessage(res, "Item not found.");
-    }
-
+    if (itemRows.length === 0) return requiredmessage(res, "Item not found.");
     const item = itemRows[0];
     const openingStock = Number(item.openingStock) || 0;
     const stockValue = Number(item.stockValue) || 0;
 
-    // ---------------------------------------------------------
-    // 2. ALL VERIFIED PURCHASE DETAILS
-    // ---------------------------------------------------------
+    // ---- Purchase details (verified filter hataya) ----
     const purchaseDetails = await selectWithJoins(
-      "purchasedetails",
-      [],
-      {
-        itemId,
-        companyId,
-        verified: true,
-        delete: 0,
-      },
-      [
-        "purchaseDetailsId",
-        "purchaseId",
-        "qty",
-        "rate",
-        "total",
-        "currentStock",
-        "created",
-      ]
+      "purchasedetails", [],
+      { itemId, companyId, delete: 0 },   // ✅ verified: true hataya
+      ["purchaseDetailsId", "purchaseId", "qty", "rate", "total", "created"]
     );
 
-    // ---------------------------------------------------------
-    // 3. PURCHASE HEADER MAP
-    // ---------------------------------------------------------
-    const purchaseIds = [
-      ...new Set(purchaseDetails.map((d) => d.purchaseId).filter(Boolean)),
-    ];
-
+    // ---- Purchase headers (billNo, date, accountId) ----
+    const purchaseIds = [...new Set(purchaseDetails.map((d) => d.purchaseId).filter(Boolean))];
     let purchaseMap = {};
     if (purchaseIds.length) {
       const purchases = await selectWithJoins(
-        "purchase",
-        [],
-        {
-          purchaseId: purchaseIds,
-          companyId,
-          delete: 0,
-        },
+        "purchase", [], { purchaseId: purchaseIds, companyId, delete: 0 },
         ["purchaseId", "purchaseBillNo", "purchaseDate", "accountId"]
       );
-
-      purchases.forEach((p) => {
-        purchaseMap[p.purchaseId] = p;
-      });
+      purchases.forEach((p) => { purchaseMap[p.purchaseId] = p; });
     }
 
-    // ---------------------------------------------------------
-    // 4. CURRENT STOCK + AVG PURCHASE PRICE
-    // ---------------------------------------------------------
+    // ---- Party names (batch fetch) ----
+    const accountIds = [...new Set(Object.values(purchaseMap).map((p) => p.accountId).filter(Boolean))];
+    let accountMap = {};
+    if (accountIds.length) {
+      const accounts = await selectWithJoins("account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName"]);
+      accounts.forEach((a) => { accountMap[a.id] = a.accountName; });
+    }
+
     let totalPurchaseQty = 0;
     let totalPurchaseValue = 0;
-
     purchaseDetails.forEach((d) => {
       const qty = Number(d.qty) || 0;
       const rate = Number(d.rate) || 0;
@@ -318,33 +245,18 @@ const getStockReportDetails = async (req, res) => {
     });
 
     const currentStock = openingStock + totalPurchaseQty;
+    const purchasePrice = totalPurchaseQty > 0 ? totalPurchaseValue / totalPurchaseQty : 0;
 
-    // Average purchase price from verified purchases
-    let purchasePrice = 0;
-    if (totalPurchaseQty > 0) {
-      purchasePrice = totalPurchaseValue / totalPurchaseQty;
-    }
-
-    // ---------------------------------------------------------
-    // 5. HISTORY ROWS
-    // ---------------------------------------------------------
+    // ---- History rows (running balance + party/bill info) ----
     const rows = [];
-
-    // Opening entry (always first)
-    // qty     = openingStock
-    // balance = stockValue
     rows.push({
-      id: "opening",
-      date: "",
-      type: "Opening",
-      qty: String(openingStock),
-      balance: String(stockValue),
+      id: "opening", date: "", type: "Opening",
+      partyName: "", billNo: "",
+      qty: String(openingStock), billAmount: "",
+      currentStock: String(openingStock),
     });
 
-    // Running quantity balance
     let runningQtyBalance = openingStock;
-
-    // Sort purchases oldest → newest
     const sortedPurchases = [...purchaseDetails].sort((a, b) => {
       const dateA = purchaseMap[a.purchaseId]?.purchaseDate || "";
       const dateB = purchaseMap[b.purchaseId]?.purchaseDate || "";
@@ -354,50 +266,28 @@ const getStockReportDetails = async (req, res) => {
     sortedPurchases.forEach((d) => {
       const purchase = purchaseMap[d.purchaseId] || {};
       const qty = Number(d.qty) || 0;
-
       runningQtyBalance += qty;
 
       rows.push({
         id: String(d.purchaseDetailsId),
         date: purchase.purchaseDate || "",
         type: "Purchase",
+        partyName: accountMap[purchase.accountId] || "",
+        billNo: purchase.purchaseBillNo || "",
         qty: String(qty),
-        balance: String(runningQtyBalance),
+        billAmount: String(d.total ?? ""),
+        currentStock: String(runningQtyBalance),
       });
     });
 
-    // ---------------------------------------------------------
-    // 6. FINAL RESPONSE
-    // ---------------------------------------------------------
-    return successResponse(
-      res,
-      {
-        itemId: String(item.itemId),
-        itemCode: item.itemCode || "",
-        itemName: item.itemName || "",
-
-        // Cards
-        currentStock: String(currentStock),
-        purchasePrice: purchasePrice.toFixed(2),
-        unit: item.unit || "",
-
-        // Item Details
-        hsnCode: item.hsnCode || "",
-        brand: "",                         // no brand column → empty
-        category: item.categoryName || "",
-        group: item.groupName || "",
-
-        // History
-        rows,
-      },
-      "Stock report details fetched successfully"
-    );
+    return successResponse(res, {
+      itemId: String(item.itemId), itemCode: item.itemCode || "", itemName: item.itemName || "",
+      currentStock: String(currentStock), purchasePrice: purchasePrice.toFixed(2), unit: item.unit || "",
+      hsnCode: item.hsnCode || "", brand: "", category: item.categoryName || "", group: item.groupName || "",
+      rows,
+    }, "Stock report details fetched successfully");
   } catch (error) {
-    return errorResponse(
-      res,
-      error.message || "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 

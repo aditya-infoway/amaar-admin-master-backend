@@ -349,9 +349,10 @@ const getPurchaseOrderList = async (req, res) => {
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const { financialYearId } = req.query;
+      const { financialYearId, excludeBilled } = req.query; // ✅ NEW
     const where = { companyId, delete: 0 };
     if (financialYearId) where.financialYearId = financialYearId;
+    if (excludeBilled === "true") where.status = "Generated"; 
 
     const pos = await selectWithJoins("purchaseorder", [], where, [
       "purchaseOrderId",

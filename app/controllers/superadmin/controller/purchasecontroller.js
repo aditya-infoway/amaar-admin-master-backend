@@ -53,6 +53,7 @@ const createPurchase = async (req, res) => {
       cashAccountId, bankAccountId, paymentMode, chequeNo, chequeDate, chequeClearDate, bankNarration,
       items,
       createdBy, createdType,
+        purchaseOrderId,
     } = req.body;
 
     if (!accountId) return errorResponse(res, "Party is required.");
@@ -188,6 +189,7 @@ const createPurchase = async (req, res) => {
     const purchase = await saveModel("purchase", {
       companyId,
       financialYearId: fy.financialYearId,
+       purchaseOrderId: purchaseOrderId || null,
       date: new Date(),
       terms,
       accountId,
@@ -239,7 +241,13 @@ const createPurchase = async (req, res) => {
         delete: 0,
       });
     }
-
+if (purchaseOrderId) {
+  await updateModelHelper(
+    "purchaseorder",
+    { status: "Billed", updated: new Date() },
+    { purchaseOrderId, companyId },
+  );
+}
     // =========================================================
     // Payment entry + balance update (terms wise)
     // =========================================================
