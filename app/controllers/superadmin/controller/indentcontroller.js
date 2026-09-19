@@ -338,6 +338,7 @@ const getIndentById = async (req, res) => {
 
 
 // ---------------- GET INDENTS FOR PO DROPDOWN ----------------
+// ---------------- GET INDENTS FOR PO DROPDOWN ----------------
 const getIndentsForPO = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -355,13 +356,30 @@ const getIndentsForPO = async (req, res) => {
       [["indentId", "DESC"]]
     );
 
-    const data = indents.map((i) => ({
-      id: i.indentId,
-      indentId: i.indentId,
-      indentNo: i.indentNo,
-      label: i.indentNo,           // for Combobox display
-      modelName: i.modelName || "",
-    }));
+    if (!indents.length)
+      return successResponse(res, [], "Indents fetched successfully");
+
+    // NEW: indentIds jinke liye already PO ban chuka hai, unhe exclude karo
+    const indentIds = indents.map((i) => i.indentId);
+    const usedIndents = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { companyId, indentId: indentIds, delete: 0 },
+      ["indentId"],
+    );
+    const usedIndentIdSet = new Set(
+      usedIndents.map((p) => p.indentId).filter(Boolean),
+    );
+
+    const data = indents
+      .filter((i) => !usedIndentIdSet.has(i.indentId)) // NEW: PO-consumed indent hide
+      .map((i) => ({
+        id: i.indentId,
+        indentId: i.indentId,
+        indentNo: i.indentNo,
+        label: i.indentNo,
+        modelName: i.modelName || "",
+      }));
 
     return successResponse(res, data, "Indents fetched successfully");
   } catch (error) {
