@@ -135,7 +135,21 @@ const createPurchaseOrder = async (req, res) => {
     }
 
     // Same serial number for every supplier in this batch
-    const batchSerialNo = maxExistingSerial + 1;
+  // Get the highest existing serial number for this company + financial year
+const existingPOs = await selectWithJoins(
+  "purchaseorder",
+  [],
+  { companyId, financialYearId: fy.financialYearId, delete: 0 },
+  ["serialNo"],
+);
+
+const maxExistingSerial = existingPOs.reduce(
+  (max, row) => Math.max(max, Number(row.serialNo) || 0),
+  0,
+);
+
+// Same serial number for every supplier in this batch
+const batchSerialNo = maxExistingSerial + 1;
 
     const orders = [];
 
