@@ -4,5 +4,6 @@ module.exports = (app) => {
     require("./security")(app);
     require("./saleexecutive")(app);
       require("./hr")(app);
+           require("./storemanager")(app);
     require("./employeereusable.routes.js")(app);
 };
