@@ -16,6 +16,60 @@ const {
   clearVerifiedEmail,
 } = require("../../../helper/emailOtp.js");
 
+
+
+// lead -> sales order -> work order -> indent
+// returns Map: leadId (string) -> { workOrderIds: [], indentNo: "" }
+const getLeadWorkChain = async (leadIds, companyId) => {
+  const result = new Map();
+  const ids = leadIds.map((id) => String(id));
+  if (!ids.length) return result;
+
+  const soRows = await selectWithJoins(
+    "salesorder",
+    [],
+    { leadId: ids, companyId, delete: 0 },
+    ["salesOrderId", "leadId"],
+  );
+  if (!soRows.length) return result;
+
+  const woRows = await selectWithJoins(
+    "workorder",
+    [],
+    { salesOrderId: soRows.map((s) => s.salesOrderId), companyId, delete: 0 },
+    ["workOrderId", "salesOrderId"],
+  );
+  if (!woRows.length) return result;
+
+  const indentRows = await selectWithJoins(
+    "indent",
+    [],
+    { workOrderId: woRows.map((w) => w.workOrderId), companyId, delete: 0 },
+    ["workOrderId", "indentNo"],
+  );
+
+  const leadBySo = new Map(
+    soRows.map((s) => [String(s.salesOrderId), String(s.leadId)]),
+  );
+  const indentByWo = new Map(
+    indentRows.map((i) => [String(i.workOrderId), i.indentNo]),
+  );
+
+  for (const wo of woRows) {
+    const leadKey = leadBySo.get(String(wo.salesOrderId));
+    if (!result.has(leadKey)) {
+      result.set(leadKey, { workOrderIds: [], indentNo: "" });
+    }
+    const entry = result.get(leadKey);
+    entry.workOrderIds.push(wo.workOrderId);
+    if (!entry.indentNo && indentByWo.has(String(wo.workOrderId))) {
+      entry.indentNo = indentByWo.get(String(wo.workOrderId));
+    }
+  }
+
+  return result;
+};
+
 // ---------------- NEXT LEAD CODE (purchase ke bill-no jaisa hi) ----------------
 const getNextLeadId = async (req, res) => {
   try {
@@ -222,11 +276,16 @@ const getLeadList = async (req, res) => {
       }
     }
 
+       const chainMap = await getLeadWorkChain(
+      list.map((item) => item.leadId),
+      companyId,
+    );
+
     const data = list.map((item) => ({
       ...item,
       modelName: modelMap[String(item.model)] || "",
+      modelLocked: Boolean(chainMap.get(String(item.leadId))?.indentNo),
     }));
-
     return successResponse(res, data, "Enquiry list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -315,9 +374,23 @@ const updateLead = async (req, res) => {
       "lead",
       [],
       { leadId, companyId, delete: 0 },
-      ["leadId"],
+      ["leadId", "model"],
     );
     if (existing.length === 0) return requiredmessage(res, "Enquiry not found");
+
+    // work orders / indent that belong to this enquiry
+    const chain = (await getLeadWorkChain([leadId], companyId)).get(
+      String(leadId),
+    );
+    const workOrderIds = chain?.workOrderIds || [];
+
+    // model is locked once Material Availability is generated (indent exists)
+    if (chain?.indentNo && String(model) !== String(existing[0].model)) {
+      return errorResponse(
+        res,
+        `Model can't be changed because Indent ${chain.indentNo} is already generated for this enquiry.`,
+      );
+    }
 
     const leadEmail = String(email || "").trim();
     if (!leadEmail || !isEmailVerified(companyId, leadEmail)) {
@@ -341,6 +414,24 @@ const updateLead = async (req, res) => {
     };
 
     await updateModelHelper("lead", payload, { leadId, companyId });
+
+    // keep this enquiry's work orders in step (model is already locked once an indent exists)
+    if (workOrderIds.length) {
+      await updateModelHelper(
+        "workorder",
+        {
+          customerName: name,
+          mobile: number,
+          email: email || null,
+          address: address || null,
+          city: city || null,
+          model: model ? String(model) : null,
+          updated: new Date(),
+        },
+        { workOrderId: workOrderIds, companyId, delete: 0 },
+      );
+    }
+
     clearVerifiedEmail(companyId, leadEmail);
     return successResponse(res, {}, "Enquiry updated successfully");
   } catch (error) {

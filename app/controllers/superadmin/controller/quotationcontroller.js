@@ -43,6 +43,43 @@ const normalizeId = (value) => {
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
+// Lead details are never copied into the quotation. Always read them live from the lead.
+const getLeadMap = async (leadIds, companyId) => {
+  const ids = [
+    ...new Set(
+      leadIds
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ];
+  if (!ids.length) return new Map();
+
+  const rows = await selectWithJoins("lead", [], { leadId: ids, companyId }, [
+    "leadId",
+    "leadCode",
+    "name",
+    "number",
+    "email",
+    "address",
+    "city",
+    "model",
+    "remark",
+  ]);
+  return new Map(rows.map((l) => [String(l.leadId), l]));
+};
+
+// Same keys the frontend already receives, so no frontend change is needed
+const leadFieldsForQuotation = (lead) => ({
+  leadCode: lead?.leadCode || "",
+  customerName: lead?.name || "",
+  mobile: lead?.number || "",
+  email: lead?.email || "",
+  address: lead?.address || "",
+  city: lead?.city || "",
+  model: lead?.model ? String(lead.model) : "",
+  remark: lead?.remark || "",
+});
+
 // ============================================================
 // VALIDATE CREATE MASTER SELECTIONS + GET PRICES
 // ============================================================
@@ -69,10 +106,7 @@ const getQuotationMasterPrices = async ({
 
   for (const [field, type] of Object.entries(MASTER_TYPES)) {
     // These fields are optional for Tipper
-    if (
-      vehicleType === "tipper" &&
-      TIPPER_OPTIONAL_FIELDS.includes(field)
-    ) {
+    if (vehicleType === "tipper" && TIPPER_OPTIONAL_FIELDS.includes(field)) {
       result[field] = null;
       continue;
     }
@@ -95,19 +129,11 @@ const getQuotationMasterPrices = async ({
         delete: 0,
         status: "active",
       },
-      [
-        "createMasterId",
-        "companyId",
-        "type",
-        "description",
-        "code",
-      ],
+      ["createMasterId", "companyId", "type", "description", "code"],
     );
 
     const master = rows.find(
-      (row) =>
-        row.type?.trim().toLowerCase() ===
-        type.trim().toLowerCase(),
+      (row) => row.type?.trim().toLowerCase() === type.trim().toLowerCase(),
     );
 
     if (!master) {
@@ -139,11 +165,7 @@ const getQuotationMasterPrices = async ({
         delete: 0,
         status: "active",
       },
-      [
-        "createPricingId",
-        "code",
-        "exShowroomPrice",
-      ],
+      ["createPricingId", "code", "exShowroomPrice"],
     );
 
     // ---------------------------------------------------------
@@ -158,9 +180,7 @@ const getQuotationMasterPrices = async ({
     // ---------------------------------------------------------
     // 5. Pricing must have valid price > 0
     // ---------------------------------------------------------
-    const price = Number(
-      pricingRows[0].exShowroomPrice,
-    );
+    const price = Number(pricingRows[0].exShowroomPrice);
 
     if (!Number.isFinite(price) || price <= 0) {
       throw new Error(
@@ -279,14 +299,6 @@ const createQuotation = async (req, res) => {
 
       leadId,
 
-      customerName,
-      mobile,
-      email,
-      address,
-      city,
-      model,
-      remark,
-
       vehicleType,
 
       trailer,
@@ -317,7 +329,7 @@ const createQuotation = async (req, res) => {
       createdType,
     } = req.body;
 
-        // --------------------------------------------------------
+    // --------------------------------------------------------
     // Trailer-only fields required only when vehicleType = trailer
     // --------------------------------------------------------
 
@@ -349,6 +361,18 @@ const createQuotation = async (req, res) => {
           return errorResponse(res, `${label} is required.`);
         }
       }
+    }
+
+    if (!leadId) return errorResponse(res, "Lead is required.");
+
+    const leadCheck = await selectWithJoins(
+      "lead",
+      [],
+      { leadId, companyId, delete: 0 },
+      ["leadId"],
+    );
+    if (!leadCheck.length) {
+      return errorResponse(res, "Selected lead was not found.");
     }
 
     if (!financialYearId) {
@@ -453,14 +477,6 @@ const createQuotation = async (req, res) => {
       qNo,
       leadId,
 
-      customerName,
-      mobile,
-      email: email || null,
-      address: address || null,
-      city: city || null,
-      model: model || null,
-      remark: remark || null,
-
       vehicleType,
 
       trailer: masterResult.selections.trailer,
@@ -564,13 +580,6 @@ const getQuotationList = async (req, res) => {
         "financialYearId",
         "qNo",
         "leadId",
-        "customerName",
-        "mobile",
-        "email",
-        "address",
-        "city",
-        "model",
-        "remark",
         "vehicleType",
         "trailer",
         "chassis",
@@ -604,116 +613,92 @@ const getQuotationList = async (req, res) => {
       [["quotationId", "DESC"]],
     );
 
-  if (!quotations.length) {
-  return successResponse(res, [], "Quotation list fetched successfully");
-}
+    if (!quotations.length) {
+      return successResponse(res, [], "Quotation list fetched successfully");
+    }
 
-// ✅ Get employee IDs - only numeric values (skip "Admin")
-const employeeIds = quotations
-  .map(q => q.createdBy)
-  .filter(id => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
+    // ✅ Get employee IDs - only numeric values (skip "Admin")
+    const employeeIds = quotations
+      .map((q) => q.createdBy)
+      .filter((id) => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
 
-let employeeMap = {};
+    let employeeMap = {};
 
-if (employeeIds.length > 0) {
-  try {
-    const employees = await selectWithJoins(
-      "employee",
-      [],
-      { employeeId: employeeIds },
-      ["employeeId", "employeeName"],
-    );
+    if (employeeIds.length > 0) {
+      try {
+        const employees = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: employeeIds },
+          ["employeeId", "employeeName"],
+        );
 
-    employeeMap = employees.reduce((map, emp) => {
-      map[String(emp.employeeId)] = emp.employeeName || String(emp.employeeId);
-      return map;
-    }, {});
-  } catch (err) {
-    console.error("Error fetching employees:", err.message);
-  }
-}
+        employeeMap = employees.reduce((map, emp) => {
+          map[String(emp.employeeId)] =
+            emp.employeeName || String(emp.employeeId);
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching employees:", err.message);
+      }
+    }
 
-// ✅ Get lead codes — same pattern as employeeMap above
-const leadIds = quotations
-  .map(q => q.leadId)
-  .filter(id => id !== null && id !== undefined && !isNaN(Number(id)));
+   const leadMap = await getLeadMap(
+  quotations.map((q) => q.leadId),
+  companyId,
+);
+    const data = quotations.map((quotation) => {
+      // ✅ Handle different createdBy values
+      let createdByName = quotation.createdBy || "";
 
-let leadCodeMap = {};
+      if (createdByName === "Admin") {
+        createdByName = "Admin";
+      } else if (
+        !isNaN(Number(createdByName)) &&
+        employeeMap[String(createdByName)]
+      ) {
+        createdByName = employeeMap[String(createdByName)];
+      }
 
-if (leadIds.length > 0) {
-  try {
-    const leads = await selectWithJoins(
-      "lead",
-      [],
-      { leadId: leadIds, companyId, delete: 0 },
-      ["leadId", "leadCode"],
-    );
+      return {
+        id: String(quotation.quotationId),
+        financialYearId: quotation.financialYearId,
+        qNo: quotation.qNo,
+        leadId: quotation.leadId,
+            ...leadFieldsForQuotation(leadMap.get(String(quotation.leadId))),
+        vehicleType: quotation.vehicleType,
+        trailer: quotation.trailer,
+        chassis: quotation.chassis,
+        body: quotation.body,
+        hydraulic: quotation.hydraulic,
+        axle: quotation.axle,
+        suspension: quotation.suspension,
+        tyre: quotation.tyre,
+        rim: quotation.rim,
+        kingPin: quotation.kingPin,
+        landingLeg: quotation.landingLeg,
+        brakeSystem: quotation.brakeSystem,
+        mudguard: quotation.mudguard,
+        color: quotation.color,
+        electricalTapes: quotation.electricalTapes,
+        supdRupd: quotation.supdRupd,
+        box: quotation.box,
+        spareWheelCarrier: quotation.spareWheelCarrier,
+        warranty: quotation.warranty || "",
+        discountType: quotation.discountType,
+        discountValue: String(quotation.discountValue || 0),
+        basicCost: String(quotation.basicCost || 0),
+        gstAmount: String(quotation.gstAmount || 0),
+        finalPrice: String(quotation.finalPrice || 0),
+        position: quotation.position || "",
+        createdBy: createdByName,
+        createdType: quotation.createdtype || "",
+        createdAt: quotation.created,
+        updatedAt: quotation.updated,
+      };
+    });
 
-    leadCodeMap = leads.reduce((map, lead) => {
-      map[String(lead.leadId)] = lead.leadCode || "";
-      return map;
-    }, {});
-  } catch (err) {
-    console.error("Error fetching lead codes:", err.message);
-  }
-}
-
-const data = quotations.map((quotation) => {
-  // ✅ Handle different createdBy values
-  let createdByName = quotation.createdBy || "";
-
-  if (createdByName === "Admin") {
-    createdByName = "Admin";
-  } else if (!isNaN(Number(createdByName)) && employeeMap[String(createdByName)]) {
-    createdByName = employeeMap[String(createdByName)];
-  }
-
-  return {
-    id: String(quotation.quotationId),
-    financialYearId: quotation.financialYearId,
-    qNo: quotation.qNo,
-    leadId: quotation.leadId,
-    leadCode: leadCodeMap[String(quotation.leadId)] || "",   // 👈 added
-    customerName: quotation.customerName || "",
-    mobile: quotation.mobile || "",
-    email: quotation.email || "",
-    address: quotation.address || "",
-    city: quotation.city || "",
-    model: quotation.model || "",
-    remark: quotation.remark || "",
-    vehicleType: quotation.vehicleType,
-    trailer: quotation.trailer,
-    chassis: quotation.chassis,
-    body: quotation.body,
-    hydraulic: quotation.hydraulic,
-    axle: quotation.axle,
-    suspension: quotation.suspension,
-    tyre: quotation.tyre,
-    rim: quotation.rim,
-    kingPin: quotation.kingPin,
-    landingLeg: quotation.landingLeg,
-    brakeSystem: quotation.brakeSystem,
-    mudguard: quotation.mudguard,
-    color: quotation.color,
-    electricalTapes: quotation.electricalTapes,
-    supdRupd: quotation.supdRupd,
-    box: quotation.box,
-    spareWheelCarrier: quotation.spareWheelCarrier,
-    warranty: quotation.warranty || "",
-    discountType: quotation.discountType,
-    discountValue: String(quotation.discountValue || 0),
-    basicCost: String(quotation.basicCost || 0),
-    gstAmount: String(quotation.gstAmount || 0),
-    finalPrice: String(quotation.finalPrice || 0),
-    position: quotation.position || "",
-    createdBy: createdByName,
-    createdType: quotation.createdtype || "",
-    createdAt: quotation.created,
-    updatedAt: quotation.updated,
-  };
-});
-
-return successResponse(res, data, "Quotation list fetched successfully");
+    return successResponse(res, data, "Quotation list fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
@@ -750,13 +735,6 @@ const getQuotationById = async (req, res) => {
         "qNo",
         "leadId",
 
-        "customerName",
-        "mobile",
-        "email",
-        "address",
-        "city",
-        "model",
-        "remark",
 
         "vehicleType",
 
@@ -801,6 +779,8 @@ const getQuotationById = async (req, res) => {
 
     const quotation = rows[0];
 
+        const leadMap = await getLeadMap([quotation.leadId], companyId);
+
     return successResponse(
       res,
       {
@@ -809,13 +789,7 @@ const getQuotationById = async (req, res) => {
         qNo: quotation.qNo,
         leadId: quotation.leadId,
 
-        customerName: quotation.customerName,
-        mobile: quotation.mobile,
-        email: quotation.email,
-        address: quotation.address,
-        city: quotation.city,
-        model: quotation.model,
-        remark: quotation.remark,
+                ...leadFieldsForQuotation(leadMap.get(String(quotation.leadId))),
 
         vehicleType: quotation.vehicleType,
 
@@ -901,13 +875,6 @@ const updateQuotation = async (req, res) => {
     const {
       financialYearId,
       leadId,
-      customerName,
-      mobile,
-      email,
-      address,
-      city,
-      model,
-      remark,
 
       vehicleType,
 
@@ -940,12 +907,7 @@ const updateQuotation = async (req, res) => {
       createdType,
     } = req.body;
 
-
-
-
-
-
-        // --------------------------------------------------------
+    // --------------------------------------------------------
     // Trailer-only fields required only when vehicleType = trailer
     // --------------------------------------------------------
 
@@ -987,12 +949,14 @@ const updateQuotation = async (req, res) => {
       return errorResponse(res, "Lead is required.");
     }
 
-    if (!customerName) {
-      return errorResponse(res, "Customer name is required.");
-    }
-
-    if (!mobile) {
-      return errorResponse(res, "Mobile is required.");
+       const leadCheck = await selectWithJoins(
+      "lead",
+      [],
+      { leadId, companyId, delete: 0 },
+      ["leadId"],
+    );
+    if (!leadCheck.length) {
+      return errorResponse(res, "Selected lead was not found.");
     }
 
     if (!["tipper", "trailer"].includes(vehicleType)) {
@@ -1079,14 +1043,6 @@ const updateQuotation = async (req, res) => {
 
         qNo,
         leadId,
-
-        customerName,
-        mobile,
-        email: email || null,
-        address: address || null,
-        city: city || null,
-        model: model || null,
-        remark: remark || null,
 
         vehicleType,
 
@@ -1185,17 +1141,7 @@ const deleteQuotation = async (req, res) => {
       return requiredmessage(res, "Quotation not found.");
     }
 
-    await updateModelHelper(
-      "quotation",
-      {
-        delete: 1,
-        updated: new Date(),
-      },
-      {
-        quotationId: id,
-        companyId,
-      },
-    );
+   
 
     return successResponse(
       res,

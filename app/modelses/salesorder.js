@@ -40,48 +40,7 @@ module.exports = (sequelize) => {
       field: "leadId",
     },
 
-    customerName: {
-      type: DataTypes.STRING(200),
-      allowNull: false,
-      field: "customerName",
-    },
-
-    mobile: {
-      type: DataTypes.STRING(30),
-      allowNull: false,
-      field: "mobile",
-    },
-
-    email: {
-      type: DataTypes.STRING(200),
-      allowNull: true,
-      field: "email",
-    },
-
-    address: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      field: "address",
-    },
-
-    city: {
-      type: DataTypes.STRING(150),
-      allowNull: true,
-      field: "city",
-    },
-
-    model: {
-      type: DataTypes.STRING(150),
-      allowNull: true,
-      field: "model",
-    },
-
-    remark: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      field: "remark",
-    },
-
+   
     mode: {
       type: DataTypes.STRING(30),
       allowNull: false,

@@ -45,27 +45,13 @@ const validateSalesOrder = Joi.object().keys({
   // SALES ORDER CUSTOMER DETAILS
   // ==========================================================
 
-  customerName: Joi.string().trim().required().messages({
-    "string.empty": "Customer name is required",
-    "any.required": "Customer name is required",
-  }),
-
-  mobile: Joi.string().trim().required().messages({
-    "string.empty": "Client number is required",
-    "any.required": "Client number is required",
-  }),
-
-  email: Joi.string().trim().email().allow("", null).messages({
-    "string.email": "Enter a valid email",
-  }),
-
-  address: Joi.string().trim().allow("", null),
-
-  city: Joi.string().trim().allow("", null),
-
-  model: Joi.string().trim().allow("", null),
-
-  remark: Joi.string().trim().allow("", null),
+    customerName: Joi.any().optional(),
+    mobile: Joi.any().optional(),
+    email: Joi.any().optional(),
+    address: Joi.any().optional(),
+    city: Joi.any().optional(),
+    model: Joi.any().optional(),
+    remark: Joi.any().optional(),
 
   // ==========================================================
   // QUANTITY / AMOUNT

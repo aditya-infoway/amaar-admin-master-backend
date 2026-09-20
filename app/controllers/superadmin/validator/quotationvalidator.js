@@ -17,25 +17,21 @@ const validateQuotation = Joi.object().keys({
     "any.required": "Please select a lead",
   }),
 
-  customerName: Joi.string().trim().required().messages({
-    "string.empty": "Customer name is required",
-  }),
 
-  mobile: Joi.string().trim().required().messages({
-    "string.empty": "Mobile is required",
-  }),
 
-  email: Joi.string().trim().email().allow("", null).messages({
-    "string.email": "Enter a valid email",
-  }),
 
-  address: Joi.string().trim().allow("", null),
+  // Lead details are read live from the lead now. The backend ignores these
+  // fields; they are only allowed here until the frontend stops sending them.
+  customerName: Joi.any().optional(),
+  mobile: Joi.any().optional(),
+  email: Joi.any().optional(),
+  address: Joi.any().optional(),
+  city: Joi.any().optional(),
+  model: Joi.any().optional(),
+  remark: Joi.any().optional(),
 
-  city: Joi.string().trim().allow("", null),
 
-  model: Joi.string().trim().allow("", null),
-
-  remark: Joi.string().trim().allow("", null),
+ 
 
   // ==========================================================
   // VEHICLE TYPE
