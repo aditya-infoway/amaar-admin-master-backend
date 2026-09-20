@@ -9,6 +9,11 @@ const {
 
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
+const {
+  getLeadMap,
+  leadDetails,
+  getLeadMapBySalesOrder,
+} = require("../../../helper/leadDetails.js");
 
 // ============================================================
 // HELPERS
@@ -27,6 +32,19 @@ const normalizeId = (value) => {
 
   return Number.isInteger(id) && id > 0 ? id : null;
 };
+
+// live customer/model details from the lead, falling back to the stored copy
+const liveDetails = (workOrder, lead) =>
+  lead
+    ? leadDetails(lead)
+    : {
+        customerName: workOrder.customerName || "",
+        mobile: workOrder.mobile || "",
+        email: workOrder.email || "",
+        address: workOrder.address || "",
+        city: workOrder.city || "",
+        model: workOrder.model || "",
+      };
 
 // ============================================================
 // GET NEXT WORK ORDER NO
@@ -118,13 +136,6 @@ const createWorkOrder = async (req, res) => {
       workOrderNo,
       salesOrderId,
 
-      customerName,
-      mobile,
-      email,
-      address,
-      city,
-      model,
-
       qty,
       totalPrice,
       gst,
@@ -149,14 +160,6 @@ const createWorkOrder = async (req, res) => {
       return errorResponse(res, "Please select a Sales Order.");
     }
 
-    if (!customerName || !String(customerName).trim()) {
-      return errorResponse(res, "Customer name is required.");
-    }
-
-    if (!mobile || !String(mobile).trim()) {
-      return errorResponse(res, "Client number is required.");
-    }
-
     const fy = await getFinancialYearById(financialYearId, companyId);
 
     if (!fy) {
@@ -171,11 +174,20 @@ const createWorkOrder = async (req, res) => {
       "salesorder",
       [],
       { salesOrderId, companyId, delete: 0 },
-      ["salesOrderId", "soNo"],
+      ["salesOrderId", "soNo", "leadId"],
     );
 
     if (!salesOrderRows.length) {
       return errorResponse(res, "Selected Sales Order was not found.");
+    }
+
+    const leadMap = await getLeadMap([salesOrderRows[0].leadId], companyId);
+    const lead = leadMap.get(String(salesOrderRows[0].leadId));
+    if (!lead) {
+      return errorResponse(
+        res,
+        "Lead for the selected Sales Order was not found.",
+      );
     }
 
     // ========================================================
@@ -248,11 +260,11 @@ const createWorkOrder = async (req, res) => {
     // CHECK MODEL (PRODUCT) BELONGS TO THIS COMPANY
     // ========================================================
 
-    if (model) {
+    if (lead.model) {
       const modelRows = await selectWithJoins(
         "itemmaster",
         [],
-        { itemId: normalizeId(model), companyId, delete: 0 },
+        { itemId: normalizeId(lead.model), companyId, delete: 0 },
         ["itemId"],
       );
 
@@ -276,12 +288,12 @@ const createWorkOrder = async (req, res) => {
 
       salesOrderId,
 
-      customerName: String(customerName).trim(),
-      mobile: String(mobile).trim(),
-      email: email || null,
-      address: address || null,
-      city: city || null,
-      model: model || null,
+      customerName: lead.name,
+      mobile: lead.number,
+      email: lead.email || null,
+      address: lead.address || null,
+      city: lead.city || null,
+      model: lead.model ? String(lead.model) : null,
 
       qty: finalQty,
       totalPrice: finalTotalPrice,
@@ -301,12 +313,7 @@ const createWorkOrder = async (req, res) => {
         workOrderNo: finalWorkOrderNo,
         salesOrderId,
 
-        customerName,
-        mobile,
-        email: email || "",
-        address: address || "",
-        city: city || "",
-        model: model || "",
+        ...leadDetails(lead),
 
         qty: finalQty,
         totalPrice: finalTotalPrice,
@@ -416,7 +423,19 @@ const getWorkOrderList = async (req, res) => {
     // GET MODEL NAMES
     // ========================================================
 
-    const modelIds = workOrders.map((item) => item.model).filter((id) => id);
+    const leadBySalesOrder = await getLeadMapBySalesOrder(
+      workOrders.map((item) => item.salesOrderId),
+      companyId,
+    );
+
+    const modelIds = [
+      ...new Set(
+        [
+          ...[...leadBySalesOrder.values()].map((l) => l?.model),
+          ...workOrders.map((item) => item.model),
+        ].filter(Boolean),
+      ),
+    ];
 
     let modelMap = {};
 
@@ -438,34 +457,41 @@ const getWorkOrderList = async (req, res) => {
       }
     }
 
-    const data = workOrders.map((workOrder) => ({
-      id: String(workOrder.workOrderId),
+    const data = workOrders.map((workOrder) => {
+      const live = liveDetails(
+        workOrder,
+        leadBySalesOrder.get(String(workOrder.salesOrderId)),
+      );
 
-      financialYearId: workOrder.financialYearId,
+      return {
+        id: String(workOrder.workOrderId),
 
-      workOrderNo: workOrder.workOrderNo || "",
-      salesOrderId: workOrder.salesOrderId,
-      salesOrderNo: salesOrderMap[String(workOrder.salesOrderId)] || "",
+        financialYearId: workOrder.financialYearId,
 
-      customerName: workOrder.customerName || "",
-      mobile: workOrder.mobile || "",
-      email: workOrder.email || "",
-      address: workOrder.address || "",
-      city: workOrder.city || "",
-      model: workOrder.model || "",
-      modelName: modelMap[String(workOrder.model)] || "",
+        workOrderNo: workOrder.workOrderNo || "",
+        salesOrderId: workOrder.salesOrderId,
+        salesOrderNo: salesOrderMap[String(workOrder.salesOrderId)] || "",
 
-      qty: Number(workOrder.qty) || 0,
-      totalPrice: Number(workOrder.totalPrice) || 0,
-      gst: Number(workOrder.gst) || 0,
-      grandTotal: Number(workOrder.grandTotal) || 0,
+        customerName: live.customerName,
+        mobile: live.mobile,
+        email: live.email,
+        address: live.address,
+        city: live.city,
+        model: live.model,
+        modelName: modelMap[String(live.model)] || "",
 
-      createdBy: workOrder.createdBy || "",
-      createdType: workOrder.createdtype || "",
+        qty: Number(workOrder.qty) || 0,
+        totalPrice: Number(workOrder.totalPrice) || 0,
+        gst: Number(workOrder.gst) || 0,
+        grandTotal: Number(workOrder.grandTotal) || 0,
 
-      createdAt: workOrder.created,
-      updatedAt: workOrder.updated,
-    }));
+        createdBy: workOrder.createdBy || "",
+        createdType: workOrder.createdtype || "",
+
+        createdAt: workOrder.created,
+        updatedAt: workOrder.updated,
+      };
+    });
 
     return successResponse(res, data, "Work Order list fetched successfully");
   } catch (error) {
@@ -528,6 +554,15 @@ const getWorkOrderById = async (req, res) => {
 
     const workOrder = rows[0];
 
+    const leadBySalesOrder = await getLeadMapBySalesOrder(
+      [workOrder.salesOrderId],
+      companyId,
+    );
+    const live = liveDetails(
+      workOrder,
+      leadBySalesOrder.get(String(workOrder.salesOrderId)),
+    );
+
     return successResponse(
       res,
       {
@@ -538,12 +573,12 @@ const getWorkOrderById = async (req, res) => {
         workOrderNo: workOrder.workOrderNo || "",
         salesOrderId: workOrder.salesOrderId,
 
-        customerName: workOrder.customerName || "",
-        mobile: workOrder.mobile || "",
-        email: workOrder.email || "",
-        address: workOrder.address || "",
-        city: workOrder.city || "",
-        model: workOrder.model || "",
+              customerName: live.customerName,
+        mobile: live.mobile,
+        email: live.email,
+        address: live.address,
+        city: live.city,
+        model: live.model,
 
         qty: Number(workOrder.qty) || 0,
         totalPrice: Number(workOrder.totalPrice) || 0,
@@ -598,13 +633,6 @@ const updateWorkOrder = async (req, res) => {
       financialYearId,
       salesOrderId,
 
-      customerName,
-      mobile,
-      email,
-      address,
-      city,
-      model,
-
       qty,
       totalPrice,
       gst,
@@ -629,19 +657,31 @@ const updateWorkOrder = async (req, res) => {
       return errorResponse(res, "Please select a Sales Order.");
     }
 
-    if (!customerName || !String(customerName).trim()) {
-      return errorResponse(res, "Customer name is required.");
-    }
-
-    if (!mobile || !String(mobile).trim()) {
-      return errorResponse(res, "Client number is required.");
-    }
-
     const fy = await getFinancialYearById(financialYearId, companyId);
 
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
     }
+
+    const salesOrderRows = await selectWithJoins(
+      "salesorder",
+      [],
+      { salesOrderId, companyId, delete: 0 },
+      ["salesOrderId", "leadId"],
+    );
+    if (!salesOrderRows.length) {
+      return errorResponse(res, "Selected Sales Order was not found.");
+    }
+
+    const leadMap = await getLeadMap([salesOrderRows[0].leadId], companyId);
+    const lead = leadMap.get(String(salesOrderRows[0].leadId));
+    if (!lead) {
+      return errorResponse(
+        res,
+        "Lead for the selected Sales Order was not found.",
+      );
+    }
+
     const duplicate = await selectWithJoins(
       "workorder",
       [],
@@ -676,11 +716,11 @@ const updateWorkOrder = async (req, res) => {
     // CHECK MODEL (PRODUCT) BELONGS TO THIS COMPANY
     // ========================================================
 
-    if (model) {
+      if (lead.model) {
       const modelRows = await selectWithJoins(
         "itemmaster",
         [],
-        { itemId: normalizeId(model), companyId, delete: 0 },
+        { itemId: normalizeId(lead.model), companyId, delete: 0 },
         ["itemId"],
       );
 
@@ -702,13 +742,12 @@ const updateWorkOrder = async (req, res) => {
         financialYearId: fy.financialYearId,
         salesOrderId,
 
-        customerName: String(customerName).trim(),
-        mobile: String(mobile).trim(),
-        email: email || null,
-        address: address || null,
-        city: city || null,
-        model: model || null,
-
+        customerName: lead.name,
+        mobile: lead.number,
+        email: lead.email || null,
+        address: lead.address || null,
+        city: lead.city || null,
+        model: lead.model ? String(lead.model) : null,
         qty: finalQty,
         totalPrice: finalTotalPrice,
         gst: finalGst,
@@ -729,12 +768,7 @@ const updateWorkOrder = async (req, res) => {
         workOrderNo: existing.workOrderNo,
         salesOrderId,
 
-        customerName,
-        mobile,
-        email: email || "",
-        address: address || "",
-        city: city || "",
-        model: model || "",
+        ...leadDetails(lead),
 
         qty: finalQty,
         totalPrice: finalTotalPrice,
