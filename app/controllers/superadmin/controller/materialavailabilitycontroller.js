@@ -4,6 +4,7 @@ const {
   requiredmessage,
   selectWithJoins,
 } = require("../../../helper/index.js");
+const { getLeadMapBySalesOrder } = require("../../../helper/leadDetails.js");
 
 const db = require("../../../modelses");
 const Bom = db.bom;
@@ -28,7 +29,8 @@ const getLeafBomItems = (rows) => {
 const getMaterialAvailability = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { workOrderId } = req.params;
     if (!workOrderId) return errorResponse(res, "Work Order id is required.");
@@ -38,18 +40,43 @@ const getMaterialAvailability = async (req, res) => {
       "workorder",
       [],
       { workOrderId, companyId, delete: 0 },
-      ["workOrderId", "workOrderNo", "customerName", "model", "qty"],
+      [
+        "workOrderId",
+        "workOrderNo",
+        "salesOrderId",
+        "customerName",
+        "model",
+        "qty",
+      ],
     );
-    if (woRows.length === 0) return requiredmessage(res, "Work Order not found.");
+    if (woRows.length === 0)
+      return requiredmessage(res, "Work Order not found.");
     const workOrder = woRows[0];
 
+    const leadBySalesOrder = await getLeadMapBySalesOrder(
+      [workOrder.salesOrderId],
+      companyId,
+    );
+    const lead = leadBySalesOrder.get(String(workOrder.salesOrderId));
+    if (lead) {
+      workOrder.customerName = lead.name;
+      workOrder.model = lead.model;
+    }
+
     if (!workOrder.model) {
-      return errorResponse(res, "This Work Order has no product linked, so no BOM can be resolved.");
+      return errorResponse(
+        res,
+        "This Work Order has no product linked, so no BOM can be resolved.",
+      );
     }
 
     // ---- resolve BOM from the work order's finished-goods item ----
     let bom = await Bom.findOne({
-      where: { companyId, finishedGoodsItemId: Number(workOrder.model), delete: 0 },
+      where: {
+        companyId,
+        finishedGoodsItemId: Number(workOrder.model),
+        delete: 0,
+      },
       raw: true,
     });
 
@@ -139,10 +166,22 @@ const getMaterialAvailability = async (req, res) => {
       "itemmaster",
       [],
       { itemId: itemIds, companyId, delete: 0 },
-      ["itemId", "itemCode", "itemName", "itemLocation", "unit", "openingStock", "itemCategoryId", "hsnCode", "taxSlab"],
+      [
+        "itemId",
+        "itemCode",
+        "itemName",
+        "itemLocation",
+        "unit",
+        "openingStock",
+        "itemCategoryId",
+        "hsnCode",
+        "taxSlab",
+      ],
     );
 
-    const categoryIds = [...new Set(itemDetails.map((i) => i.itemCategoryId).filter(Boolean))];
+    const categoryIds = [
+      ...new Set(itemDetails.map((i) => i.itemCategoryId).filter(Boolean)),
+    ];
     let categoryMap = new Map();
     if (categoryIds.length > 0) {
       const categories = await selectWithJoins(
@@ -151,7 +190,9 @@ const getMaterialAvailability = async (req, res) => {
         { itemCategoryId: categoryIds, companyId, delete: 0 },
         ["itemCategoryId", "categoryName"],
       );
-      categoryMap = new Map(categories.map((c) => [c.itemCategoryId, c.categoryName]));
+      categoryMap = new Map(
+        categories.map((c) => [c.itemCategoryId, c.categoryName]),
+      );
     }
 
     const itemMap = new Map(
@@ -169,9 +210,11 @@ const getMaterialAvailability = async (req, res) => {
       const item = itemMap.get(Number(li.itemId));
       const availableStock = item ? Number(item.openingStock) || 0 : 0;
       const requiredStock = round2((Number(li.quantity) || 0) * productionQty);
-      const purchaseRequired = round2(Math.max(requiredStock - availableStock, 0));
+      const purchaseRequired = round2(
+        Math.max(requiredStock - availableStock, 0),
+      );
 
-          return {
+      return {
         bomItemId: li.bomItemId,
         itemId: li.itemId,
         itemCode: item ? item.itemCode : "(item not found)",

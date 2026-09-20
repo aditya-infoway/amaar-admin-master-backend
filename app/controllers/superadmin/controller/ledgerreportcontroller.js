@@ -183,6 +183,7 @@ const getLedgerDetails = async (req, res) => {
       [
         "paymentId", "date", "voucherNo", "voucherType", "paymentCollectedByModules",
         "selfAccountId", "selfDrOrCr", "accountId", "accountDrOrCr", "amount", "narration",
+        "purchaseId",
       ]
     );
 
@@ -200,6 +201,18 @@ const getLedgerDetails = async (req, res) => {
         "account", [], { id: oppIds, companyId, delete: 0 }, ["id", "accountName"]
       );
       oppAccounts.forEach((a) => { oppMap[a.id] = a.accountName; });
+    }
+
+    // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
+       // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
+    const purchaseIds = [...new Set(rows.map((r) => r.purchaseId).filter(Boolean))];
+    let purchaseBillMap = {};
+    if (purchaseIds.length) {
+      const purchases = await selectWithJoins(
+        "purchase", [], { purchaseId: purchaseIds, companyId, delete: 0 },
+        ["purchaseId", "billNo"]
+      );
+      purchases.forEach((p) => { purchaseBillMap[p.purchaseId] = p.billNo; });
     }
 
     // ---- Split: FY start → fromDate (opening calc) vs fromDate → toDate (display) ----
@@ -230,6 +243,7 @@ const getLedgerDetails = async (req, res) => {
         sr: 1,
         date: effectiveFromDate,
         voucherNo: "-",
+        billNo: "-",
         type: "OB",
         particulars: "Opening Balance",
         debit: openingBalanceForRange >= 0 ? openingBalanceForRange.toFixed(2) : "",
@@ -255,6 +269,7 @@ const getLedgerDetails = async (req, res) => {
         sr: list.length + 1,
         date: r.date,
         voucherNo: r.voucherNo || "-",
+        billNo: r.purchaseId ? (purchaseBillMap[r.purchaseId] || "-") : "-",
         type: moduleCode,
         particulars: getParticularsLabel(moduleCode, oppName),
         debit: debit ? debit.toFixed(2) : "",
