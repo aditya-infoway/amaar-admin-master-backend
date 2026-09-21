@@ -29,6 +29,11 @@ module.exports = sequelize => {
       allowNull: false,
       field: "roleId"
     },
+     accountId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "accountId"
+    },
     employeeName: {
       type: DataTypes.STRING(100),
       allowNull: false,

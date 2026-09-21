@@ -12,7 +12,8 @@ const createPurchaseOrder = Joi.object().keys({
   roundAmount: Joi.number().allow(null, "").default(0),
   emailSupplierIds: Joi.array().items(Joi.number()).optional(),
   status: Joi.string().valid("Draft", "Generated").required(),
-
+ createdBy: Joi.number().allow(null, ""),           
+  createdType: Joi.string().trim().allow(null, ""),
   items: Joi.array().min(1).items(
     Joi.object({
       itemId: Joi.number().required().messages({ "any.required": "Item id is required" }),

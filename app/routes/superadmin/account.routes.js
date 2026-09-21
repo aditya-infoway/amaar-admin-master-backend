@@ -24,6 +24,7 @@ module.exports = (app) => {
   routes.get("/supplier/list", account.getSupplierAccountList);
   routes.get("/customer/list", account.getCustomerAccountList);
   routes.get("/opposite/list", account.getOppAccountList);
+  routes.get("/sundry-creditor/list", account.getSundryCreditorAccountList);
   routes.get("/:id", account.getAccountById);
   routes.put("/update", validate(accountValidation.updateAccount), account.updateAccount);
   routes.delete("/delete", validate(accountValidation.deleteAccount), account.deleteAccount);

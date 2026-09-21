@@ -6,7 +6,8 @@ const createGrr = Joi.object().keys({
   purchaseOrderId: Joi.number().required().messages({ "any.required": "Purchase order is required" }),
   grrDate: Joi.string().required().messages({ "any.required": "GRR date is required" }),
   remarks: Joi.string().allow("", null),
-
+ createdBy: Joi.number().allow(null, ""),           
+  createdType: Joi.string().trim().allow(null, ""),
   items: Joi.array().min(1).items(
     Joi.object({
       purchaseOrderDetailsId: Joi.number().required().messages({

@@ -27,7 +27,7 @@ const createItemCategory = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { categoryName, status } = req.body;
+    const { categoryName, status, createdBy, createdType } = req.body;
     const cleanName = categoryName.trim().replace(/\s+/g, " ");
 
     // categoryName company-wise unique honi chahiye (case & spacing insensitive)
@@ -49,6 +49,8 @@ const createItemCategory = async (req, res) => {
     const payload = {
       companyId,
       categoryName: cleanName,
+      createdBy,
+      createdType,
       status,
       delete: 0,
     };
@@ -70,49 +72,73 @@ const getItemCategoryList = async (req, res) => {
     const companyId = req.companyId;
 
     if (!companyId) {
-      return requiredmessage(
-        res,
-        "Unauthorized. Please login again."
-      );
+      return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
     try {
       await syncDefaultItemCategories(companyId);
     } catch (syncError) {
-      // TEMPORARY:
-      // Don't stop category listing if sync fails.
+      // TEMPORARY: don't stop listing if sync fails
     }
 
     const list = await selectWithJoins(
       "itemcategory",
       [],
-      {
-        companyId,
-        delete: 0,
-      },
+      { companyId, delete: 0 },
       [
         "itemCategoryId",
         "companyId",
         "categoryName",
         "status",
         "categoryType",
+        "createdBy",    
+        "createdType",  
         "created",
       ],
       [["itemCategoryId", "DESC"]]
     );
 
-    return successResponse(
-      res,
-      list,
-      "Item category list fetched successfully"
-    );
+    // createdBy resolve — company ho ya employee
+    const createdByIds = [
+      ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
+    ];
 
+    let companyMap = {};
+    if (createdByIds.length > 0) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      companyMap = (companies || []).reduce((acc, item) => {
+        acc[String(item.companyId)] = item.companyName;
+        return acc;
+      }, {});
+    }
+
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
+    const data = (list || []).map((row) => ({
+      ...(row.toJSON ? row.toJSON() : row),
+      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
+    }));
+
+    return successResponse(res, data, "Item category list fetched successfully");
   } catch (error) {
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
 
@@ -131,14 +157,38 @@ const getItemCategoryById = async (req, res) => {
       "itemcategory",
       [],
       { itemCategoryId: id, companyId, delete: 0 },
-      ["itemCategoryId", "companyId", "categoryName", "status", "created"]
+      ["itemCategoryId", "companyId", "categoryName", "status", "createdBy", "createdType", "created"] // 👈 add
     );
 
     if (rows.length === 0) {
       return requiredmessage(res, "Item category not found");
     }
 
-    return successResponse(res, rows[0], "Item category fetched successfully");
+    const categoryRow = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+
+    if (categoryRow.createdBy) {
+      const companyRows = await selectWithJoins(
+        "company",
+        [],
+        { companyId: categoryRow.createdBy, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      if (companyRows.length > 0) {
+        categoryRow.createdBy = companyRows[0].companyName;
+      } else {
+        const employeeRows = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: categoryRow.createdBy, delete: 0 },
+          ["employeeId", "employeeName"]
+        );
+        if (employeeRows.length > 0) {
+          categoryRow.createdBy = employeeRows[0].employeeName;
+        }
+      }
+    }
+
+    return successResponse(res, categoryRow, "Item category fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
