@@ -1,6 +1,6 @@
-const Sequelize = require('sequelize');
-const process = require('process');
-const config =require("../config/db-config.js");
+const Sequelize = require("sequelize");
+const process = require("process");
+const config = require("../config/db-config.js");
 const db = {};
 
 let sequelize;
@@ -31,7 +31,10 @@ db.axlebrand = require("./axlebrand.js")(sequelize, Sequelize);
 db.hydraulicbrand = require("./hydraulicbrand.js")(sequelize, Sequelize);
 db.tyrebrand = require("./tyrebrand.js")(sequelize, Sequelize);
 db.account = require("./account.js")(sequelize, Sequelize);
-db.accountopeningbalance = require("./accountopeningbalance.js")(sequelize, Sequelize);
+db.accountopeningbalance = require("./accountopeningbalance.js")(
+  sequelize,
+  Sequelize,
+);
 db.itemcategory = require("./itemcategory.js")(sequelize, Sequelize);
 db.itemgroup = require("./itemgroup.js")(sequelize, Sequelize);
 db.itemmaster = require("./itemmaster.js")(sequelize, Sequelize);
@@ -43,7 +46,10 @@ db.vehicleentry = require("./vehicleentry.js")(sequelize, Sequelize);
 db.visitorentry = require("./visitorentry.js")(sequelize, Sequelize);
 db.payment = require("./payment.js")(sequelize, Sequelize);
 db.purchaseorder = require("./purchaseorder.js")(sequelize, Sequelize);
-db.purchaseorderdetails = require("./purchaseorderdetails.js")(sequelize, Sequelize);
+db.purchaseorderdetails = require("./purchaseorderdetails.js")(
+  sequelize,
+  Sequelize,
+);
 db.lead = require("./lead.js")(sequelize, Sequelize);
 db.followup = require("./followup.js")(sequelize, Sequelize);
 db.createmaster = require("./createmaster.js")(sequelize, Sequelize);
@@ -60,7 +66,10 @@ db.indentitem = require("./indentitem.js")(sequelize, Sequelize);
 db.attendance = require("./attendance.js")(sequelize, Sequelize);
 db.grr = require("./grr.js")(sequelize, Sequelize);
 db.grritem = require("./grritem.js")(sequelize, Sequelize);
-
+db.contractoremployee = require("./contractoremployee.js")(
+  sequelize,
+  Sequelize,
+);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;

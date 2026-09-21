@@ -71,10 +71,13 @@ const getPurchaseOrdersForGrr = async (req, res) => {
     );
     const supplierIdByPo = {};
     details.forEach((d) => {
-      if (!supplierIdByPo[d.purchaseOrderId]) supplierIdByPo[d.purchaseOrderId] = d.supplierId;
+      if (!supplierIdByPo[d.purchaseOrderId])
+        supplierIdByPo[d.purchaseOrderId] = d.supplierId;
     });
 
-    const supplierIds = [...new Set(Object.values(supplierIdByPo).filter(Boolean))];
+    const supplierIds = [
+      ...new Set(Object.values(supplierIdByPo).filter(Boolean)),
+    ];
     let accountMap = {};
     if (supplierIds.length) {
       const accounts = await selectWithJoins(
@@ -127,13 +130,21 @@ const getPoItemsForGrr = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { purchaseOrderId } = req.params;
-    if (!purchaseOrderId) return errorResponse(res, "Purchase order id is required.");
+    if (!purchaseOrderId)
+      return errorResponse(res, "Purchase order id is required.");
 
     const poRows = await selectWithJoins(
       "purchaseorder",
       [],
       { purchaseOrderId, companyId, delete: 0 },
-      ["purchaseOrderId", "poNumber", "poDate", "requiredDate", "serialNo", "status"],
+      [
+        "purchaseOrderId",
+        "poNumber",
+        "poDate",
+        "requiredDate",
+        "serialNo",
+        "status",
+      ],
     );
     if (!poRows.length) return errorResponse(res, "Purchase order not found.");
     const po = poRows[0];
@@ -142,9 +153,19 @@ const getPoItemsForGrr = async (req, res) => {
       "purchaseorderdetails",
       [],
       { purchaseOrderId, companyId, delete: 0 },
-      ["purchaseOrderDetailsId", "itemId", "supplierId", "itemCode", "itemName", "hsnCode", "uom", "qty"],
+      [
+        "purchaseOrderDetailsId",
+        "itemId",
+        "supplierId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "uom",
+        "qty",
+      ],
     );
-    if (!detailRows.length) return errorResponse(res, "No items found for this purchase order.");
+    if (!detailRows.length)
+      return errorResponse(res, "No items found for this purchase order.");
 
     const supplierId = detailRows[0].supplierId;
     let supplier = {};
@@ -192,12 +213,14 @@ const getPoItemsForGrr = async (req, res) => {
 const createGrr = async (req, res) => {
   try {
     const companyId = req.companyId;
-    const { financialYearId, purchaseOrderId, grrDate, remarks, items } = req.body;
+    const { financialYearId, purchaseOrderId, grrDate, remarks, items } =
+      req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
     if (!financialYearId)
       return errorResponse(res, "Financial Year not found in session.");
-    if (!purchaseOrderId) return errorResponse(res, "Purchase order is required.");
+    if (!purchaseOrderId)
+      return errorResponse(res, "Purchase order is required.");
     if (!Array.isArray(items) || items.length === 0)
       return errorResponse(res, "Please add at least one item.");
 
@@ -210,7 +233,8 @@ const createGrr = async (req, res) => {
       { purchaseOrderId, companyId, delete: 0 },
       ["purchaseOrderId", "serialNo"],
     );
-    if (!poRows.length) return errorResponse(res, "Purchase order not found or invalid.");
+    if (!poRows.length)
+      return errorResponse(res, "Purchase order not found or invalid.");
 
     // one GRR per PO — remove this block if partial/multiple GRRs get allowed
     const existing = await selectWithJoins(
@@ -219,24 +243,54 @@ const createGrr = async (req, res) => {
       { purchaseOrderId, companyId, delete: 0 },
       ["grrId"],
     );
-    if (existing.length) return errorResponse(res, "GRR already generated for this purchase order.");
+    if (existing.length)
+      return errorResponse(
+        res,
+        "GRR already generated for this purchase order.",
+      );
 
     for (const row of items) {
       if (!row.purchaseOrderDetailsId)
-        return errorResponse(res, `Purchase order item reference missing for "${row.itemName || "an item"}".`);
-      if (row.inQty === undefined || row.inQty === null || Number(row.inQty) < 0)
-        return errorResponse(res, `Invalid In Qty for "${row.itemName || "an item"}".`);
+        return errorResponse(
+          res,
+          `Purchase order item reference missing for "${row.itemName || "an item"}".`,
+        );
+      if (
+        row.inQty === undefined ||
+        row.inQty === null ||
+        Number(row.inQty) < 0
+      )
+        return errorResponse(
+          res,
+          `Invalid In Qty for "${row.itemName || "an item"}".`,
+        );
     }
 
     const detailIds = items.map((i) => i.purchaseOrderDetailsId);
     const detailRows = await selectWithJoins(
       "purchaseorderdetails",
       [],
-      { purchaseOrderDetailsId: detailIds, purchaseOrderId, companyId, delete: 0 },
-      ["purchaseOrderDetailsId", "itemId", "supplierId", "itemCode", "itemName", "hsnCode", "qty"],
+      {
+        purchaseOrderDetailsId: detailIds,
+        purchaseOrderId,
+        companyId,
+        delete: 0,
+      },
+      [
+        "purchaseOrderDetailsId",
+        "itemId",
+        "supplierId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "qty",
+      ],
     );
     if (detailRows.length !== items.length)
-      return errorResponse(res, "One or more items do not belong to the selected purchase order.");
+      return errorResponse(
+        res,
+        "One or more items do not belong to the selected purchase order.",
+      );
 
     const detailMap = {};
     let supplierId = null;
@@ -315,7 +369,8 @@ const getGrrList = async (req, res) => {
       "supplierId",
       "status",
     ]);
-    if (!grrs.length) return successResponse(res, [], "GRR list fetched successfully");
+    if (!grrs.length)
+      return successResponse(res, [], "GRR list fetched successfully");
 
     const poIds = [...new Set(grrs.map((g) => g.purchaseOrderId))];
     const pos = await selectWithJoins(
@@ -329,7 +384,9 @@ const getGrrList = async (req, res) => {
       poMap[p.purchaseOrderId] = p.poNumber;
     });
 
-    const supplierIds = [...new Set(grrs.map((g) => g.supplierId).filter(Boolean))];
+    const supplierIds = [
+      ...new Set(grrs.map((g) => g.supplierId).filter(Boolean)),
+    ];
     let accountMap = {};
     if (supplierIds.length) {
       const accounts = await selectWithJoins(
@@ -371,18 +428,70 @@ const getGrrById = async (req, res) => {
       "grr",
       [],
       { grrId: id, companyId, delete: 0 },
-      ["grrId", "grrNo", "grrDate", "purchaseOrderId", "serialNo", "supplierId", "remarks", "status"],
+      [
+        "grrId",
+        "grrNo",
+        "grrDate",
+        "purchaseOrderId",
+        "serialNo",
+        "supplierId",
+        "remarks",
+        "status",
+      ],
     );
     if (!rows.length) return requiredmessage(res, "GRR not found");
+    const grr = rows[0];
 
     const items = await selectWithJoins(
       "grritem",
       [],
       { grrId: id, companyId, delete: 0 },
-      ["grrItemId", "itemId", "itemCode", "itemName", "hsnCode", "orderQty", "inQty", "difference"],
+      [
+        "grrItemId",
+        "itemId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "orderQty",
+        "inQty",
+        "difference",
+      ],
     );
 
-    return successResponse(res, { ...rows[0], items }, "GRR fetched successfully");
+    // PO + supplier for the header. No `delete: 0` here on purpose:
+    // an already-saved GRR should still show them if they were removed later.
+    const poRows = await selectWithJoins(
+      "purchaseorder",
+      [],
+      { purchaseOrderId: grr.purchaseOrderId, companyId },
+      ["purchaseOrderId", "poNumber", "poDate", "requiredDate"],
+    );
+    const po = poRows[0] || {};
+
+    let supplier = {};
+    if (grr.supplierId) {
+      const supRows = await selectWithJoins(
+        "account",
+        [],
+        { id: grr.supplierId, companyId },
+        ["id", "accountName", "mobileNo"],
+      );
+      if (supRows.length) supplier = supRows[0];
+    }
+
+    return successResponse(
+      res,
+      {
+        ...grr,
+        poNumber: po.poNumber || "",
+        orderDate: po.poDate || "",
+        requestedDate: po.requiredDate || "",
+        supplierName: supplier.accountName || "",
+        supplierNumber: supplier.mobileNo || "",
+        items,
+      },
+      "GRR fetched successfully",
+    );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
