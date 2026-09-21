@@ -16,8 +16,6 @@ const {
   clearVerifiedEmail,
 } = require("../../../helper/emailOtp.js");
 
-
-
 // lead -> sales order -> work order -> indent
 // returns Map: leadId (string) -> { workOrderIds: [], indentNo: "" }
 const getLeadWorkChain = async (leadIds, companyId) => {
@@ -276,7 +274,7 @@ const getLeadList = async (req, res) => {
       }
     }
 
-       const chainMap = await getLeadWorkChain(
+    const chainMap = await getLeadWorkChain(
       list.map((item) => item.leadId),
       companyId,
     );
@@ -374,7 +372,7 @@ const updateLead = async (req, res) => {
       "lead",
       [],
       { leadId, companyId, delete: 0 },
-      ["leadId", "model"],
+      ["leadId", "model", "email"],
     );
     if (existing.length === 0) return requiredmessage(res, "Enquiry not found");
 
@@ -393,7 +391,14 @@ const updateLead = async (req, res) => {
     }
 
     const leadEmail = String(email || "").trim();
-    if (!leadEmail || !isEmailVerified(companyId, leadEmail)) {
+    const oldEmail = String(existing[0].email || "").trim();
+    const emailChanged = leadEmail.toLowerCase() !== oldEmail.toLowerCase();
+
+    // OTP needed only if the email was changed
+    if (
+      emailChanged &&
+      (!leadEmail || !isEmailVerified(companyId, leadEmail))
+    ) {
       return errorResponse(
         res,
         "Email is not verified. Please verify the OTP first.",
@@ -432,7 +437,7 @@ const updateLead = async (req, res) => {
       );
     }
 
-    clearVerifiedEmail(companyId, leadEmail);
+    if (emailChanged) clearVerifiedEmail(companyId, leadEmail);
     return successResponse(res, {}, "Enquiry updated successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -476,4 +481,3 @@ module.exports = {
   sendLeadOtp,
   verifyLeadOtp,
 };
-

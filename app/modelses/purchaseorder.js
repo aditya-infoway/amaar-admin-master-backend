@@ -53,7 +53,8 @@ module.exports = (sequelize) => {
     }, // Draft | Generated
 
      mailStatus: { type: DataTypes.STRING(10), allowNull: true },
-
+ createdBy: { type: DataTypes.INTEGER, allowNull: true },       
+    createdType: { type: DataTypes.STRING(20), allowNull: true },
     created: {
       type: DataTypes.DATE,
       allowNull: false,

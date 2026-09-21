@@ -34,6 +34,8 @@ module.exports = sequelize => {
     barcodeType: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "manual", field: "barcodeType" },
     barcode: { type: DataTypes.STRING(30), allowNull: true, field: "barcode" },
     status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "active", field: "status" },
+      createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },     
+    createdType: { type: DataTypes.STRING(20), allowNull: true, field: "createdType" }, 
     created: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     delete: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: "delete" },

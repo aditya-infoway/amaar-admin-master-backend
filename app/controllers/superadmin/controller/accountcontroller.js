@@ -416,7 +416,39 @@ const getOppAccountList = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
-
+const getSundryCreditorAccountList = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+ 
+    const list = await selectWithJoinsV2(
+      "account",
+      [],
+      {
+        'account."companyId"': companyId,
+        'account."groupId"': 30,
+        'account."delete"': 0,
+      },
+      [
+        "account.id",
+        'account."accountName"',
+        'account."mobileNo"',
+        'account."email"',
+        'account."cityName"',
+        'account."currentBalance"',
+        'account."currentDrOrCr"',
+        'account."stateName"',
+      ],
+      [["account.id", "DESC"]],
+      0,
+      0
+    );
+ 
+    return successResponse(res, list, "Sundry Creditor account list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
 module.exports = {
   createAccount,
   getAccountList,
@@ -428,4 +460,5 @@ module.exports = {
   getSupplierAccountList,
   getCustomerAccountList,
   getOppAccountList,
+  getSundryCreditorAccountList
 };

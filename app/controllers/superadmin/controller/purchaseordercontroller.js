@@ -116,6 +116,8 @@ const createPurchaseOrder = async (req, res) => {
       items,
       indentId,
       emailSupplierIds,
+       createdBy,    
+      createdType,
     } = req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
@@ -260,6 +262,8 @@ const createPurchaseOrder = async (req, res) => {
         roundAmount: Number(roundAmount) || 0,
         grandTotal: Number(grandTotal.toFixed(2)),
         status: finalStatus,
+          createdBy,     
+  createdType,   
         delete: 0,
       });
 
@@ -365,6 +369,8 @@ const getPurchaseOrderList = async (req, res) => {
       "grandTotal",
       "status",
       "mailStatus",
+       "createdBy",     
+  "createdType", 
     ]);
     if (!pos.length)
       return successResponse(
@@ -425,22 +431,55 @@ const getPurchaseOrderList = async (req, res) => {
       );
     });
 
-    const data = pos.map((p) => {
-      const names = supplierNamesByPo[p.purchaseOrderId];
-      const supplierName = names ? [...names].join(", ") : "";
-      const branch = branchMap[p.branchId] || {};
-      return {
-        id: String(p.purchaseOrderId),
-        poNumber: p.poNumber,
-        poDate: p.poDate,
-        serialNo: p.serialNo ?? null,
-        supplierName,
-        deliveryLocation: branch.branchName || "Main Branch",
-        totalAmount: String(p.grandTotal),
-        status: p.status,
-        mailStatus: p.mailStatus || null,
-      };
-    });
+   // createdBy resolve — company ho ya employee
+const createdByIds = [...new Set(pos.map((p) => p.createdBy).filter(Boolean))];
+
+let companyMap = {};
+if (createdByIds.length > 0) {
+  const companies = await selectWithJoins(
+    "company",
+    [],
+    { companyId: createdByIds, delete: 0 },
+    ["companyId", "companyName"]
+  );
+  companyMap = (companies || []).reduce((acc, item) => {
+    acc[String(item.companyId)] = item.companyName;
+    return acc;
+  }, {});
+}
+
+let employeeMap = {};
+if (createdByIds.length > 0) {
+  const employees = await selectWithJoins(
+    "employee",
+    [],
+    { employeeId: createdByIds, delete: 0 },
+    ["employeeId", "employeeName"]
+  );
+  employeeMap = (employees || []).reduce((acc, item) => {
+    acc[String(item.employeeId)] = item.employeeName;
+    return acc;
+  }, {});
+}
+
+const data = pos.map((p) => {
+  const names = supplierNamesByPo[p.purchaseOrderId];
+  const supplierName = names ? [...names].join(", ") : "";
+  const branch = branchMap[p.branchId] || {};
+  return {
+    id: String(p.purchaseOrderId),
+    poNumber: p.poNumber,
+    poDate: p.poDate,
+    serialNo: p.serialNo ?? null,
+    supplierName,
+    deliveryLocation: branch.branchName || "Main Branch",
+    totalAmount: String(p.grandTotal),
+    status: p.status,
+    mailStatus: p.mailStatus || null,
+    createdBy: companyMap[String(p.createdBy)] || employeeMap[String(p.createdBy)] || p.createdBy || "", 
+    createdType:p.createdType || ""
+  };
+});
 
     return successResponse(
       res,
@@ -477,6 +516,8 @@ const getPurchaseOrderById = async (req, res) => {
         "roundAmount",
         "grandTotal",
         "status",
+          "createdBy",    
+    "createdType",
       ],
     );
     if (rows.length === 0)

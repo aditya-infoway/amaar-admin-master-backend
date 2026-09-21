@@ -16,7 +16,7 @@ const createLocation = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { locationCode, locationName, status } = req.body;
+    const { locationCode, locationName, status, createdBy, createdType } = req.body;
 
     // Check locationCode unique
     const codeExists = await selectWithJoins(
@@ -47,6 +47,8 @@ const createLocation = async (req, res) => {
       locationCode: locationCode.trim(),
       locationName: locationName.trim(),
       status: status || "active",
+        createdBy,     
+  createdType,
       delete: 0,
     };
 
@@ -74,11 +76,49 @@ const getLocationList = async (req, res) => {
       "location",
       [],
       { companyId, delete: 0 },
-      ["locationId", "companyId", "locationCode", "locationName", "status", "created"],
+      ["locationId", "companyId", "locationCode", "locationName", "status", "createdBy", "createdType", "created"], 
       [["locationId", "DESC"]]
     );
 
-    return successResponse(res, list, "Location list fetched successfully");
+    // createdBy resolve — company ho ya employee
+    const createdByIds = [
+      ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
+    ];
+
+    let companyMap = {};
+    if (createdByIds.length > 0) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      companyMap = (companies || []).reduce((acc, item) => {
+        acc[String(item.companyId)] = item.companyName;
+        return acc;
+      }, {});
+    }
+
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
+    const data = (list || []).map((row) => ({
+      ...(row.toJSON ? row.toJSON() : row),
+      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
+    }));
+
+    return successResponse(res, data, "Location list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -99,14 +139,38 @@ const getLocationById = async (req, res) => {
       "location",
       [],
       { locationId: id, companyId, delete: 0 },
-      ["locationId", "companyId", "locationCode", "locationName", "status", "created"]
+      ["locationId", "companyId", "locationCode", "locationName", "status", "createdBy", "createdType", "created"]
     );
 
     if (rows.length === 0) {
       return requiredmessage(res, "Location not found");
     }
 
-    return successResponse(res, rows[0], "Location fetched successfully");
+    const locationRow = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+
+    if (locationRow.createdBy) {
+      const companyRows = await selectWithJoins(
+        "company",
+        [],
+        { companyId: locationRow.createdBy, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      if (companyRows.length > 0) {
+        locationRow.createdBy = companyRows[0].companyName;
+      } else {
+        const employeeRows = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: locationRow.createdBy, delete: 0 },
+          ["employeeId", "employeeName"]
+        );
+        if (employeeRows.length > 0) {
+          locationRow.createdBy = employeeRows[0].employeeName;
+        }
+      }
+    }
+
+    return successResponse(res, locationRow, "Location fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }

@@ -30,6 +30,8 @@ module.exports = sequelize => {
       defaultValue: "manual",
       field: "categoryType"
     },
+     createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },    
+    createdType: { type: DataTypes.STRING(20), allowNull: true, field: "createdType" },
     created: {
       type: DataTypes.DATE,
       allowNull: false,

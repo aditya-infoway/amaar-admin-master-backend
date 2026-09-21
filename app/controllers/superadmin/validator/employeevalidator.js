@@ -14,6 +14,9 @@ const createEmployee = Joi.object().keys({
     "number.base": "Please select a role",
     "any.required": "Please select a role",
   }),
+    accountId: Joi.number().allow(null, "").messages({
+    "number.base": "Invalid account selected",
+  }),
   employeeName: Joi.string().trim().required().messages({
     "string.empty": "Employee name is required",
   }),

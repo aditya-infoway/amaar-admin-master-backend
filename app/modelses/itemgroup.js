@@ -30,6 +30,8 @@ module.exports = sequelize => {
       defaultValue: "active",
       field: "status"
     },
+    createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },    
+    createdType: { type: DataTypes.STRING(20), allowNull: true, field: "createdType" },
     created: {
       type: DataTypes.DATE,
       allowNull: false,

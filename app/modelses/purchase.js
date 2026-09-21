@@ -41,6 +41,8 @@ module.exports = sequelize => {
     bankNarration: { type: DataTypes.TEXT, allowNull: true },
 
     billStatus: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "pending" },
+     createdBy: { type: DataTypes.INTEGER, allowNull: true },       
+    createdType: { type: DataTypes.STRING(20), allowNull: true },
     created: {
       type: DataTypes.DATE,
       allowNull: false,
