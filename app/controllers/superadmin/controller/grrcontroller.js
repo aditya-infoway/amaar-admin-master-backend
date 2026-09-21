@@ -213,8 +213,9 @@ const getPoItemsForGrr = async (req, res) => {
 const createGrr = async (req, res) => {
   try {
     const companyId = req.companyId;
-    const { financialYearId, purchaseOrderId, grrDate, remarks, items } =
-      req.body;
+ 
+    const { financialYearId, purchaseOrderId, grrDate, remarks, items , createdBy,
+      createdType,} = req.body;
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
     if (!financialYearId)
@@ -317,6 +318,8 @@ const createGrr = async (req, res) => {
       supplierId,
       remarks: remarks || "",
       status: "Completed",
+       createdBy,
+      createdType,
       delete: 0,
     });
 
@@ -351,6 +354,7 @@ const createGrr = async (req, res) => {
 };
 
 // ---------------- LIST ----------------
+// ---------------- LIST ----------------
 const getGrrList = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -368,6 +372,8 @@ const getGrrList = async (req, res) => {
       "purchaseOrderId",
       "supplierId",
       "status",
+      "createdBy",
+      "createdType",
     ]);
     if (!grrs.length)
       return successResponse(res, [], "GRR list fetched successfully");
@@ -400,6 +406,37 @@ const getGrrList = async (req, res) => {
       });
     }
 
+    // ---- createdBy resolve — company ho ya employee ----
+    const createdByIds = [...new Set(grrs.map((g) => g.createdBy).filter(Boolean))];
+
+    let companyMap = {};
+    if (createdByIds.length > 0) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      companyMap = (companies || []).reduce((acc, item) => {
+        acc[String(item.companyId)] = item.companyName;
+        return acc;
+      }, {});
+    }
+
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
     const data = grrs.map((g) => ({
       id: String(g.grrId),
       grrNo: g.grrNo,
@@ -408,6 +445,8 @@ const getGrrList = async (req, res) => {
       supplierName: accountMap[g.supplierId]?.accountName || "",
       supplierNumber: accountMap[g.supplierId]?.mobileNo || "",
       status: g.status,
+      createdBy: companyMap[String(g.createdBy)] || employeeMap[String(g.createdBy)] || g.createdBy || "",
+      createdType: g.createdType || "",
     }));
 
     return successResponse(res, data, "GRR list fetched successfully");
@@ -416,6 +455,8 @@ const getGrrList = async (req, res) => {
   }
 };
 
+// ---------------- GET BY ID (view/print) ----------------
+// ---------------- GET BY ID (view/print) ----------------
 // ---------------- GET BY ID (view/print) ----------------
 const getGrrById = async (req, res) => {
   try {
@@ -437,6 +478,8 @@ const getGrrById = async (req, res) => {
         "supplierId",
         "remarks",
         "status",
+        "createdBy",
+        "createdType",
       ],
     );
     if (!rows.length) return requiredmessage(res, "GRR not found");
@@ -479,6 +522,30 @@ const getGrrById = async (req, res) => {
       if (supRows.length) supplier = supRows[0];
     }
 
+    // ---- createdBy resolve — company ho ya employee ----
+    let createdByName = grr.createdBy || "";
+    if (grr.createdBy) {
+      const companyRows = await selectWithJoins(
+        "company",
+        [],
+        { companyId: grr.createdBy, delete: 0 },
+        ["companyId", "companyName"],
+      );
+      if (companyRows.length > 0) {
+        createdByName = companyRows[0].companyName;
+      } else {
+        const employeeRows = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: grr.createdBy, delete: 0 },
+          ["employeeId", "employeeName"],
+        );
+        if (employeeRows.length > 0) {
+          createdByName = employeeRows[0].employeeName;
+        }
+      }
+    }
+
     return successResponse(
       res,
       {
@@ -489,6 +556,8 @@ const getGrrById = async (req, res) => {
         supplierName: supplier.accountName || "",
         supplierNumber: supplier.mobileNo || "",
         items,
+        createdBy: createdByName,
+        createdType: grr.createdType || "",
       },
       "GRR fetched successfully",
     );

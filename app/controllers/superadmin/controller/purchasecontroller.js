@@ -62,8 +62,7 @@ const createPurchase = async (req, res) => {
       return errorResponse(res, "Please add at least one item.");
     }
 
-    const finalCreatedBy = createdBy != null ? Number(createdBy) : companyId;
-    const finalCreatedType = createdType || "Super Admin";
+   
 
     // ---- Financial Year validate ----
     const fy = await getFinancialYearById(financialYearId, companyId);
@@ -215,8 +214,8 @@ const createPurchase = async (req, res) => {
       grandTotal: Number(grandTotal.toFixed(2)),
 
       billStatus: "pending",
-      createdBy: finalCreatedBy,
-      createdType: finalCreatedType,
+        createdBy,
+      createdType,
       delete: 0,
     });
 
@@ -269,8 +268,8 @@ if (purchaseOrderId) {
       narration: narration || "",
       paymentMode: "CREDIT",
       purchaseId: purchase.purchaseId,   // ledger report join ke liye
-      createdBy: finalCreatedBy,
-      createdType: finalCreatedType,
+          createdBy,
+      createdType,
       status: "active",
       delete: 0,
     });
@@ -306,8 +305,8 @@ if (purchaseOrderId) {
         narration: narration || "",
         paymentMode: "CASH",
         purchaseId: purchase.purchaseId,   // ledger report join ke liye
-        createdBy: finalCreatedBy,
-        createdType: finalCreatedType,
+          createdBy,
+      createdType,
         status: "active",
         delete: 0,
       });
@@ -346,8 +345,8 @@ if (purchaseOrderId) {
         chequeDate: modeUpper === "CHEQUE" ? chequeDate : null,
         chequeClearDate: modeUpper === "CHEQUE" ? (chequeClearDate || null) : null,
         purchaseId: purchase.purchaseId,   // ledger report join ke liye
-        createdBy: finalCreatedBy,
-        createdType: finalCreatedType,
+           createdBy,
+      createdType,
         status: "active",
         delete: 0,
       });
@@ -395,6 +394,7 @@ const getPurchaseList = async (req, res) => {
         "billNo", "purchaseBillNo", "transportCharge", "loadingCharge",
         "otherCharge", "taxableValue", "gstAmount", "cgstAmount", "sgstAmount",
         "igstAmount", "grandTotal", "billStatus",
+        "createdBy", "createdType",
       ]
     );
  
@@ -422,7 +422,6 @@ const getPurchaseList = async (req, res) => {
         );
         branches.forEach((b) => { branchMap[b.branchId] = b; });
       } catch (e) {
-        // agar "branch" table exist nahi karti to location blank rahega
         branchMap = {};
       }
     }
@@ -436,6 +435,37 @@ const getPurchaseList = async (req, res) => {
     details.forEach((d) => {
       qtyMap[d.purchaseId] = (qtyMap[d.purchaseId] || 0) + Number(d.qty || 0);
     });
+
+    // ---- createdBy resolve — company ho ya employee ----
+    const createdByIds = [...new Set(purchases.map((p) => p.createdBy).filter(Boolean))];
+
+    let companyMap = {};
+    if (createdByIds.length > 0) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      companyMap = (companies || []).reduce((acc, item) => {
+        acc[String(item.companyId)] = item.companyName;
+        return acc;
+      }, {});
+    }
+
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
  
     const data = purchases.map((p) => {
       const account = accountMap[p.accountId] || {};
@@ -457,10 +487,12 @@ const getPurchaseList = async (req, res) => {
         sgstAmount: String(p.sgstAmount),
         igstAmount: String(p.igstAmount),
         grandTotal: String(p.grandTotal),
-        transportName: "", // schema mein column nahi he abhi
+        transportName: "",
         mobileNo: account.mobileNo || "",
-        vehicleNo: "", // schema mein column nahi he abhi
+        vehicleNo: "",
         status: p.billStatus,
+        createdBy: companyMap[String(p.createdBy)] || employeeMap[String(p.createdBy)] || p.createdBy || "",
+        createdType: p.createdType || "",
       };
     });
  
@@ -489,6 +521,7 @@ const getPurchaseById = async (req, res) => {
         "discountPct", "discountAmount", "roundAmount",
         "taxableValue", "gstAmount", "cgstAmount", "sgstAmount", "igstAmount",
         "grandTotal", "billStatus", "created",
+        "createdBy", "createdType",
       ]
     );
 
@@ -527,6 +560,30 @@ const getPurchaseById = async (req, res) => {
       ]
     );
 
+    // ---- createdBy resolve — company ho ya employee ----
+    let createdByName = purchase.createdBy || "";
+    if (purchase.createdBy) {
+      const companyRows = await selectWithJoins(
+        "company",
+        [],
+        { companyId: purchase.createdBy, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      if (companyRows.length > 0) {
+        createdByName = companyRows[0].companyName;
+      } else {
+        const employeeRows = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: purchase.createdBy, delete: 0 },
+          ["employeeId", "employeeName"]
+        );
+        if (employeeRows.length > 0) {
+          createdByName = employeeRows[0].employeeName;
+        }
+      }
+    }
+
     return successResponse(
       res,
       {
@@ -536,6 +593,8 @@ const getPurchaseById = async (req, res) => {
         supplierAddress: party.addressLine1 || "",
         branchName: branch.branchName || "",
         items,
+        createdBy: createdByName,
+        createdType: purchase.createdType || "",
       },
       "Purchase fetched successfully"
     );

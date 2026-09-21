@@ -16,7 +16,7 @@ const createItemGroup = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { groupName, itemCategoryId, status } = req.body;
+    const { groupName, itemCategoryId, status,createdBy, createdType } = req.body;
 
     const nameExists = await selectWithJoins(
       "itemgroup",
@@ -33,6 +33,8 @@ const createItemGroup = async (req, res) => {
       companyId,
       groupName: groupName.trim(),
       itemCategoryId,
+       createdBy,    
+  createdType, 
       status,
       delete: 0,
     };
@@ -61,11 +63,58 @@ const getItemGroupList = async (req, res) => {
       "itemgroup",
       [],
       { companyId, delete: 0 },
-      ["itemGroupId", "companyId", "groupName", "itemCategoryId", "status", "created"],
+      [
+        "itemGroupId",
+        "companyId",
+        "groupName",
+        "itemCategoryId",
+        "status",
+        "createdBy",     // 👈 add
+        "createdType",   // 👈 add
+        "created",
+      ],
       [["itemGroupId", "DESC"]]
     );
 
-    return successResponse(res, list, "Item group list fetched successfully");
+    // createdBy resolve — company ho ya employee
+    const createdByIds = [
+      ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
+    ];
+
+    let companyMap = {};
+    if (createdByIds.length > 0) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      companyMap = (companies || []).reduce((acc, item) => {
+        acc[String(item.companyId)] = item.companyName;
+        return acc;
+      }, {});
+    }
+
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
+    const data = (list || []).map((row) => ({
+      ...(row.toJSON ? row.toJSON() : row),
+      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
+    }));
+
+    return successResponse(res, data, "Item group list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -86,14 +135,38 @@ const getItemGroupById = async (req, res) => {
       "itemgroup",
       [],
       { itemGroupId: id, companyId, delete: 0 },
-      ["itemGroupId", "companyId", "groupName", "itemCategoryId", "status", "created"]
+      ["itemGroupId", "companyId", "groupName", "itemCategoryId", "status", "createdBy", "createdType", "created"] // 👈 add
     );
 
     if (rows.length === 0) {
       return requiredmessage(res, "Item group not found");
     }
 
-    return successResponse(res, rows[0], "Item group fetched successfully");
+    const groupRow = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+
+    if (groupRow.createdBy) {
+      const companyRows = await selectWithJoins(
+        "company",
+        [],
+        { companyId: groupRow.createdBy, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      if (companyRows.length > 0) {
+        groupRow.createdBy = companyRows[0].companyName;
+      } else {
+        const employeeRows = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: groupRow.createdBy, delete: 0 },
+          ["employeeId", "employeeName"]
+        );
+        if (employeeRows.length > 0) {
+          groupRow.createdBy = employeeRows[0].employeeName;
+        }
+      }
+    }
+
+    return successResponse(res, groupRow, "Item group fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }

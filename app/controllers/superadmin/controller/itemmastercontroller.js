@@ -50,11 +50,12 @@ const createItemMaster = async (req, res) => {
     const {
       itemCode, itemName, shortName, hsnCode, itemLocation,
       itemCategoryId, groupId, unit, taxSlab,
-       openingStock, stockValue,
+      openingStock, stockValue,
       thickness, length, width, weight,
       stockMapping, minQty, maxQty,
       // purchasePrice, actualPurchasePrice, salesPrice, mrp,
       barcodeType, barcode, status,
+      createdBy, createdType,
     } = req.body;
 
     // itemCode company-wise unique
@@ -121,7 +122,7 @@ const createItemMaster = async (req, res) => {
       taxSlab,
       openingStock,
       stockValue,
-       thickness,
+      thickness,
       length,
       width,
       weight,
@@ -135,6 +136,8 @@ const createItemMaster = async (req, res) => {
       barcodeType,
       barcode: finalBarcode || null, // 👈 blank barcode ko NULL store karo (unique constraint safe)
       status: status || "active",
+      createdBy,        // 👈 add
+      createdType,
       delete: 0,
     };
 
@@ -181,15 +184,15 @@ const getItemMasterList = async (req, res) => {
         'itemmaster."hsnCode"',
         'ic."categoryName" AS "categoryName"',
         'ig."groupName" AS "groupName"',
-                 'itemmaster."unit"',
-         'itemmaster."taxSlab"',
-         'itemmaster."openingStock"',
-'itemmaster."stockValue"',
+        'itemmaster."unit"',
+        'itemmaster."taxSlab"',
+        'itemmaster."openingStock"',
+        'itemmaster."stockValue"',
         'itemmaster."thickness"',
         'itemmaster."length"',
         'itemmaster."width"',
         'itemmaster."weight"',
-         'itemmaster."stockMapping"',
+        'itemmaster."stockMapping"',
         'itemmaster."minQty"',
         'itemmaster."maxQty"',
         // 'itemmaster."purchasePrice"',
@@ -198,6 +201,8 @@ const getItemMasterList = async (req, res) => {
         // 'itemmaster."mrp"',
         'itemmaster."barcodeType"',
         'itemmaster."barcode"',
+          'itemmaster."createdBy"',
+            'itemmaster."createdType"',
         "itemmaster.status",
         "itemmaster.created",
       ],
@@ -206,7 +211,45 @@ const getItemMasterList = async (req, res) => {
       0
     );
 
-    return successResponse(res, list, "Item list fetched successfully");
+    // createdBy me companyId ya employeeId store hota hai — name resolve karo
+    const createdByIds = [
+      ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
+    ];
+
+    let companyMap = {};
+    if (createdByIds.length > 0) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      companyMap = (companies || []).reduce((acc, item) => {
+        acc[String(item.companyId)] = item.companyName;
+        return acc;
+      }, {});
+    }
+
+    let employeeMap = {};
+    if (createdByIds.length > 0) {
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employeeMap = (employees || []).reduce((acc, item) => {
+        acc[String(item.employeeId)] = item.employeeName;
+        return acc;
+      }, {});
+    }
+
+    const data = (list || []).map((row) => ({
+      ...row,
+      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
+    }));
+
+    return successResponse(res, data, "Item list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -226,7 +269,32 @@ const getItemMasterById = async (req, res) => {
 
     if (rows.length === 0) return requiredmessage(res, "Item not found");
 
-    return successResponse(res, rows[0], "Item fetched successfully");
+    const itemRow = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+
+    // createdBy resolve — company ho ya employee
+    if (itemRow.createdBy) {
+      const companyRows = await selectWithJoins(
+        "company",
+        [],
+        { companyId: itemRow.createdBy, delete: 0 },
+        ["companyId", "companyName"]
+      );
+      if (companyRows.length > 0) {
+        itemRow.createdBy = companyRows[0].companyName;
+      } else {
+        const employeeRows = await selectWithJoins(
+          "employee",
+          [],
+          { employeeId: itemRow.createdBy, delete: 0 },
+          ["employeeId", "employeeName"]
+        );
+        if (employeeRows.length > 0) {
+          itemRow.createdBy = employeeRows[0].employeeName;
+        }
+      }
+    }
+
+    return successResponse(res, itemRow, "Item fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -241,7 +309,7 @@ const updateItemMaster = async (req, res) => {
     const {
       itemId, itemCode, itemName, shortName, hsnCode, itemLocation,
       itemCategoryId, groupId, unit, taxSlab,
-       openingStock, stockValue,
+      openingStock, stockValue,
       thickness, length, width, weight,
       stockMapping, minQty, maxQty,
       // purchasePrice, actualPurchasePrice, salesPrice, mrp,
@@ -323,7 +391,7 @@ const updateItemMaster = async (req, res) => {
         taxSlab,
         openingStock,
         stockValue,
-         thickness,
+        thickness,
         length,
         width,
         weight,
@@ -605,7 +673,7 @@ const getPurchaseItemList = async (req, res) => {
     const list = await selectWithJoinsV2(
       "itemmaster", [],
       { 'itemmaster."companyId"': companyId, 'itemmaster."delete"': 0 },
-          [
+      [
         'itemmaster."itemId"', 'itemmaster."itemCode"', 'itemmaster."itemName"',
         'itemmaster."hsnCode"', 'itemmaster."unit"', 'itemmaster."taxSlab"',
         // 'itemmaster."purchasePrice"',
@@ -881,7 +949,7 @@ const bulkImportItemMaster = async (req, res) => {
       // CASE 1: SOFT-DELETED ITEM EXISTS
       // RESTORE EXISTING RECORD
       // ==========================================================
-          if (deletedItem) {
+      if (deletedItem) {
         await updateModelHelper(
           "itemmaster",
           {
@@ -1060,5 +1128,5 @@ module.exports = {
   getItemByBarcode,
   getPurchaseItemList,
   bulkImportItemMaster,
-    getFinishedGoodsItemList,
+  getFinishedGoodsItemList,
 };

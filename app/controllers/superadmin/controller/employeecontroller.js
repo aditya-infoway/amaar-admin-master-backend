@@ -25,6 +25,7 @@ const createEmployee = async (req, res) => {
       department,
       branch,
       roleId,
+       accountId,
       employeeName,
       mobileNumber,
       alternateNumber,
@@ -35,15 +36,21 @@ const createEmployee = async (req, res) => {
     } = req.body;
 
     // role exists aur usi department ka hona chahiye
-    const roleExists = await selectWithJoins(
+   const roleExists = await selectWithJoins(
       "role",
       [],
       { roleId, department, delete: 0 },
-      ["roleId"]
+      ["roleId", "roleName"]   // 👈 label bhi nikal lo check ke liye
     );
 
     if (roleExists.length === 0) {
       return errorResponse(res, "Selected role not found for this department");
+    }
+
+    // Contractor Manager role ho to accountGroupId mandatory
+    const isContractorManager = roleExists[0].roleName === "Contractor Manager";
+    if (isContractorManager && !accountId) {
+      return errorResponse(res, "Please select a party (Sundry Creditor account)");
     }
 
     // mobile number companyId-wise unique
@@ -86,6 +93,7 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
+         accountId: isContractorManager ? accountId : null,
       createdBy,
       createdType,
       delete: 0,
@@ -265,6 +273,7 @@ const updateEmployee = async (req, res) => {
       alternateNumber,
       email,
       password,
+         accountId,
     } = req.body;
 
     const existing = await selectWithJoins(
@@ -277,16 +286,20 @@ const updateEmployee = async (req, res) => {
     if (existing.length === 0) {
       return requiredmessage(res, "Employee not found");
     }
-
-    const roleExists = await selectWithJoins(
+   const roleExists = await selectWithJoins(
       "role",
       [],
       { roleId, department, delete: 0 },
-      ["roleId"]
+      ["roleId", "roleName"]   // 👈 roleName bhi select karo, select karna zaruri hai
     );
 
     if (roleExists.length === 0) {
       return errorResponse(res, "Selected role not found for this department");
+    }
+
+    const isContractorManager = roleExists[0].roleName === "Contractor Manager";
+    if (isContractorManager && !accountId) {
+      return errorResponse(res, "Please select a party (Sundry Creditor account)");
     }
 
     // mobile number uniqueness (khud ko exclude karke)
@@ -329,6 +342,7 @@ const updateEmployee = async (req, res) => {
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
       email: email.trim().toLowerCase(),
+        accountId: isContractorManager ? accountId : null, 
       updated: new Date(),
     };
 

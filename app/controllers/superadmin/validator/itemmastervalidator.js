@@ -117,6 +117,8 @@ weight: Joi.number().allow(null, "").min(0).messages({
   }),
 
   status: Joi.string().valid("active", "inactive").default("active"),
+  createdBy: Joi.number().allow(null, ""),         
+createdType: Joi.string().trim().allow(null, ""),  
 };
 
 const createItemMaster = Joi.object().keys(baseSchema);

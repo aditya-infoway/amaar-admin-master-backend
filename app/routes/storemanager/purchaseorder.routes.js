@@ -1,0 +1,29 @@
+const { errorResponse } = require("../../helper/index.js");
+const purchaseOrder = require("../../controllers/superadmin/controller/purchaseordercontroller.js");
+const purchaseOrderValidation = require("../../controllers/superadmin/validator/purchaseordervalidator.js");
+const { employeeAuth } = require("../../helper/employeeAuth.js");
+
+var routes = require("express").Router();
+
+const validate = (schema) => (req, res, next) => {
+  const { error } = schema.validate(req.body);
+  if (error) return errorResponse(res, error.details.map((i) => i.message).join(","));
+  next();
+};
+
+module.exports = (app) => {
+  routes.use(employeeAuth);
+
+  routes.get("/next-po-no", purchaseOrder.getNextPoNumber);
+  routes.get("/next-serial-no", purchaseOrder.getNextSerialNo);
+  routes.get("/item-suppliers/:itemId", purchaseOrder.getItemSupplierInfo);
+   routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
+   routes.get("/vendor-history/:vendorId", purchaseOrder.getVendorHistory);
+  routes.get("/list", purchaseOrder.getPurchaseOrderList);
+  // routes.get("/indent-items/:indentId", purchaseOrder.getIndentItemsForPO);
+  routes.get("/:id", purchaseOrder.getPurchaseOrderById);
+
+  routes.post("/create", validate(purchaseOrderValidation.createPurchaseOrder), purchaseOrder.createPurchaseOrder);
+
+  app.use("/storemanager/purchase-order", routes);
+};
