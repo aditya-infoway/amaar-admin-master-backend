@@ -15,5 +15,5 @@ module.exports = (app) => {
 
     routes.get("/:id", workOrder.getWorkOrderById);
 
-    app.use("/contractoremployee/workorder", routes);
+    app.use("/contractor/workorder", routes);
 };

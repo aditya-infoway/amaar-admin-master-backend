@@ -5,6 +5,6 @@ module.exports = (app) => {
     require("./saleexecutive")(app);
     require("./hr")(app);
     require("./storemanager")(app);
-    require("./contractoremployee")(app);
+    require("./contractor")(app);
     require("./employeereusable.routes.js")(app);
 };
