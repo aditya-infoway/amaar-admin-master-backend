@@ -14,6 +14,7 @@ const {
   leadDetails,
   getLeadMapBySalesOrder,
 } = require("../../../helper/leadDetails.js");
+const db = require("../../../modelses");
 
 // ============================================================
 // HELPERS
@@ -38,13 +39,13 @@ const liveDetails = (workOrder, lead) =>
   lead
     ? leadDetails(lead)
     : {
-        customerName: workOrder.customerName || "",
-        mobile: workOrder.mobile || "",
-        email: workOrder.email || "",
-        address: workOrder.address || "",
-        city: workOrder.city || "",
-        model: workOrder.model || "",
-      };
+      customerName: workOrder.customerName || "",
+      mobile: workOrder.mobile || "",
+      email: workOrder.email || "",
+      address: workOrder.address || "",
+      city: workOrder.city || "",
+      model: workOrder.model || "",
+    };
 
 // ============================================================
 // GET NEXT WORK ORDER NO
@@ -380,6 +381,7 @@ const getWorkOrderList = async (req, res) => {
 
         "createdBy",
         "createdtype",
+        "assignedEmployeeId",
 
         "created",
         "updated",
@@ -487,6 +489,9 @@ const getWorkOrderList = async (req, res) => {
 
         createdBy: workOrder.createdBy || "",
         createdType: workOrder.createdtype || "",
+        assignedEmployeeId: workOrder.assignedEmployeeId
+          ? String(workOrder.assignedEmployeeId)
+          : null,
 
         createdAt: workOrder.created,
         updatedAt: workOrder.updated,
@@ -573,7 +578,7 @@ const getWorkOrderById = async (req, res) => {
         workOrderNo: workOrder.workOrderNo || "",
         salesOrderId: workOrder.salesOrderId,
 
-              customerName: live.customerName,
+        customerName: live.customerName,
         mobile: live.mobile,
         email: live.email,
         address: live.address,
@@ -696,9 +701,8 @@ const updateWorkOrder = async (req, res) => {
     if (conflictsWithAnother) {
       return errorResponse(
         res,
-        `Work Order already exists for this Sales Order (${
-          duplicate.find((row) => String(row.workOrderId) !== String(id))
-            ?.workOrderNo
+        `Work Order already exists for this Sales Order (${duplicate.find((row) => String(row.workOrderId) !== String(id))
+          ?.workOrderNo
         }).`,
       );
     }
@@ -716,7 +720,7 @@ const updateWorkOrder = async (req, res) => {
     // CHECK MODEL (PRODUCT) BELONGS TO THIS COMPANY
     // ========================================================
 
-      if (lead.model) {
+    if (lead.model) {
       const modelRows = await selectWithJoins(
         "itemmaster",
         [],
@@ -827,6 +831,97 @@ const deleteWorkOrder = async (req, res) => {
   }
 };
 
+
+
+
+const assignWorkOrder = async (req, res) => {
+  try {
+    const { workOrderId, contractorManagerId } = req.body;
+
+    if (!workOrderId) {
+      return errorResponse(res, "Work Order ID is required");
+    }
+
+    if (!contractorManagerId) {
+      return errorResponse(res, "Contractor Manager is required");
+    }
+
+    // Check Contractor Manager
+    const contractorManager = await selectWithJoins(
+      "employee",
+      [],
+      {
+        employeeId: contractorManagerId,
+        delete: 0,
+        roleId: 18,
+      },
+      [
+        "employeeId",
+        "employeeName",
+        "department",
+        "branch",
+        "roleId",
+      ],
+      [["employeeId", "ASC"]]
+    );
+
+    if (!contractorManager || contractorManager.length === 0) {
+      return errorResponse(
+        res,
+        "Contractor Manager not found"
+      );
+    }
+
+    // Check Work Order
+    const workOrderData = await selectWithJoins(
+      "workorder",
+      [],
+      {
+        workOrderId: workOrderId,
+        delete: 0,
+      },
+      ["workOrderId"],
+      [["workOrderId", "ASC"]]
+    );
+    if (!workOrderData || workOrderData.length === 0) {
+      return errorResponse(
+        res,
+        "Work Order not found"
+      );
+    }
+
+  await db.workorder.update(
+  {
+    assignedEmployeeId: contractorManagerId,
+  },
+  {
+    where: {
+      workOrderId: workOrderId,
+      delete: 0,
+    },
+  }
+);
+
+    return successResponse(
+      res,
+      {
+        workOrderId,
+        contractorManagerId,
+      },
+      "Work Order assigned successfully"
+    );
+  } catch (error) {
+    console.error("Assign Work Order error:", error);
+
+    return errorResponse(
+      res,
+      "Something Went Wrong",
+      error
+    );
+  }
+};
+
+
 module.exports = {
   getNextWorkOrderNo,
   createWorkOrder,
@@ -834,4 +929,5 @@ module.exports = {
   getWorkOrderById,
   updateWorkOrder,
   deleteWorkOrder,
+  assignWorkOrder,
 };

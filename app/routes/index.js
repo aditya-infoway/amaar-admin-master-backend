@@ -3,7 +3,8 @@ module.exports = (app) => {
     require("./superadmin")(app);
     require("./security")(app);
     require("./saleexecutive")(app);
-      require("./hr")(app);
-           require("./storemanager")(app);
+    require("./hr")(app);
+    require("./storemanager")(app);
+    require("./contractor")(app);
     require("./employeereusable.routes.js")(app);
 };

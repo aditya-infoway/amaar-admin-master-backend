@@ -110,6 +110,12 @@ module.exports = (sequelize) => {
       field: "createdtype",
     },
 
+    assignedEmployeeId: {
+  type: DataTypes.INTEGER,
+  allowNull: true,
+  field: "assignedEmployeeId",
+},
+
     created: {
       type: DataTypes.DATE,
       allowNull: false,
