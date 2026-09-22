@@ -1,6 +1,7 @@
 const { checkEmployeeToken } = require("../middleware/employeeToken");
 
 const employeeAuth = async (req, res, next) => {
+  console.log("🔥🔥🔥 EMPLOYEE AUTH FILE IS RUNNING — URL:", req.originalUrl, "| x-token:", req.headers["x-token"]);
   try {
     // API Token
     const apiToken = req.headers.apitoken;

@@ -24,6 +24,12 @@ module.exports = (app) => {
     employee.createEmployee
   );
   routes.get("/list", employee.getEmployeeList);
+
+
+  routes.get(
+  "/contractor-managers",
+  employee.getContractorManagers
+);
   routes.get("/:id", employee.getEmployeeById);
   routes.put(
     "/update",
