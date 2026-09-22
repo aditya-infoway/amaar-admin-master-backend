@@ -25,7 +25,7 @@ const createEmployee = async (req, res) => {
       department,
       branch,
       roleId,
-       accountId,
+      accountId,
       employeeName,
       mobileNumber,
       alternateNumber,
@@ -36,7 +36,7 @@ const createEmployee = async (req, res) => {
     } = req.body;
 
     // role exists aur usi department ka hona chahiye
-   const roleExists = await selectWithJoins(
+    const roleExists = await selectWithJoins(
       "role",
       [],
       { roleId, department, delete: 0 },
@@ -93,7 +93,7 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-         accountId: isContractorManager ? accountId : null,
+      accountId: isContractorManager ? accountId : null,
       createdBy,
       createdType,
       delete: 0,
@@ -273,7 +273,7 @@ const updateEmployee = async (req, res) => {
       alternateNumber,
       email,
       password,
-         accountId,
+      accountId,
     } = req.body;
 
     const existing = await selectWithJoins(
@@ -286,7 +286,7 @@ const updateEmployee = async (req, res) => {
     if (existing.length === 0) {
       return requiredmessage(res, "Employee not found");
     }
-   const roleExists = await selectWithJoins(
+    const roleExists = await selectWithJoins(
       "role",
       [],
       { roleId, department, delete: 0 },
@@ -342,7 +342,7 @@ const updateEmployee = async (req, res) => {
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
       email: email.trim().toLowerCase(),
-        accountId: isContractorManager ? accountId : null, 
+      accountId: isContractorManager ? accountId : null,
       updated: new Date(),
     };
 
@@ -1464,6 +1464,78 @@ const getEmployeeProfile = async (req, res) => {
     );
   }
 };
+
+
+
+
+
+
+const getContractorManagers = async (req, res) => {
+  try {
+    const companyId = req.user?.companyId;
+
+    const role = await selectWithJoins(
+      "role",
+      [],
+      {
+        delete: 0,
+        roleName: "Contractor Manager",
+      },
+      ["roleId"],
+      [["roleId", "ASC"]]
+    );
+
+    if (!role || role.length === 0) {
+      return successResponse(
+        res,
+        [],
+        "Contractor Manager role not found"
+      );
+    }
+
+    const roleId = role[0].roleId;
+
+    const where = {
+      delete: 0,
+      roleId: roleId,
+    };
+
+    if (companyId) {
+      where.companyId = companyId;
+    }
+
+    const list = await selectWithJoins(
+      "employee",
+      [],
+      where,
+      [
+        "employeeId",
+        "employeeName",
+        "department",
+        "branch",
+        "roleId",
+      ],
+      [["employeeName", "ASC"]]
+    );
+
+    return successResponse(
+      res,
+      list,
+      "Contractor Manager list fetched successfully"
+    );
+  } catch (error) {
+    console.error("getContractorManagers error:", error);
+
+    return errorResponse(
+      res,
+      "Something Went Wrong",
+      error
+    );
+  }
+};
+
+
+
 module.exports = {
   createEmployee,
   getEmployeeList,
@@ -1477,8 +1549,9 @@ module.exports = {
   updateRegisteredEmployee,
 
   deleteEmployee,
-getEmployeeProfile,
+  getEmployeeProfile,
   getNextEmployeeId,
   getUnregisteredEmployeeList,
   registerEmployee,
+  getContractorManagers,
 };
