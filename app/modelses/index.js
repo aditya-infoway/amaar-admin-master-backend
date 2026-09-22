@@ -70,6 +70,8 @@ db.contractoremployee = require("./contractoremployee.js")(
   sequelize,
   Sequelize,
 );
+db.itemrequest = require("./itemrequest.js")(sequelize, Sequelize);
+db.itemrequestdetail = require("./itemrequestdetail.js")(sequelize, Sequelize);
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
