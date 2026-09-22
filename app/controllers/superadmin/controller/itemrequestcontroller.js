@@ -72,9 +72,8 @@ const getAssignedWorkOrders = async (req, res) => {
     res.set("Expires", "0");
 
     const companyId = req.companyId;
-    const employeeId = req.employeeId;
 
-    if (!companyId || !employeeId) {
+    if (!companyId) {
       return requiredmessage(
         res,
         "Unauthorized. Please login again.",
@@ -83,13 +82,8 @@ const getAssignedWorkOrders = async (req, res) => {
 
     const { financialYearId } = req.query;
 
-    /* ============================================================
-       1. GET ONLY WORK ORDERS ASSIGNED TO CURRENT CONTRACTOR
-       ============================================================ */
-
     const where = {
       companyId,
-      assignedEmployeeId: employeeId,
       delete: 0,
     };
 
@@ -97,13 +91,12 @@ const getAssignedWorkOrders = async (req, res) => {
       where.financialYearId = Number(financialYearId);
     }
 
-    console.log("======================================");
-    console.log("CONTRACTOR ITEM REQUEST WORK ORDERS");
+    console.log("====================================");
+    console.log("ITEM REQUEST - WORK ORDER LIST");
     console.log("companyId:", companyId);
-    console.log("employeeId:", employeeId);
     console.log("financialYearId:", financialYearId);
     console.log("where:", where);
-    console.log("======================================");
+    console.log("====================================");
 
     const workOrders = await selectWithJoins(
       "workorder",
@@ -119,141 +112,36 @@ const getAssignedWorkOrders = async (req, res) => {
     );
 
     console.log(
-      "Assigned Work Orders:",
+      "WORK ORDERS FROM DATABASE:",
       workOrders,
     );
 
-    if (!workOrders.length) {
-      return successResponse(
-        res,
-        [],
-        "No Work Orders assigned to you",
-      );
-    }
+    const data = workOrders.map((wo) => ({
+      id: Number(wo.workOrderId),
 
-    /* ============================================================
-       2. GET MODEL IDS FROM WORK ORDERS
-       ============================================================ */
+      workOrderNo:
+        wo.workOrderNo || "",
 
-    const modelIds = [
-      ...new Set(
-        workOrders
-          .map((wo) =>
-            wo.model
-              ? Number(wo.model)
-              : null,
-          )
-          .filter(Boolean),
-      ),
-    ];
-
-    console.log(
-      "Models in assigned Work Orders:",
-      modelIds,
-    );
-
-    if (!modelIds.length) {
-      return successResponse(
-        res,
-        [],
-        "No models found in assigned Work Orders",
-      );
-    }
-
-    /* ============================================================
-       3. FIND MODELS WHICH HAVE BOM
-       ============================================================ */
-
-    const boms = await Bom.findAll({
-      where: {
-        companyId,
-        finishedGoodsItemId: modelIds,
-        delete: 0,
-      },
-      attributes: [
-        "bomId",
-        "finishedGoodsItemId",
-      ],
-      raw: true,
-    });
-
-    console.log(
-      "BOMs found for models:",
-      boms,
-    );
-
-    /* ============================================================
-       4. GET ONLY MODEL IDS WHICH HAVE BOM
-       ============================================================ */
-
-    const bomModelIds = new Set(
-      boms
-        .map((bom) =>
-          bom.finishedGoodsItemId
-            ? Number(
-                bom.finishedGoodsItemId,
-              )
-            : null,
-        )
-        .filter(Boolean),
-    );
-
-    console.log(
-      "Models having BOM:",
-      [...bomModelIds],
-    );
-
-    /* ============================================================
-       5. FILTER WORK ORDERS
-          ASSIGNED + MODEL HAS BOM
-       ============================================================ */
-
-    const filteredWorkOrders =
-      workOrders.filter((wo) => {
-        const modelId = wo.model
-          ? Number(wo.model)
-          : null;
-
-        return (
-          modelId &&
-          bomModelIds.has(modelId)
-        );
-      });
-
-    /* ============================================================
-       6. FINAL DROPDOWN DATA
-       ============================================================ */
-
-    const data =
-      filteredWorkOrders.map((wo) => ({
-        id: Number(
-          wo.workOrderId,
-        ),
-
-        workOrderNo:
-          wo.workOrderNo || "",
-
-        model: wo.model
+      model:
+        wo.model
           ? Number(wo.model)
           : null,
 
-        assignedEmployeeId:
-          wo.assignedEmployeeId
-            ? Number(
-                wo.assignedEmployeeId,
-              )
-            : null,
-      }));
+      assignedEmployeeId:
+        wo.assignedEmployeeId
+          ? Number(wo.assignedEmployeeId)
+          : null,
+    }));
 
     console.log(
-      "FINAL ITEM REQUEST WORK ORDERS:",
+      "WORK ORDER DROPDOWN DATA:",
       data,
     );
 
     return successResponse(
       res,
       data,
-      "Assigned Work Orders with BOM fetched successfully",
+      "Work Orders fetched successfully",
     );
   } catch (error) {
     console.error(
@@ -269,6 +157,7 @@ const getAssignedWorkOrders = async (req, res) => {
     );
   }
 };
+
 // ============================================================
 // 2. GET BOM ITEMS BY WORK ORDER
 //    Frontend calls this after selecting a Work Order
