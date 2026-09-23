@@ -11,13 +11,13 @@ module.exports = (app) => {
 
   // After selecting WO → get BOM items of that model
   routes.get("/items-by-workorder", itemRequest.getItemsByWorkOrder);
-routes.post("/issue", itemRequest.issueItemRequestItem);
+
   // Submit request
   routes.post("/", itemRequest.createItemRequest);
-
+routes.post("/issue", itemRequest.issueItemRequestItem);
   // Optional list
   routes.get("/list", itemRequest.getMyItemRequests);
 // Detail view (work order + items list for issuing)
 routes.get("/:id", itemRequest.getItemRequestDetail);
-  app.use("/contractor/itemrequest", routes);
+  app.use("/storemanager/itemrequest", routes);
 };
