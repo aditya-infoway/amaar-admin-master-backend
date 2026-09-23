@@ -10,39 +10,56 @@ const db = require("../../../modelses");
 const Bom = db.bom;
 const BomItem = db.bomItem;
 
+
 // ============================================================
 // HELPER: Get all items (flat) from a BOM by finishedGoodsItemId
+// (falls back to bomName == itemName match, since
+//  finishedGoodsItemId is not yet saved on BOM create/update)
 // ============================================================
 const getBomItemsByModel = async (companyId, modelId) => {
   if (!modelId) return [];
 
-  // Find BOM whose finished goods = the Work Order's model
-  const bom = await Bom.findOne({
-    where: {
-      companyId,
-      finishedGoodsItemId: modelId,
-      delete: 0,
-    },
+  let bom = await Bom.findOne({
+    where: { companyId, finishedGoodsItemId: modelId, delete: 0 },
     raw: true,
   });
 
+  if (!bom) {
+    const modelRows = await selectWithJoins(
+      "itemmaster",
+      [],
+      { itemId: modelId, companyId, delete: 0 },
+      ["itemId", "itemName"],
+    );
+
+    const modelName = modelRows[0]?.itemName;
+    if (!modelName) return [];
+
+    bom = await Bom.findOne({
+      where: { companyId, bomName: modelName, delete: 0 },
+      raw: true,
+    });
+  }
+
   if (!bom) return [];
 
-  // All items belonging to this BOM
   const bomItems = await BomItem.findAll({
-    where: {
-      bomId: bom.bomId,
-      delete: 0,
-    },
+    where: { bomId: bom.bomId, delete: 0 },
     raw: true,
   });
 
   if (!bomItems.length) return [];
 
-  // Unique itemIds
-  const itemIds = [...new Set(bomItems.map((i) => i.itemId).filter(Boolean))];
+  const parentIds = new Set(
+    bomItems.map((bi) => bi.parentId).filter((id) => id !== null && id !== undefined),
+  );
 
-  // Fetch live Item Master data
+  const leafRows = bomItems.filter((bi) => !parentIds.has(bi.bomItemId));
+
+  if (!leafRows.length) return [];
+
+  const itemIds = [...new Set(leafRows.map((bi) => bi.itemId).filter(Boolean))];
+
   const items = await selectWithJoins(
     "itemmaster",
     [],
@@ -50,14 +67,23 @@ const getBomItemsByModel = async (companyId, modelId) => {
     ["itemId", "itemCode", "itemName", "unit"],
   );
 
-  return items.map((item) => ({
-    id: Number(item.itemId),
-    itemCode: item.itemCode || "",
-    itemName: item.itemName || "",
-    unit: item.unit || "",
-  }));
-};
+  const itemById = {};
+  items.forEach((it) => { itemById[String(it.itemId)] = it; });
 
+  return leafRows
+    .filter((bi) => itemById[String(bi.itemId)])
+    .map((bi) => {
+      const master = itemById[String(bi.itemId)];
+      return {
+        id: bi.bomItemId,
+        itemId: Number(bi.itemId),
+        itemCode: master.itemCode || "",
+        itemName: master.itemName || "",
+        unit: master.unit || "",
+        bomQty: Number(bi.asslyQty) || 0,
+      };
+    });
+};
 // ============================================================
 // 1. GET ASSIGNED WORK ORDERS (for dropdown)
 //    You can also reuse the existing /contractor/workorder/list
@@ -72,8 +98,16 @@ const getAssignedWorkOrders = async (req, res) => {
     res.set("Expires", "0");
 
     const companyId = req.companyId;
+    const employeeId = req.employeeId;
 
     if (!companyId) {
+      return requiredmessage(
+        res,
+        "Unauthorized. Please login again.",
+      );
+    }
+
+    if (!employeeId) {
       return requiredmessage(
         res,
         "Unauthorized. Please login again.",
@@ -84,6 +118,7 @@ const getAssignedWorkOrders = async (req, res) => {
 
     const where = {
       companyId,
+      assignedEmployeeId: employeeId,
       delete: 0,
     };
 
@@ -91,12 +126,7 @@ const getAssignedWorkOrders = async (req, res) => {
       where.financialYearId = Number(financialYearId);
     }
 
-    console.log("====================================");
-    console.log("ITEM REQUEST - WORK ORDER LIST");
-    console.log("companyId:", companyId);
-    console.log("financialYearId:", financialYearId);
-    console.log("where:", where);
-    console.log("====================================");
+ 
 
     const workOrders = await selectWithJoins(
       "workorder",
@@ -111,10 +141,7 @@ const getAssignedWorkOrders = async (req, res) => {
       [["workOrderId", "DESC"]],
     );
 
-    console.log(
-      "WORK ORDERS FROM DATABASE:",
-      workOrders,
-    );
+  
 
     const data = workOrders.map((wo) => ({
       id: Number(wo.workOrderId),
@@ -133,10 +160,7 @@ const getAssignedWorkOrders = async (req, res) => {
           : null,
     }));
 
-    console.log(
-      "WORK ORDER DROPDOWN DATA:",
-      data,
-    );
+  
 
     return successResponse(
       res,
