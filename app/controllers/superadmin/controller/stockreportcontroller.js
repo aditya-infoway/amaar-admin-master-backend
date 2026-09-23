@@ -56,6 +56,20 @@ const getStockReportList = async (req, res) => {
     });
 
     // ---------------------------------------------------------
+    // ✅ NEW — ISSUED STOCK (itemissue table se)
+    // ---------------------------------------------------------
+    const issueRows = await selectWithJoins(
+      "itemissue", [],
+      { companyId, delete: 0 },
+      ["itemId", "qty"],
+    );
+    const issuedMap = {};
+    issueRows.forEach((d) => {
+      const qty = Number(d.qty) || 0;
+      issuedMap[d.itemId] = (issuedMap[d.itemId] || 0) + qty;
+    });
+
+    // ---------------------------------------------------------
     // CATEGORY MAP
     // ---------------------------------------------------------
     const categoryIds = [
@@ -124,7 +138,6 @@ const getStockReportList = async (req, res) => {
     // ---------------------------------------------------------
     // FINAL STOCK REPORT DATA
     // ---------------------------------------------------------
-    // FINAL STOCK REPORT DATA
     const data = items.map((item) => {
       // Opening stock from Item Master
       const openingStock = Number(item.openingStock) || 0;
@@ -132,8 +145,11 @@ const getStockReportList = async (req, res) => {
       // Purchase stock from Purchase Details
       const purchaseStock = Number(stockMap[item.itemId]) || 0;
 
-      // Final current stock
-      const currentStock = openingStock + purchaseStock;
+      // ✅ Issued stock from Item Issue
+      const issuedStock = Number(issuedMap[item.itemId]) || 0;
+
+      // Final current stock = Opening + Purchase - Issued
+      const currentStock = openingStock + purchaseStock - issuedStock;
 
       return {
         id: String(item.itemId),
@@ -158,7 +174,7 @@ const getStockReportList = async (req, res) => {
         stockValue:
           String(item.stockValue ?? "0"),
 
-        // Opening Stock + Purchase Stock
+        // Opening Stock + Purchase Stock - Issued Stock
         currentStock:
           String(currentStock),
       };
@@ -207,16 +223,14 @@ const getStockReportDetails = async (req, res) => {
     if (itemRows.length === 0) return requiredmessage(res, "Item not found.");
     const item = itemRows[0];
     const openingStock = Number(item.openingStock) || 0;
-    const stockValue = Number(item.stockValue) || 0;
 
-    // ---- Purchase details (verified filter hataya) ----
+    // ---- Purchase details ----
     const purchaseDetails = await selectWithJoins(
       "purchasedetails", [],
-      { itemId, companyId, delete: 0 },   // ✅ verified: true hataya
+      { itemId, companyId, delete: 0 },
       ["purchaseDetailsId", "purchaseId", "qty", "rate", "total", "created"]
     );
 
-    // ---- Purchase headers (billNo, date, accountId) ----
     const purchaseIds = [...new Set(purchaseDetails.map((d) => d.purchaseId).filter(Boolean))];
     let purchaseMap = {};
     if (purchaseIds.length) {
@@ -227,12 +241,28 @@ const getStockReportDetails = async (req, res) => {
       purchases.forEach((p) => { purchaseMap[p.purchaseId] = p; });
     }
 
-    // ---- Party names (batch fetch) ----
     const accountIds = [...new Set(Object.values(purchaseMap).map((p) => p.accountId).filter(Boolean))];
     let accountMap = {};
     if (accountIds.length) {
       const accounts = await selectWithJoins("account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName"]);
       accounts.forEach((a) => { accountMap[a.id] = a.accountName; });
+    }
+
+    // ---- ✅ NEW — Issue records (Outward) ----
+    const itemIssues = await selectWithJoins(
+      "itemissue", [],
+      { itemId, companyId, delete: 0 },
+      ["itemIssueId", "qty", "issuedTo", "billNo", "created"]
+    );
+
+    const issuedEmployeeIds = [...new Set(itemIssues.map((d) => d.issuedTo).filter(Boolean))];
+    let employeeMap = {};
+    if (issuedEmployeeIds.length) {
+      const employees = await selectWithJoins(
+        "employee", [], { employeeId: issuedEmployeeIds, companyId, delete: 0 },
+        ["employeeId", "employeeName"]
+      );
+      employees.forEach((e) => { employeeMap[e.employeeId] = e.employeeName; });
     }
 
     let totalPurchaseQty = 0;
@@ -244,10 +274,12 @@ const getStockReportDetails = async (req, res) => {
       totalPurchaseValue += qty * rate;
     });
 
-    const currentStock = openingStock + totalPurchaseQty;
+    const totalIssuedQty = itemIssues.reduce((sum, d) => sum + (Number(d.qty) || 0), 0);
+
+    const currentStock = openingStock + totalPurchaseQty - totalIssuedQty; // ✅ issued minus
     const purchasePrice = totalPurchaseQty > 0 ? totalPurchaseValue / totalPurchaseQty : 0;
 
-    // ---- History rows (running balance + party/bill info) ----
+    // ---- History rows — Purchase (+) aur Outward (-) dono ek saath, date se sort ----
     const rows = [];
     rows.push({
       id: "opening", date: "", type: "Opening",
@@ -256,26 +288,38 @@ const getStockReportDetails = async (req, res) => {
       currentStock: String(openingStock),
     });
 
-    let runningQtyBalance = openingStock;
-    const sortedPurchases = [...purchaseDetails].sort((a, b) => {
-      const dateA = purchaseMap[a.purchaseId]?.purchaseDate || "";
-      const dateB = purchaseMap[b.purchaseId]?.purchaseDate || "";
-      return dateA.localeCompare(dateB);
-    });
-
-    sortedPurchases.forEach((d) => {
-      const purchase = purchaseMap[d.purchaseId] || {};
-      const qty = Number(d.qty) || 0;
-      runningQtyBalance += qty;
-
-      rows.push({
-        id: String(d.purchaseDetailsId),
-        date: purchase.purchaseDate || "",
+    const movements = [
+      ...purchaseDetails.map((d) => ({
+        date: purchaseMap[d.purchaseId]?.purchaseDate || "",
         type: "Purchase",
-        partyName: accountMap[purchase.accountId] || "",
-        billNo: purchase.purchaseBillNo || "",
-        qty: String(qty),
-        billAmount: String(d.total ?? ""),
+        partyName: accountMap[purchaseMap[d.purchaseId]?.accountId] || "",
+        billNo: purchaseMap[d.purchaseId]?.purchaseBillNo || "",
+        qty: Number(d.qty) || 0,
+        billAmount: d.total ?? "",
+        sortKey: purchaseMap[d.purchaseId]?.purchaseDate || d.created || "",
+      })),
+      ...itemIssues.map((d) => ({
+        date: d.created,
+        type: "Outward",
+        partyName: employeeMap[d.issuedTo] || "",
+        billNo: d.billNo || "-",
+        qty: -(Number(d.qty) || 0), // ✅ negative — stock ghatega
+        billAmount: "",
+        sortKey: d.created,
+      })),
+    ].sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
+
+    let runningQtyBalance = openingStock;
+    movements.forEach((m, idx) => {
+      runningQtyBalance += m.qty;
+      rows.push({
+        id: `mv-${idx}`,
+        date: m.date || "",
+        type: m.type,
+        partyName: m.partyName,
+        billNo: m.billNo,
+        qty: String(m.qty),
+        billAmount: String(m.billAmount ?? ""),
         currentStock: String(runningQtyBalance),
       });
     });

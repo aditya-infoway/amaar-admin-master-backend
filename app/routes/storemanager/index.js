@@ -7,4 +7,5 @@ module.exports = (app) => {
     require("./purchaseorder.routes")(app);
      require("./purchase.routes")(app);
       require("./grr.routes")(app);
+        require("./itemrequest.routes")(app); 
 };
