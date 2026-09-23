@@ -278,13 +278,49 @@ const createItemRequest = async (req, res) => {
       );
     }
 
+    // ---------- Validate qty against BOM ----------
+    const modelId = workOrders[0].model ? Number(workOrders[0].model) : null;
+
+    if (!modelId) {
+      return errorResponse(res, "No model linked to this Work Order");
+    }
+
+    const bomLeaves = await getBomItemsByModel(companyId, modelId);
+
+    for (const row of items) {
+      if (!row.itemId || !row.qty || Number(row.qty) <= 0) continue;
+
+      const requestedQty = Number(row.qty);
+
+      // Allowed if any BOM leaf for this item can cover the requested qty
+      const matchingLeaf = bomLeaves.find(
+        (leaf) =>
+          leaf.itemId === Number(row.itemId) &&
+          requestedQty <= leaf.bomQty,
+      );
+
+      if (!matchingLeaf) {
+        const maxForItem = Math.max(
+          0,
+          ...bomLeaves
+            .filter((leaf) => leaf.itemId === Number(row.itemId))
+            .map((leaf) => leaf.bomQty),
+        );
+
+        return errorResponse(
+          res,
+          `Qty for "${row.itemName || row.itemCode || "item"}" cannot exceed ${maxForItem} (BOM quantity)`,
+        );
+      }
+    }
+
     // ---------- Create Header ----------
     const header = await saveModel("itemrequest", {
       companyId,
       financialYearId: financialYearId || null,
       workOrderId,
       requestedBy: employeeId,
-      status: "Pending", // Pending / Approved / Rejected / Issued
+      status: "Pending",
       remarks: remarks || null,
       delete: 0,
     });
