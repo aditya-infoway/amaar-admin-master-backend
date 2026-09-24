@@ -1,113 +1,111 @@
-const {
-  DataTypes
-} = require('sequelize');
-module.exports = sequelize => {
+const { DataTypes } = require("sequelize");
+module.exports = (sequelize) => {
   const attributes = {
     companyId: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        primaryKey: true,
-        autoIncrement: true,
-        field: "companyId"
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      primaryKey: true,
+      autoIncrement: true,
+      field: "companyId",
     },
 
     // ---- Company Information ----
     companyName: {
       type: DataTypes.STRING(100),
       allowNull: false,
-      field: "companyName"
+      field: "companyName",
     },
     companyAddress: {
       type: DataTypes.TEXT,
       allowNull: false,
-      field: "companyAddress"
+      field: "companyAddress",
     },
     contactNumber: {
       type: DataTypes.STRING(15),
       allowNull: false,
       unique: true,
-      field: "contactNumber"
+      field: "contactNumber",
     },
     businessEmail: {
       type: DataTypes.STRING(50),
       allowNull: false,
       unique: true,
-      field: "businessEmail"
+      field: "businessEmail",
     },
     ownerName: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      field: "ownerName"
+      field: "ownerName",
     },
     ownerContactNumber: {
       type: DataTypes.STRING(15),
       allowNull: false,
-      field: "ownerContactNumber"
+      field: "ownerContactNumber",
     },
     ownerEmail: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      field: "ownerEmail"
+      field: "ownerEmail",
     },
     country: {
       type: DataTypes.STRING(10),
       allowNull: false,
-      field: "country"
+      field: "country",
     },
     state: {
       type: DataTypes.STRING(10),
       allowNull: false,
-      field: "state"
+      field: "state",
     },
     district: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      field: "district"
+      field: "district",
     },
     taluka: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      field: "taluka"
+      field: "taluka",
     },
 
     // ---- Business Information ----
     registrationDate: {
       type: DataTypes.DATEONLY,
       allowNull: false,
-      field: "registrationDate"
+      field: "registrationDate",
     },
     expiryDate: {
       type: DataTypes.DATEONLY,
       allowNull: false,
-      field: "expiryDate"
+      field: "expiryDate",
     },
     businessType: {
       type: DataTypes.STRING(30),
       allowNull: false,
-      field: "businessType"
+      field: "businessType",
     },
     employeeSize: {
       type: DataTypes.STRING(20),
       allowNull: false,
-      field: "employeeSize"
+      field: "employeeSize",
     },
     gstNumber: {
       type: DataTypes.STRING(15),
       allowNull: false,
       unique: true,
-      field: "gstNumber"
+      field: "gstNumber",
     },
     panNumber: {
       type: DataTypes.STRING(10),
       allowNull: false,
       unique: true,
-      field: "panNumber"
+      field: "panNumber",
     },
     aadhaarNumber: {
       type: DataTypes.STRING(12),
       allowNull: false,
       unique: true,
-      field: "aadhaarNumber"
+      field: "aadhaarNumber",
     },
 
     // ---- Login Information ----
@@ -115,52 +113,57 @@ module.exports = sequelize => {
       type: DataTypes.STRING(50),
       allowNull: false,
       unique: true,
-      field: "email"
+      field: "email",
     },
     password: {
       type: DataTypes.STRING(255), // bcrypt hash — longer than raw password
       allowNull: false,
-      field: "password"
+      field: "password",
     },
     token: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      field: "token"
+      field: "token",
+    },
+    tokenDate: {
+      type: DataTypes.STRING(10),
+      allowNull: true,
+      field: "tokenDate",
     },
     otp: {
       type: DataTypes.STRING(10),
       allowNull: true,
-      field: "otp"
+      field: "otp",
     },
     status: {
       type: DataTypes.STRING(20),
       allowNull: false,
       defaultValue: "PENDING", // PENDING | APPROVED | REJECTED
-      field: "status"
+      field: "status",
     },
 
     created: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
     },
 
     updated: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
     },
     delete: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: "0",
-      field: "delete"
+      field: "delete",
     },
   };
   const options = {
     tableName: "company",
     comment: "",
-    indexes: []
+    indexes: [],
   };
   const CompanyModel = sequelize.define("company", attributes, options);
   return CompanyModel;

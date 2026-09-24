@@ -8,6 +8,10 @@ const {
   updateModel,
 } = require("../../../helper/index.js");
 
+const { Op } = require("sequelize");
+const db = require("../../../modelses/index.js"); // adjust path if needed
+const { todayIST } = require("../../../helper/checkCompanyToken.js");
+
 // ---- Login ----
 const companyLogin = async (req, res) => {
   try {
@@ -18,12 +22,15 @@ const companyLogin = async (req, res) => {
       return requiredmessage(res, "Email and Password are required.");
     }
 
-    const rows = await selectWithJoins(
-      "company",
-      [],
-      { email, delete: 0 },
-      ["companyId", "companyName", "email", "password", "expiryDate"]
-    );
+    const rows = await selectWithJoins("company", [], { email, delete: 0 }, [
+      "companyId",
+      "companyName",
+      "email",
+      "password",
+      "expiryDate",
+      "token",
+      "tokenDate",
+    ]);
 
     if (rows.length === 0) {
       return requiredmessage(res, "Invalid Email or Password");
@@ -45,19 +52,39 @@ const companyLogin = async (req, res) => {
       if (expiry < today) {
         return requiredmessage(
           res,
-          "Your subscription has expired. Please contact the administrator to renew."
+          "Your subscription has expired. Please contact the administrator to renew.",
         );
       }
     }
 
-    const token = crypto.randomBytes(30).toString("hex");
+    const today = todayIST();
+    let token = company.token;
 
-    await updateModel(
-      "company",
-      { token, updated: new Date() },
-      { companyId: company.companyId, delete: 0 }
-    );
+    // no token yet, or token is from an earlier day → first login of today
+    if (!token || company.tokenDate !== today) {
+      const newToken = crypto.randomBytes(30).toString("hex");
 
+      // only succeeds for the first login of the day
+      await db.company.update(
+        { token: newToken, tokenDate: today, updated: new Date() },
+        {
+          where: {
+            companyId: company.companyId,
+            delete: 0,
+            [Op.or]: [{ tokenDate: null }, { tokenDate: { [Op.ne]: today } }],
+          },
+          silent: true, // don't touch an updatedAt column, your table doesn't have one
+        },
+      );
+
+      // read back whichever token won (yours, or one created a moment ago)
+      const fresh = await db.company.findOne({
+        where: { companyId: company.companyId },
+        attributes: ["token"],
+        raw: true,
+      });
+      token = fresh.token;
+    }
     const responseData = {
       companyId: company.companyId,
       companyName: company.companyName,
@@ -85,7 +112,7 @@ const getProfile = async (req, res) => {
         "email",
         "contactNumber",
         "expiryDate",
-      ]
+      ],
     );
 
     if (rows.length === 0) {
