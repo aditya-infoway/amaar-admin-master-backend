@@ -1,4 +1,7 @@
-const { checkCompanyToken } = require("../helper/checkCompanyToken.js");
+const {
+  checkCompanyToken,
+  todayIST,
+} = require("../helper/checkCompanyToken.js");
 
 const superAdminAuth = async (req, res, next) => {
   try {
@@ -22,6 +25,14 @@ const superAdminAuth = async (req, res, next) => {
 
     const company = companyRows[0];
 
+    // token is valid only on the day it was created
+    if (company.tokenDate !== todayIST()) {
+      return res.status(401).json({
+        status: 401,
+        message: "Invalid or expired session. Please login again.",
+      });
+    }
+
     // expiry dobara check — login ke baad bhi agar expire ho jaaye toh block
     if (company.expiryDate) {
       const expiry = new Date(company.expiryDate);
@@ -29,7 +40,8 @@ const superAdminAuth = async (req, res, next) => {
       if (expiry < new Date()) {
         return res.status(401).json({
           status: 401,
-          message: "Your subscription has expired. Please contact the administrator.",
+          message:
+            "Your subscription has expired. Please contact the administrator.",
         });
       }
     }
