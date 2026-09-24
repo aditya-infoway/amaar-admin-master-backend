@@ -135,12 +135,43 @@ const createBankReceipt = Joi.object().keys({
   createdBy: Joi.number().allow(null),
   createdType: Joi.string().trim().allow("", null),
 });
-
+const createContra = Joi.object().keys({
+  type: Joi.string().valid("deposit", "withdrawal", "transfer").required().messages({
+    "any.only": "Please select a valid contra type",
+    "string.empty": "Type is required",
+    "any.required": "Type is required",
+  }),
+  accountId: Joi.number().required().messages({
+    "any.required": "Account is required",
+  }),
+  voucherNo: Joi.string().trim().required().messages({
+    "string.empty": "Voucher No is required",
+  }),
+  date: Joi.string().trim().required().messages({
+    "string.empty": "Date is required",
+  }),
+  oppAccountId: Joi.number().required().messages({
+    "any.required": "Opp. account is required",
+  }).invalid(Joi.ref("accountId")).messages({
+    "any.invalid": "Account and opposite account cannot be the same",
+  }),
+  amount: Joi.number().positive().required().messages({
+    "any.required": "Amount is required",
+    "number.positive": "Amount must be greater than 0",
+  }),
+  narration: Joi.string().trim().allow("", null),
+  financialYearId: Joi.number().required().messages({
+    "any.required": "Financial year is required",
+  }),
+  createdBy: Joi.number().allow(null),
+  createdType: Joi.string().trim().allow("", null),
+});
 module.exports = {
   createCashPayment,
   createBankPayment,
   // new
   createCashReceipt,
   createBankReceipt,
+    createContra,
 };
 

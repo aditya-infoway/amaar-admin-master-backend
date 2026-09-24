@@ -92,6 +92,10 @@ const PARTICULARS_LABELS = {
   OB: "Opening Balance",
   SALE: "Sale",
   FIN: "Finance",
+    CTD: "Contra Deposit",
+  CTW: "Contra Withdrawal",
+  CTT: "Contra Transfer",
+  CTR: "Contra",
 };
 
 const getParticularsLabel = (moduleCode, oppName) => {
@@ -100,6 +104,208 @@ const getParticularsLabel = (moduleCode, oppName) => {
 };
 
 // ---------------- LEDGER DETAILS (account-wise, payment table se) ----------------
+// const getLedgerDetails = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+//     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+//     const { accountId, fromDate, toDate, financialYearId } = req.query;
+//     if (!accountId) return errorResponse(res, "Account id is required.");
+
+//     // ---- Account + group fetch ----
+//     const accRows = await selectWithJoinsV2(
+//       "account",
+//       [
+//         {
+//           table: '"group"',
+//           alias: "g",
+//           onClause: { "g.id": { "=": 'account."groupId"' } },
+//         },
+//       ],
+//       {
+//         "account.id": Number(accountId),
+//         'account."companyId"': companyId,
+//         'account."delete"': 0,
+//       },
+//       [
+//         "account.id",
+//         'account."accountName"',
+//         'account."groupId"',
+//         'g."groupName" AS "groupName"',
+//         'account."openingBalance"',
+//         'account."drOrCr"',
+//       ],
+//       [],
+//       0,
+//       0
+//     );
+
+//     if (!accRows.length) return requiredmessage(res, "Account not found.");
+//     const account = accRows[0];
+//     const groupId = Number(account.groupId);
+//     const isCashBank = CASH_BANK_GROUP_IDS.includes(groupId);
+
+//     // ---- Financial Year ----
+//     const fy = financialYearId ? await getFinancialYearById(financialYearId, companyId) : null;
+//     const fyStartDate = fy?.startDate || fromDate || new Date().toISOString().slice(0, 10);
+//     const effectiveFromDate = fromDate || fyStartDate;
+//     const effectiveToDate = toDate || new Date().toISOString().slice(0, 10);
+
+//     // ---- FY-wise opening balance override (accountopeningbalance), fallback account default ----
+//     let openingBalance = Number(account.openingBalance) || 0;
+//     let openingDrOrCr = account.drOrCr || "DR";
+
+//     if (fy) {
+//       const obRows = await selectWithJoins(
+//         "accountopeningbalance",
+//         [],
+//         { companyId, financialYearId: fy.financialYearId, accountId: Number(accountId), delete: 0 },
+//         ["openingBalance", "drOrCr"]
+//       );
+//       if (obRows.length) {
+//         openingBalance = Number(obRows[0].openingBalance);
+//         openingDrOrCr = obRows[0].drOrCr;
+//       }
+//     }
+
+//     const fyOpeningSigned = openingDrOrCr === "CR" ? -openingBalance : openingBalance;
+
+//     // ---- Payment rows jisme ye account involve ho ----
+//     // groupId 1/4 (Cash/Bank) -> account "self" side pe hota he
+//     // baaki groups (Customer/Supplier/etc) -> account "opp" side pe hota he
+//     const where = { companyId, delete: 0 };
+//     if (isCashBank) {
+//       where.selfAccountId = Number(accountId);
+//     } else {
+//       where.accountId = Number(accountId);
+//     }
+
+//     let rows = await selectWithJoins(
+//       "payment",
+//       [],
+//       where,
+//       [
+//         "paymentId", "date", "voucherNo", "voucherType", "paymentCollectedByModules",
+//         "selfAccountId", "selfDrOrCr", "accountId", "accountDrOrCr", "amount", "narration",
+//         "purchaseId",
+//       ]
+//     );
+
+//     rows = rows.sort(
+//       (a, b) => (new Date(a.date) - new Date(b.date)) || (a.paymentId - b.paymentId)
+//     );
+
+//     // ---- Opp account names (batch fetch) ----
+//     const oppIds = [
+//       ...new Set(rows.map((r) => (isCashBank ? r.accountId : r.selfAccountId)).filter(Boolean)),
+//     ];
+//     let oppMap = {};
+//     if (oppIds.length) {
+//       const oppAccounts = await selectWithJoins(
+//         "account", [], { id: oppIds, companyId, delete: 0 }, ["id", "accountName"]
+//       );
+//       oppAccounts.forEach((a) => { oppMap[a.id] = a.accountName; });
+//     }
+
+//     // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
+//        // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
+//     const purchaseIds = [...new Set(rows.map((r) => r.purchaseId).filter(Boolean))];
+//     let purchaseBillMap = {};
+//     if (purchaseIds.length) {
+//       const purchases = await selectWithJoins(
+//         "purchase", [], { purchaseId: purchaseIds, companyId, delete: 0 },
+//         ["purchaseId", "billNo"]
+//       );
+//       purchases.forEach((p) => { purchaseBillMap[p.purchaseId] = p.billNo; });
+//     }
+
+//     // ---- Split: FY start → fromDate (opening calc) vs fromDate → toDate (display) ----
+//     const beforeRows = rows.filter(
+//       (r) => String(r.date) >= String(fyStartDate) && String(r.date) < String(effectiveFromDate)
+//     );
+//     const inRangeRows = rows.filter(
+//       (r) => String(r.date) >= String(effectiveFromDate) && String(r.date) <= String(effectiveToDate)
+//     );
+
+//     const resolveDebitCredit = (r) => {
+//       const drOrCr = isCashBank ? r.selfDrOrCr : r.accountDrOrCr;
+//       const debit = drOrCr === "DR" ? Number(r.amount) : 0;
+//       const credit = drOrCr === "CR" ? Number(r.amount) : 0;
+//       return [debit, credit];
+//     };
+
+//     let runningBalance = fyOpeningSigned;
+//     beforeRows.forEach((r) => {
+//       const [debit, credit] = resolveDebitCredit(r);
+//       runningBalance += debit - credit;
+//     });
+
+//     const openingBalanceForRange = runningBalance;
+
+//     const list = [
+//       {
+//         sr: 1,
+//         date: effectiveFromDate,
+//         voucherNo: "-",
+//         billNo: "-",
+//         type: "OB",
+//         particulars: "Opening Balance",
+//         debit: openingBalanceForRange >= 0 ? openingBalanceForRange.toFixed(2) : "",
+//         credit: openingBalanceForRange < 0 ? Math.abs(openingBalanceForRange).toFixed(2) : "",
+//         balance: `${Math.abs(openingBalanceForRange).toFixed(2)} ${openingBalanceForRange >= 0 ? "DR" : "CR"}`,
+//       },
+//     ];
+
+//     let totalDebit = 0;
+//     let totalCredit = 0;
+
+//     inRangeRows.forEach((r) => {
+//       const [debit, credit] = resolveDebitCredit(r);
+//       totalDebit += debit;
+//       totalCredit += credit;
+//       runningBalance += debit - credit;
+
+//       const oppId = isCashBank ? r.accountId : r.selfAccountId;
+//       const oppName = oppMap[oppId] || "";
+//       const moduleCode = r.paymentCollectedByModules || r.voucherType || "";
+
+//       list.push({
+//         sr: list.length + 1,
+//         date: r.date,
+//         voucherNo: r.voucherNo || "-",
+//         billNo: r.purchaseId ? (purchaseBillMap[r.purchaseId] || "-") : "-",
+//         type: moduleCode,
+//         particulars: getParticularsLabel(moduleCode, oppName),
+//         debit: debit ? debit.toFixed(2) : "",
+//         credit: credit ? credit.toFixed(2) : "",
+//         balance: `${Math.abs(runningBalance).toFixed(2)} ${runningBalance >= 0 ? "DR" : "CR"}`,
+//       });
+//     });
+
+//     return successResponse(
+//       res,
+//       {
+//         account: {
+//           id: account.id,
+//           accountName: account.accountName,
+//           groupName: account.groupName,
+//         },
+//         fromDate: effectiveFromDate,
+//         toDate: effectiveToDate,
+//         openingBalance: openingBalanceForRange.toFixed(2),
+//         openingBalanceLabel: `${Math.abs(openingBalanceForRange).toFixed(2)} ${openingBalanceForRange >= 0 ? "DR" : "CR"}`,
+//         totalDebit: totalDebit.toFixed(2),
+//         totalCredit: totalCredit.toFixed(2),
+//         closingBalance: runningBalance.toFixed(2),
+//         closingBalanceLabel: `${Math.abs(runningBalance).toFixed(2)} ${runningBalance >= 0 ? "DR" : "CR"}`,
+//         list,
+//       },
+//       "Ledger details fetched successfully"
+//     );
+//   } catch (error) {
+//     return errorResponse(res, error.message || "Something Went Wrong", error);
+//   }
+// };
 const getLedgerDetails = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -167,34 +373,49 @@ const getLedgerDetails = async (req, res) => {
     const fyOpeningSigned = openingDrOrCr === "CR" ? -openingBalance : openingBalance;
 
     // ---- Payment rows jisme ye account involve ho ----
-    // groupId 1/4 (Cash/Bank) -> account "self" side pe hota he
-    // baaki groups (Customer/Supplier/etc) -> account "opp" side pe hota he
-    const where = { companyId, delete: 0 };
-    if (isCashBank) {
-      where.selfAccountId = Number(accountId);
-    } else {
-      where.accountId = Number(accountId);
-    }
+    // ✅ CHANGED — Cash/Bank account Contra ki wajah se selfAccountId YA accountId, dono side aa sakta hai
+    const paymentFields = [
+      "paymentId", "date", "voucherNo", "voucherType", "paymentCollectedByModules",
+      "selfAccountId", "selfDrOrCr", "accountId", "accountDrOrCr", "amount", "narration",
+      "purchaseId",
+    ];
 
-    let rows = await selectWithJoins(
-      "payment",
-      [],
-      where,
-      [
-        "paymentId", "date", "voucherNo", "voucherType", "paymentCollectedByModules",
-        "selfAccountId", "selfDrOrCr", "accountId", "accountDrOrCr", "amount", "narration",
-        "purchaseId",
-      ]
-    );
+    let rows;
+    if (isCashBank) {
+      const selfRows = await selectWithJoins(
+        "payment", [],
+        { companyId, delete: 0, selfAccountId: Number(accountId) },
+        paymentFields
+      );
+      const oppRows = await selectWithJoins(
+        "payment", [],
+        { companyId, delete: 0, accountId: Number(accountId) },
+        paymentFields
+      );
+      const seen = new Set();
+      rows = [...selfRows, ...oppRows].filter((r) => {
+        if (seen.has(r.paymentId)) return false;
+        seen.add(r.paymentId);
+        return true;
+      });
+    } else {
+      rows = await selectWithJoins(
+        "payment", [],
+        { companyId, delete: 0, accountId: Number(accountId) },
+        paymentFields
+      );
+    }
 
     rows = rows.sort(
       (a, b) => (new Date(a.date) - new Date(b.date)) || (a.paymentId - b.paymentId)
     );
 
+    // ✅ CHANGED — row-wise decide karo ki current account self hai ya opp
+    const getOppIdForRow = (r) =>
+      Number(r.selfAccountId) === Number(accountId) ? r.accountId : r.selfAccountId;
+
     // ---- Opp account names (batch fetch) ----
-    const oppIds = [
-      ...new Set(rows.map((r) => (isCashBank ? r.accountId : r.selfAccountId)).filter(Boolean)),
-    ];
+    const oppIds = [...new Set(rows.map((r) => getOppIdForRow(r)).filter(Boolean))];
     let oppMap = {};
     if (oppIds.length) {
       const oppAccounts = await selectWithJoins(
@@ -204,7 +425,6 @@ const getLedgerDetails = async (req, res) => {
     }
 
     // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
-       // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
     const purchaseIds = [...new Set(rows.map((r) => r.purchaseId).filter(Boolean))];
     let purchaseBillMap = {};
     if (purchaseIds.length) {
@@ -223,8 +443,10 @@ const getLedgerDetails = async (req, res) => {
       (r) => String(r.date) >= String(effectiveFromDate) && String(r.date) <= String(effectiveToDate)
     );
 
+    // ✅ CHANGED — group se nahi, row-wise self/opp check karo
     const resolveDebitCredit = (r) => {
-      const drOrCr = isCashBank ? r.selfDrOrCr : r.accountDrOrCr;
+      const isSelfInThisRow = Number(r.selfAccountId) === Number(accountId);
+      const drOrCr = isSelfInThisRow ? r.selfDrOrCr : r.accountDrOrCr;
       const debit = drOrCr === "DR" ? Number(r.amount) : 0;
       const credit = drOrCr === "CR" ? Number(r.amount) : 0;
       return [debit, credit];
@@ -261,7 +483,7 @@ const getLedgerDetails = async (req, res) => {
       totalCredit += credit;
       runningBalance += debit - credit;
 
-      const oppId = isCashBank ? r.accountId : r.selfAccountId;
+      const oppId = getOppIdForRow(r);
       const oppName = oppMap[oppId] || "";
       const moduleCode = r.paymentCollectedByModules || r.voucherType || "";
 
@@ -302,7 +524,6 @@ const getLedgerDetails = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 module.exports = {
   getLedgerReportList,
   getLedgerDetails,
