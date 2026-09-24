@@ -33,6 +33,11 @@ routes.post("/cash-receipt/create", validate(paymentValidation.createCashReceipt
 
 routes.get("/bank-receipt/list", payment.getBankReceiptList);
 routes.post("/bank-receipt/create", validate(paymentValidation.createBankReceipt), payment.createBankReceipt);
-
+routes.post(
+  "/contra/create",
+  validate(paymentValidation.createContra),
+  payment.createContra
+);
+routes.get("/contra/list", payment.getContraList);
   app.use("/payment", routes);
 };
