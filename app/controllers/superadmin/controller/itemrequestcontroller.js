@@ -575,6 +575,7 @@ const getItemRequestDetail = async (req, res) => {
     });
 
     // ---- ✅ NEW — Issued qty (Stock Report jaisi hi logic, availableQty se minus) ----
+     // ---- ✅ NEW — Issued qty for AVAILABLE STOCK calculation (company-wide, itemId-based — sahi rehne do) ----
     const itemIssues = await selectWithJoins(
       "itemissue",
       [],
@@ -585,6 +586,21 @@ const getItemRequestDetail = async (req, res) => {
     itemIssues.forEach((d) => {
       const qty = Number(d.qty) || 0;
       issuedMap[d.itemId] = (issuedMap[d.itemId] || 0) + qty;
+    });
+
+    // ---- ✅ FIXED — Issued qty for THIS SPECIFIC request line (itemRequestDetailId-based) ----
+    const detailIds = details.map((d) => d.itemRequestDetailId);
+    const lineIssues = await selectWithJoins(
+      "itemissue",
+      [],
+      { itemRequestDetailId: detailIds, delete: 0 },
+      ["itemRequestDetailId", "qty"],
+    );
+    const issuedByDetailMap = {};
+    lineIssues.forEach((d) => {
+      const qty = Number(d.qty) || 0;
+      issuedByDetailMap[d.itemRequestDetailId] =
+        (issuedByDetailMap[d.itemRequestDetailId] || 0) + qty;
     });
 
     const items = details.map((d) => {
@@ -607,7 +623,7 @@ const getItemRequestDetail = async (req, res) => {
         itemCode: d.itemCode || master.itemCode || "",
         itemName: d.itemName || master.itemName || "",
         itemLocation: resolvedLocation,
-           issuedQty: issuedStock,
+            issuedQty: Number(issuedByDetailMap[d.itemRequestDetailId]) || 0, 
         orderQty: Number(d.qty) || 0,
         availableQty,
         unit: d.unit || master.unit || "",
