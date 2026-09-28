@@ -9,7 +9,7 @@ const {
   selectWithJoins,
   selectWithJoinsV2,
   updateModel,
-    saveModel,
+  saveModel,
 } = require("../../helper/index.js");
 
 // ---------------- LOGIN ----------------
@@ -37,7 +37,16 @@ const employeeLogin = async (req, res) => {
         "email",
         "password",
         "status",
-      ]
+      ],
+    );
+
+    console.log(
+      "employeeLogin — rows found:",
+      employeeRows.length,
+      employeeRows.map((r) => ({
+        email: r.email,
+        passwordPrefix: r.password?.slice(0, 10),
+      })),
     );
 
     if (employeeRows.length === 0) {
@@ -47,11 +56,15 @@ const employeeLogin = async (req, res) => {
     const employee = employeeRows[0];
 
     if (employee.status !== "ACTIVE") {
-      return requiredmessage(res, "Your account is inactive. Please contact admin.");
+      return requiredmessage(
+        res,
+        "Your account is inactive. Please contact admin.",
+      );
     }
 
     // ---- Step 2: password check ----
     const isPasswordValid = await bcrypt.compare(password, employee.password);
+    console.log("employeeLogin — password valid?", isPasswordValid);
     if (!isPasswordValid) {
       return requiredmessage(res, "Invalid Email or Password");
     }
@@ -61,26 +74,29 @@ const employeeLogin = async (req, res) => {
       "company",
       [],
       { companyId: employee.companyId, delete: 0 },
-      ["companyId", "companyName", "expiryDate", "status"]
+      ["companyId", "companyName", "expiryDate", "status"],
     );
 
     if (companyRows.length === 0) {
-      return requiredmessage(res, "Company not found. Please contact administrator.");
+      return requiredmessage(
+        res,
+        "Company not found. Please contact administrator.",
+      );
     }
 
     const company = companyRows[0];
-      const { latitude, longitude } = req.body;
+    const { latitude, longitude } = req.body;
 
     const companyDetailsRows = await selectWithJoins(
       "companydetails",
       [],
       { companyId: employee.companyId, delete: 0 },
-      ["latitude", "longitude"]
+      ["latitude", "longitude"],
     );
 
     const companyDetails = companyDetailsRows[0];
 
- if (
+    if (
       companyDetails &&
       companyDetails.latitude != null &&
       companyDetails.longitude != null
@@ -88,20 +104,23 @@ const employeeLogin = async (req, res) => {
       if (latitude == null || longitude == null) {
         return requiredmessage(
           res,
-          "Location access is required to login. Please enable location and try again."
+          "Location access is required to login. Please enable location and try again.",
         );
       }
 
       const { withinRange } = isWithinAllowedRadius(
-        { latitude: companyDetails.latitude, longitude: companyDetails.longitude },
+        {
+          latitude: companyDetails.latitude,
+          longitude: companyDetails.longitude,
+        },
         { latitude, longitude },
-        100 // allowed radius in meters
+        100, // allowed radius in meters
       );
 
       if (!withinRange) {
         return requiredmessage(
           res,
-          "You must be within office premises to login."
+          "You must be within office premises to login.",
         );
       }
     }
@@ -114,7 +133,7 @@ const employeeLogin = async (req, res) => {
       if (expiry < today) {
         return requiredmessage(
           res,
-          "Your company's subscription has expired. Please contact the administrator to renew."
+          "Your company's subscription has expired. Please contact the administrator to renew.",
         );
       }
     }
@@ -126,7 +145,7 @@ const employeeLogin = async (req, res) => {
         "role",
         [],
         { roleId: employee.roleId, delete: 0 },
-        ["roleId", "roleName", "department"]
+        ["roleId", "roleName", "department"],
       );
 
       if (roleRows.length > 0) {
@@ -134,105 +153,120 @@ const employeeLogin = async (req, res) => {
       }
     }
 
-   
     const token = crypto.randomBytes(30).toString("hex");
 
     await updateModel(
       "employee",
       { token, updated: new Date() },
-      { employeeId: employee.employeeId }
+      { employeeId: employee.employeeId },
     );
 
     // ---- Step 6.5: Attendance check-in (saved directly on employee row) ----
-       // ---- Step 6.5: Attendance check-in (attendance table, one row per session) ----
-  const now = new Date();
-const todayDateStr = getDateString(now);
+    // ---- Step 6.5: Attendance check-in (attendance table, one row per session) ----
+    const now = new Date();
+    const todayDateStr = getDateString(now);
 
-const openAttendanceRows = await selectWithJoins(
-  "attendance",
-  [],
-  { employeeId: employee.employeeId, isCheckedIn: true, delete: 0 },
-  ["attendanceId", "checkinDate", "checkinTime", "lastCheckinTime", "countTime"],
-  [["attendanceId", "DESC"]]
-);
-
-const openRow = openAttendanceRows[0];
-
-if (openRow && openRow.checkinDate === todayDateStr) {
-  await updateModel(
-    "attendance",
-    { updated: now },
-    { attendanceId: openRow.attendanceId }
-  );
-} else if (openRow && openRow.checkinDate !== todayDateStr) {
-  const lastCheckin = new Date(openRow.lastCheckinTime || openRow.checkinTime);
-  const endOfThatDay = new Date(openRow.checkinDate + "T23:59:59");
-  const sessionSeconds = Math.max(0, Math.floor((endOfThatDay - lastCheckin) / 1000));
-  const finalCountTime = (openRow.countTime || 0) + sessionSeconds;
-
-  await updateModel(
-    "attendance",
-    {
-      isCheckedIn: false,
-      checkoutTime: endOfThatDay,
-      countTime: finalCountTime,
-      status: "AUTO_CLOSED",
-      updated: now,
-    },
-    { attendanceId: openRow.attendanceId }
-  );
-
-  await saveModel("attendance", {
-    companyId: employee.companyId,
-    employeeId: employee.employeeId,
-    employeeName: employee.employeeName,
-    checkinDate: todayDateStr,
-    checkinTime: now,
-    lastCheckinTime: now,
-    checkinLatitude: latitude ?? null,
-    checkinLongitude: longitude ?? null,
-    countTime: 0,
-    isCheckedIn: true,
-    delete: 0,
-  });
-} else {
-  const todayRows = await selectWithJoins(
-    "attendance",
-    [],
-    { employeeId: employee.employeeId, checkinDate: todayDateStr, delete: 0 },
-    ["attendanceId", "countTime"]
-  );
-
-  if (todayRows.length > 0) {
-    await updateModel(
+    const openAttendanceRows = await selectWithJoins(
       "attendance",
-      {
-        isCheckedIn: true,
+      [],
+      { employeeId: employee.employeeId, isCheckedIn: true, delete: 0 },
+      [
+        "attendanceId",
+        "checkinDate",
+        "checkinTime",
+        "lastCheckinTime",
+        "countTime",
+      ],
+      [["attendanceId", "DESC"]],
+    );
+
+    const openRow = openAttendanceRows[0];
+
+    if (openRow && openRow.checkinDate === todayDateStr) {
+      await updateModel(
+        "attendance",
+        { updated: now },
+        { attendanceId: openRow.attendanceId },
+      );
+    } else if (openRow && openRow.checkinDate !== todayDateStr) {
+      const lastCheckin = new Date(
+        openRow.lastCheckinTime || openRow.checkinTime,
+      );
+      const endOfThatDay = new Date(openRow.checkinDate + "T23:59:59");
+      const sessionSeconds = Math.max(
+        0,
+        Math.floor((endOfThatDay - lastCheckin) / 1000),
+      );
+      const finalCountTime = (openRow.countTime || 0) + sessionSeconds;
+
+      await updateModel(
+        "attendance",
+        {
+          isCheckedIn: false,
+          checkoutTime: endOfThatDay,
+          countTime: finalCountTime,
+          status: "AUTO_CLOSED",
+          updated: now,
+        },
+        { attendanceId: openRow.attendanceId },
+      );
+
+      await saveModel("attendance", {
+        companyId: employee.companyId,
+        employeeId: employee.employeeId,
+        employeeName: employee.employeeName,
+        checkinDate: todayDateStr,
+        checkinTime: now,
         lastCheckinTime: now,
         checkinLatitude: latitude ?? null,
         checkinLongitude: longitude ?? null,
-        updated: now,
-      },
-      { attendanceId: todayRows[0].attendanceId }
-    );
-  } else {
-    await saveModel("attendance", {
-      companyId: employee.companyId,
-      employeeId: employee.employeeId,
-      employeeName: employee.employeeName,
-      checkinDate: todayDateStr,
-      checkinTime: now,
-      lastCheckinTime: now,
-      checkinLatitude: latitude ?? null,
-      checkinLongitude: longitude ?? null,
-      countTime: 0,
-      isCheckedIn: true,
-      delete: 0,
-    });
-  }
-}
+        countTime: 0,
+        isCheckedIn: true,
+        delete: 0,
+      });
+    } else {
+      const todayRows = await selectWithJoins(
+        "attendance",
+        [],
+        {
+          employeeId: employee.employeeId,
+          checkinDate: todayDateStr,
+          delete: 0,
+        },
+        ["attendanceId", "countTime"],
+      );
+
+      if (todayRows.length > 0) {
+        await updateModel(
+          "attendance",
+          {
+            isCheckedIn: true,
+            lastCheckinTime: now,
+            checkinLatitude: latitude ?? null,
+            checkinLongitude: longitude ?? null,
+            updated: now,
+          },
+          { attendanceId: todayRows[0].attendanceId },
+        );
+      } else {
+        await saveModel("attendance", {
+          companyId: employee.companyId,
+          employeeId: employee.employeeId,
+          employeeName: employee.employeeName,
+          checkinDate: todayDateStr,
+          checkinTime: now,
+          lastCheckinTime: now,
+          checkinLatitude: latitude ?? null,
+          checkinLongitude: longitude ?? null,
+          countTime: 0,
+          isCheckedIn: true,
+          delete: 0,
+        });
+      }
+    }
 
     const responseData = {
+      role: "Employee",
       employeeId: employee.employeeId,
       employeeName: employee.employeeName,
       email: employee.email,
@@ -263,7 +297,7 @@ const getEmployeeIdFromToken = async (req) => {
     "employee",
     [],
     { token, delete: 0 },
-    ["companyId"]
+    ["companyId"],
   );
 
   if (employeeRows.length === 0) {
@@ -279,7 +313,10 @@ const getFinancialYears = async (req, res) => {
     const companyId = await getEmployeeIdFromToken(req);
 
     if (!companyId) {
-      return requiredmessage(res, "Invalid or expired session. Please login again.");
+      return requiredmessage(
+        res,
+        "Invalid or expired session. Please login again.",
+      );
     }
 
     const tableName = "financialyear";
@@ -288,7 +325,9 @@ const getFinancialYears = async (req, res) => {
         table: "companydetails",
         alias: "cd",
         onClause: {
-          '"cd"."companyDetailsId"': { "=": '"financialyear"."companyDetailsId"' },
+          '"cd"."companyDetailsId"': {
+            "=": '"financialyear"."companyDetailsId"',
+          },
         },
       },
     ];
@@ -314,7 +353,7 @@ const getFinancialYears = async (req, res) => {
       attributes,
       order,
       null,
-      0
+      0,
     );
 
     return successResponse(res, rows, "Financial years fetched successfully.");
@@ -341,7 +380,7 @@ const getEmployeeProfile = async (req, res) => {
         "alternateNumber",
         "email",
         "status",
-      ]
+      ],
     );
 
     if (rows.length === 0) {
@@ -356,7 +395,7 @@ const getEmployeeProfile = async (req, res) => {
         "role",
         [],
         { roleId: employee.roleId, delete: 0 },
-        ["roleId", "roleName"]
+        ["roleId", "roleName"],
       );
       employee.roleName = roleRows.length > 0 ? roleRows[0].roleName : "";
     }
@@ -382,11 +421,14 @@ const employeeCheckout = async (req, res) => {
       [],
       { employeeId, isCheckedIn: true, delete: 0 },
       ["attendanceId", "checkinDate", "lastCheckinTime", "countTime"],
-      [["attendanceId", "DESC"]]
+      [["attendanceId", "DESC"]],
     );
 
     if (openRows.length === 0) {
-      return errorResponse(res, "No active check-in found. Please check in first.");
+      return errorResponse(
+        res,
+        "No active check-in found. Please check in first.",
+      );
     }
 
     const record = openRows[0];
@@ -404,7 +446,7 @@ const employeeCheckout = async (req, res) => {
 
     const sessionSeconds = Math.max(
       0,
-      Math.floor((cutoffTime - lastCheckin) / 1000)
+      Math.floor((cutoffTime - lastCheckin) / 1000),
     );
     const newCountTime = (record.countTime || 0) + sessionSeconds;
 
@@ -419,10 +461,14 @@ const employeeCheckout = async (req, res) => {
         status: "COMPLETED",
         updated: now,
       },
-      { attendanceId: record.attendanceId }
+      { attendanceId: record.attendanceId },
     );
 
-    return successResponse(res, { countTime: newCountTime }, "Checked out successfully");
+    return successResponse(
+      res,
+      { countTime: newCountTime },
+      "Checked out successfully",
+    );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -439,11 +485,15 @@ const getAttendanceStatus = async (req, res) => {
       [],
       { employeeId, isCheckedIn: true, delete: 0 },
       ["attendanceId", "checkinDate", "lastCheckinTime", "countTime"],
-      [["attendanceId", "DESC"]]
+      [["attendanceId", "DESC"]],
     );
 
     if (rows.length === 0) {
-      return successResponse(res, { isCheckedIn: false, countTime: 0 }, "Status fetched");
+      return successResponse(
+        res,
+        { isCheckedIn: false, countTime: 0 },
+        "Status fetched",
+      );
     }
 
     const row = rows[0];
@@ -451,10 +501,10 @@ const getAttendanceStatus = async (req, res) => {
       res,
       {
         isCheckedIn: true,
-        countTime: row.countTime || 0,           // is session shuru hone se pehle ka cumulative
-        lastCheckinTime: row.lastCheckinTime,     // frontend isse live elapsed calculate karega
+        countTime: row.countTime || 0, // is session shuru hone se pehle ka cumulative
+        lastCheckinTime: row.lastCheckinTime, // frontend isse live elapsed calculate karega
       },
-      "Status fetched"
+      "Status fetched",
     );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -463,7 +513,7 @@ const getAttendanceStatus = async (req, res) => {
 module.exports = {
   employeeLogin,
   employeeCheckout,
-    getAttendanceStatus,
+  getAttendanceStatus,
   getFinancialYears,
   getEmployeeProfile,
 };
