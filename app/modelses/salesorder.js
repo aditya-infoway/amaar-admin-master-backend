@@ -41,11 +41,10 @@ module.exports = (sequelize) => {
     },
 
    
-    mode: {
-      type: DataTypes.STRING(30),
-      allowNull: false,
-      defaultValue: "asIs",
-      field: "mode",
+   accountId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "accountId",
     },
 
     qty: {
@@ -69,41 +68,7 @@ module.exports = (sequelize) => {
       field: "totalAmount",
     },
 
-    aadharNumber: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-      field: "aadharNumber",
-    },
-
-    aadharImage: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      field: "aadharImage",
-    },
-
-    panNumber: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-      field: "panNumber",
-    },
-
-    panImage: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      field: "panImage",
-    },
-
-    gstNumber: {
-      type: DataTypes.STRING(50),
-      allowNull: true,
-      field: "gstNumber",
-    },
-
-    gstImage: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      field: "gstImage",
-    },
+  
 
     createdBy: {
       type: DataTypes.STRING(100),

@@ -39,4 +39,5 @@ module.exports = (app) => {
      require("./indent.routes")(app);
      require("./grr.routes")(app);
      require("./contractoremployee.routes")(app);
+     require("./qc.routes")(app);
 };
