@@ -28,52 +28,23 @@ const validate = (schema) => (req, res, next) => {
 module.exports = (app) => {
   routes.use(superAdminAuth);
 
-  // Get next Sales Order number
-  routes.get(
-    "/next-number",
-    salesOrder.getNextSalesOrderNo
+  routes.get("/next-number", salesOrder.getNextSalesOrderNo);
+  routes.get("/list", salesOrder.getSalesOrderList);
+  routes.get("/:id", salesOrder.getSalesOrderById);
+
+  routes.post(
+    "/create",
+    validate(salesOrderValidation.validateSalesOrder),
+    salesOrder.createSalesOrder
   );
 
-  // Get Sales Order list
-  routes.get(
-    "/list",
-    salesOrder.getSalesOrderList
-  );
-
-  // Get Sales Order by ID
-  routes.get(
+  routes.put(
     "/:id",
-    salesOrder.getSalesOrderById
+    validate(salesOrderValidation.validateSalesOrder),
+    salesOrder.updateSalesOrder
   );
 
-  // Create Sales Order
- routes.post(
-  "/create",
-  salesOrderUpload.fields([
-    { name: "aadharImage", maxCount: 1 },
-    { name: "panImage", maxCount: 1 },
-    { name: "gstImage", maxCount: 1 },
-  ]),
-  validate(salesOrderValidation.validateSalesOrder),
-  salesOrder.createSalesOrder
-);
-  // Update Sales Order
-routes.put(
-  "/:id",
-  salesOrderUpload.fields([
-    { name: "aadharImage", maxCount: 1 },
-    { name: "panImage", maxCount: 1 },
-    { name: "gstImage", maxCount: 1 },
-  ]),
-  validate(salesOrderValidation.validateSalesOrder),
-  salesOrder.updateSalesOrder
-);
-
-  // Delete Sales Order
-  routes.delete(
-    "/:id",
-    salesOrder.deleteSalesOrder
-  );
+  routes.delete("/:id", salesOrder.deleteSalesOrder);
 
   app.use("/salesorder", routes);
 };

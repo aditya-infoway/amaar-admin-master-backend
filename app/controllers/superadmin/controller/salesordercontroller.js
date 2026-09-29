@@ -194,6 +194,275 @@ const getQuotationForSalesOrder = async (req, res) => {
 // CREATE SALES ORDER
 // ============================================================
 
+// const createSalesOrder = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+
+//     if (!companyId) {
+//       return requiredmessage(res, "Unauthorized. Please login again.");
+//     }
+
+//     const {
+//       financialYearId,
+//       quotationId,
+//       leadId,
+
+//       mode,
+
+//       qty,
+//       unitPrice,
+//       totalAmount,
+
+//       aadharNumber,
+//       panNumber,
+//       gstNumber,
+
+//       createdBy,
+//       createdType,
+//     } = req.body;
+
+//     // ========================================================
+//     // IMAGE UPLOADS (multer via req.files)
+//     // ========================================================
+
+//     const aadharImage = req.files?.aadharImage?.[0]
+//       ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
+//       : null;
+
+//     const panImage = req.files?.panImage?.[0]
+//       ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
+//       : null;
+
+//     const gstImage = req.files?.gstImage?.[0]
+//       ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
+//       : null;
+
+//     // ========================================================
+//     // BASIC VALIDATION
+//     // ========================================================
+
+//     if (!financialYearId) {
+//       return errorResponse(
+//         res,
+//         "Financial Year not found. Please select a company year.",
+//       );
+//     }
+
+//     if (!normalizeId(quotationId)) {
+//       return errorResponse(res, "Please select a quotation.");
+//     }
+
+//     if (!normalizeId(leadId)) {
+//       return errorResponse(res, "Please select a lead.");
+//     }
+
+//     if (!["asIs", "manual"].includes(mode)) {
+//       return errorResponse(res, "Mode must be either As Its or Manual.");
+//     }
+
+//     const fy = await getFinancialYearById(financialYearId, companyId);
+
+//     if (!fy) {
+//       return errorResponse(res, "Invalid Financial Year.");
+//     }
+
+//     // ========================================================
+//     // CHECK QUOTATION
+//     // ========================================================
+
+//     const quotationRows = await selectWithJoins(
+//       "quotation",
+//       [],
+//       {
+//         quotationId,
+//         companyId,
+//         financialYearId: fy.financialYearId,
+//         delete: 0,
+//       },
+//       ["quotationId", "qNo", "leadId", "finalPrice"],
+//     );
+
+//     if (!quotationRows.length) {
+//       return errorResponse(res, "Selected quotation was not found.");
+//     }
+
+//     const quotation = quotationRows[0];
+
+//     // ========================================================
+//     // CHECK LEAD MATCH
+//     // ========================================================
+
+//     if (normalizeId(leadId) !== normalizeId(quotation.leadId)) {
+//       return errorResponse(
+//         res,
+//         "Selected lead does not belong to this quotation.",
+//       );
+//     }
+
+//     const leadRows = await selectWithJoins(
+//       "lead",
+//       [],
+//       { leadId: normalizeId(leadId), companyId, delete: 0 },
+//       [
+//         "leadId",
+//         "leadCode",
+//         "name",
+//         "number",
+//         "email",
+//         "address",
+//         "city",
+//         "model",
+//         "remark",
+//       ],
+//     );
+//     if (!leadRows.length) {
+//       return errorResponse(res, "Selected lead was not found.");
+//     }
+//     const lead = leadRows[0];
+
+//     // ========================================================
+//     // CHECK DUPLICATE SALES ORDER FOR QUOTATION
+//     // ========================================================
+
+//     const duplicate = await selectWithJoins(
+//       "salesorder",
+//       [],
+//       {
+//         companyId,
+//         quotationId,
+//         delete: 0,
+//       },
+//       ["salesOrderId", "soNo"],
+//     );
+
+//     if (duplicate.length > 0) {
+//       return errorResponse(
+//         res,
+//         `Sales Order already exists for this quotation (${duplicate[0].soNo}).`,
+//       );
+//     }
+
+//     // ========================================================
+//     // QUANTITY / AMOUNT
+//     // ========================================================
+
+//     const finalQty = Number(qty) || 0;
+//     const finalUnitPrice = Number(unitPrice) || 0;
+
+//     if (finalQty <= 0) {
+//       return errorResponse(res, "Quantity must be greater than 0.");
+//     }
+
+//     if (finalUnitPrice < 0) {
+//       return errorResponse(res, "Amount cannot be negative.");
+//     }
+
+//     const calculatedTotalAmount = round2(finalQty * finalUnitPrice);
+
+//     // Do not trust frontend totalAmount.
+//     const finalTotalAmount = calculatedTotalAmount;
+
+//     // ========================================================
+//     // GENERATE SALES ORDER NUMBER
+//     // ========================================================
+
+//     const { billNo } = await generateVoucherNo({
+//       companyId,
+//       financialYearId: fy.financialYearId,
+//       tableName: "salesorder",
+//       idColumn: "salesOrderId",
+//       prefixFor: "SALES ORDER",
+//     });
+
+//     const soNo = billNo;
+
+//     // ========================================================
+//     // DUPLICATE SO NUMBER
+//     // ========================================================
+
+//     const duplicateSoNo = await selectWithJoins(
+//       "salesorder",
+//       [],
+//       {
+//         companyId,
+//         financialYearId: fy.financialYearId,
+//         soNo,
+//         delete: 0,
+//       },
+//       ["salesOrderId"],
+//     );
+
+//     if (duplicateSoNo.length > 0) {
+//       return errorResponse(res, "This Sales Order No already exists.");
+//     }
+
+//     // ========================================================
+//     // SAVE
+//     // ========================================================
+
+//     const salesOrder = await saveModel("salesorder", {
+//       companyId,
+//       financialYearId: fy.financialYearId,
+
+//       // salesOrderNo: soNo,
+//       soNo,
+
+//       quotationId: quotation.quotationId,
+//       leadId,
+
+//       mode,
+
+//       ...leadDetails(lead),
+
+//       qty: finalQty,
+//       unitPrice: finalUnitPrice,
+//       totalAmount: finalTotalAmount,
+
+//       aadharNumber: aadharNumber || null,
+//       aadharImage,
+//       panNumber: panNumber || null,
+//       panImage,
+//       gstNumber: gstNumber || null,
+//       gstImage,
+
+//       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+
+//       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
+
+//       delete: 0,
+//     });
+
+//     // ========================================================
+//     // RESPONSE
+//     // ========================================================
+
+//     return successResponse(
+//       res,
+//       {
+//         salesOrderId: salesOrder.salesOrderId,
+//         soNo,
+
+//         quotationId: quotation.quotationId,
+//         qNo: quotation.qNo,
+
+//         leadId,
+
+//         mode,
+
+//         qty: finalQty,
+//         unitPrice: finalUnitPrice,
+//         totalAmount: finalTotalAmount,
+//       },
+//       "Sales Order saved successfully",
+//     );
+//   } catch (error) {
+//     if (error?.name === "SequelizeUniqueConstraintError") {
+//       return errorResponse(res, "This Sales Order already exists.");
+//     }
+
+//     return errorResponse(res, error.message || "Something Went Wrong", error);
+//   }
+// };
 const createSalesOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -206,36 +475,15 @@ const createSalesOrder = async (req, res) => {
       financialYearId,
       quotationId,
       leadId,
-
-      mode,
+      accountId,
 
       qty,
       unitPrice,
       totalAmount,
 
-      aadharNumber,
-      panNumber,
-      gstNumber,
-
       createdBy,
       createdType,
     } = req.body;
-
-    // ========================================================
-    // IMAGE UPLOADS (multer via req.files)
-    // ========================================================
-
-    const aadharImage = req.files?.aadharImage?.[0]
-      ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
-      : null;
-
-    const panImage = req.files?.panImage?.[0]
-      ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
-      : null;
-
-    const gstImage = req.files?.gstImage?.[0]
-      ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
-      : null;
 
     // ========================================================
     // BASIC VALIDATION
@@ -256,14 +504,29 @@ const createSalesOrder = async (req, res) => {
       return errorResponse(res, "Please select a lead.");
     }
 
-    if (!["asIs", "manual"].includes(mode)) {
-      return errorResponse(res, "Mode must be either As Its or Manual.");
-    }
-
     const fy = await getFinancialYearById(financialYearId, companyId);
 
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
+    }
+
+    // ========================================================
+    // CHECK ACCOUNT (agar party select ki gayi ho)
+    // ========================================================
+
+    let normalizedAccountId = normalizeId(accountId);
+
+    if (normalizedAccountId) {
+      const accountRows = await selectWithJoins(
+        "account",
+        [],
+        { id: normalizedAccountId, companyId, delete: 0 },
+        ["id"],
+      );
+
+      if (!accountRows.length) {
+        return errorResponse(res, "Selected party (account) was not found.");
+      }
     }
 
     // ========================================================
@@ -287,10 +550,6 @@ const createSalesOrder = async (req, res) => {
     }
 
     const quotation = quotationRows[0];
-
-    // ========================================================
-    // CHECK LEAD MATCH
-    // ========================================================
 
     if (normalizeId(leadId) !== normalizeId(quotation.leadId)) {
       return errorResponse(
@@ -327,11 +586,7 @@ const createSalesOrder = async (req, res) => {
     const duplicate = await selectWithJoins(
       "salesorder",
       [],
-      {
-        companyId,
-        quotationId,
-        delete: 0,
-      },
+      { companyId, quotationId, delete: 0 },
       ["salesOrderId", "soNo"],
     );
 
@@ -357,10 +612,7 @@ const createSalesOrder = async (req, res) => {
       return errorResponse(res, "Amount cannot be negative.");
     }
 
-    const calculatedTotalAmount = round2(finalQty * finalUnitPrice);
-
-    // Do not trust frontend totalAmount.
-    const finalTotalAmount = calculatedTotalAmount;
+    const finalTotalAmount = round2(finalQty * finalUnitPrice);
 
     // ========================================================
     // GENERATE SALES ORDER NUMBER
@@ -376,19 +628,10 @@ const createSalesOrder = async (req, res) => {
 
     const soNo = billNo;
 
-    // ========================================================
-    // DUPLICATE SO NUMBER
-    // ========================================================
-
     const duplicateSoNo = await selectWithJoins(
       "salesorder",
       [],
-      {
-        companyId,
-        financialYearId: fy.financialYearId,
-        soNo,
-        delete: 0,
-      },
+      { companyId, financialYearId: fy.financialYearId, soNo, delete: 0 },
       ["salesOrderId"],
     );
 
@@ -404,13 +647,11 @@ const createSalesOrder = async (req, res) => {
       companyId,
       financialYearId: fy.financialYearId,
 
-      // salesOrderNo: soNo,
       soNo,
 
       quotationId: quotation.quotationId,
       leadId,
-
-      mode,
+      accountId: normalizedAccountId,
 
       ...leadDetails(lead),
 
@@ -418,23 +659,11 @@ const createSalesOrder = async (req, res) => {
       unitPrice: finalUnitPrice,
       totalAmount: finalTotalAmount,
 
-      aadharNumber: aadharNumber || null,
-      aadharImage,
-      panNumber: panNumber || null,
-      panImage,
-      gstNumber: gstNumber || null,
-      gstImage,
-
       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-
       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
 
       delete: 0,
     });
-
-    // ========================================================
-    // RESPONSE
-    // ========================================================
 
     return successResponse(
       res,
@@ -446,8 +675,7 @@ const createSalesOrder = async (req, res) => {
         qNo: quotation.qNo,
 
         leadId,
-
-        mode,
+        accountId: normalizedAccountId,
 
         qty: finalQty,
         unitPrice: finalUnitPrice,
@@ -459,11 +687,9 @@ const createSalesOrder = async (req, res) => {
     if (error?.name === "SequelizeUniqueConstraintError") {
       return errorResponse(res, "This Sales Order already exists.");
     }
-
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 // ============================================================
 // GET SALES ORDER LIST
 // ============================================================
@@ -528,23 +754,14 @@ const getSalesOrderList = async (req, res) => {
         "financialYearId",
 
         "soNo",
-        // "salesOrderNo",
 
         "quotationId",
         "leadId",
-
-        "mode",
+        "accountId",
 
         "qty",
         "unitPrice",
         "totalAmount",
-
-        "aadharNumber",
-        "aadharImage",
-        "panNumber",
-        "panImage",
-        "gstNumber",
-        "gstImage",
 
         "createdBy",
         "createdtype",
@@ -625,6 +842,47 @@ const getSalesOrderList = async (req, res) => {
     }
 
     // ========================================================
+    // GET ACCOUNT (PARTY) KYC DETAILS
+    // ========================================================
+
+    const accountIds = [
+      ...new Set(
+        salesOrders.map((item) => item.accountId).filter((id) => id),
+      ),
+    ];
+
+    let accountMap = {};
+
+    if (accountIds.length > 0) {
+      try {
+        const accounts = await selectWithJoins(
+          "account",
+          [],
+          { id: accountIds, companyId, delete: 0 },
+          [
+            "id",
+            "accountName",
+            "mobileNo",
+            "email",
+            "aadharCardNo",
+            "aadharImage",
+            "panCard",
+            "panImage",
+            "gstNo",
+            "gstImage",
+          ],
+        );
+
+        accountMap = accounts.reduce((map, acc) => {
+          map[String(acc.id)] = acc;
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching accounts:", err.message);
+      }
+    }
+
+    // ========================================================
     // GET MODEL NAMES
     // ========================================================
 
@@ -662,6 +920,7 @@ const getSalesOrderList = async (req, res) => {
 
     const data = salesOrders.map((salesOrder) => {
       const lead = leadMap.get(String(salesOrder.leadId));
+      const account = accountMap[String(salesOrder.accountId)];
       let createdByName = salesOrder.createdBy || "";
 
       if (createdByName === "Admin") {
@@ -679,15 +938,13 @@ const getSalesOrderList = async (req, res) => {
         financialYearId: salesOrder.financialYearId,
 
         soNo: salesOrder.soNo || "",
-        //   salesOrder.salesOrderNo ||
 
         quotationId: String(salesOrder.quotationId || ""),
 
         qNo: quotationMap[String(salesOrder.quotationId)] || "",
 
         leadId: salesOrder.leadId,
-
-        mode: salesOrder.mode || "asIs",
+        accountId: salesOrder.accountId || null,
 
         ...leadDetails(lead),
         modelName: modelMap[String(lead?.model)] || "",
@@ -698,17 +955,16 @@ const getSalesOrderList = async (req, res) => {
 
         totalAmount: Number(salesOrder.totalAmount) || 0,
 
-        aadharNumber: salesOrder.aadharNumber || "",
-
-        aadharImage: salesOrder.aadharImage || "",
-
-        panNumber: salesOrder.panNumber || "",
-
-        panImage: salesOrder.panImage || "",
-
-        gstNumber: salesOrder.gstNumber || "",
-
-        gstImage: salesOrder.gstImage || "",
+        // Selected party ka KYC — account table se
+        partyName: account?.accountName || "",
+        partyMobile: account?.mobileNo || "",
+        partyEmail: account?.email || "",
+        aadharNumber: account?.aadharCardNo || "",
+        aadharImage: account?.aadharImage || "",
+        panNumber: account?.panCard || "",
+        panImage: account?.panImage || "",
+        gstNumber: account?.gstNo || "",
+        gstImage: account?.gstImage || "",
 
         createdBy: createdByName,
 
@@ -757,23 +1013,14 @@ const getSalesOrderById = async (req, res) => {
         "financialYearId",
 
         "soNo",
-        // "salesOrderNo",
 
         "quotationId",
         "leadId",
-
-        "mode",
+        "accountId",
 
         "qty",
         "unitPrice",
         "totalAmount",
-
-        "aadharNumber",
-        "aadharImage",
-        "panNumber",
-        "panImage",
-        "gstNumber",
-        "gstImage",
 
         "createdBy",
         "createdtype",
@@ -811,6 +1058,37 @@ const getSalesOrderById = async (req, res) => {
         qNo = quotationRows[0].qNo || "";
       }
     }
+
+    // ========================================================
+    // GET ACCOUNT (PARTY) KYC DETAILS
+    // ========================================================
+
+    let account = null;
+
+    if (salesOrder.accountId) {
+      const accountRows = await selectWithJoins(
+        "account",
+        [],
+        { id: salesOrder.accountId, companyId, delete: 0 },
+        [
+          "id",
+          "accountName",
+          "mobileNo",
+          "email",
+          "aadharCardNo",
+          "aadharImage",
+          "panCard",
+          "panImage",
+          "gstNo",
+          "gstImage",
+        ],
+      );
+
+      if (accountRows.length) {
+        account = accountRows[0];
+      }
+    }
+
     // ========================================================
     // GET MODEL NAME
     // ========================================================
@@ -839,15 +1117,13 @@ const getSalesOrderById = async (req, res) => {
         financialYearId: salesOrder.financialYearId,
 
         soNo: salesOrder.soNo || "",
-        //   salesOrder.salesOrderNo ||
 
         quotationId: String(salesOrder.quotationId || ""),
 
         qNo,
 
         leadId: salesOrder.leadId,
-
-        mode: salesOrder.mode || "asIs",
+        accountId: salesOrder.accountId || null,
 
         ...leadDetails(lead),
         modelName: modelName || "",
@@ -858,17 +1134,16 @@ const getSalesOrderById = async (req, res) => {
 
         totalAmount: Number(salesOrder.totalAmount) || 0,
 
-        aadharNumber: salesOrder.aadharNumber || "",
-
-        aadharImage: salesOrder.aadharImage || "",
-
-        panNumber: salesOrder.panNumber || "",
-
-        panImage: salesOrder.panImage || "",
-
-        gstNumber: salesOrder.gstNumber || "",
-
-        gstImage: salesOrder.gstImage || "",
+        // Selected party ka KYC — account table se
+        partyName: account?.accountName || "",
+        partyMobile: account?.mobileNo || "",
+        partyEmail: account?.email || "",
+        aadharNumber: account?.aadharCardNo || "",
+        aadharImage: account?.aadharImage || "",
+        panNumber: account?.panCard || "",
+        panImage: account?.panImage || "",
+        gstNumber: account?.gstNo || "",
+        gstImage: account?.gstImage || "",
 
         createdBy: salesOrder.createdBy || "",
 
@@ -889,6 +1164,265 @@ const getSalesOrderById = async (req, res) => {
 // UPDATE SALES ORDER
 // ============================================================
 
+// const updateSalesOrder = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+
+//     if (!companyId) {
+//       return requiredmessage(res, "Unauthorized. Please login again.");
+//     }
+
+//     const { id } = req.params;
+
+//     if (!id) {
+//       return errorResponse(res, "Sales Order id is required.");
+//     }
+
+//     // ========================================================
+//     // EXISTING SALES ORDER
+//     // ========================================================
+
+//     const existingRows = await selectWithJoins(
+//       "salesorder",
+//       [],
+//       {
+//         salesOrderId: id,
+//         companyId,
+//         delete: 0,
+//       },
+//       [
+//         "salesOrderId",
+//         "financialYearId",
+//         "soNo",
+//         "quotationId",
+//         "aadharImage",
+//         "panImage",
+//         "gstImage",
+//       ],
+//     );
+
+//     if (!existingRows.length) {
+//       return requiredmessage(res, "Sales Order not found.");
+//     }
+
+//     const existing = existingRows[0];
+
+//     const {
+//       financialYearId,
+//       quotationId,
+//       leadId,
+
+//       mode,
+
+//       qty,
+//       unitPrice,
+
+//       aadharNumber,
+//       panNumber,
+//       gstNumber,
+
+//       createdBy,
+//       createdType,
+//     } = req.body;
+
+//     // ========================================================
+//     // IMAGE UPLOADS (multer via req.files) — keep existing file
+//     // if no new one was uploaded
+//     // ========================================================
+
+//     const aadharImage = req.files?.aadharImage?.[0]
+//       ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
+//       : existing.aadharImage || null;
+
+//     const panImage = req.files?.panImage?.[0]
+//       ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
+//       : existing.panImage || null;
+
+//     const gstImage = req.files?.gstImage?.[0]
+//       ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
+//       : existing.gstImage || null;
+
+//     // ========================================================
+//     // VALIDATION
+//     // ========================================================
+
+//     if (!financialYearId) {
+//       return errorResponse(
+//         res,
+//         "Financial Year not found. Please select a company year.",
+//       );
+//     }
+
+//     if (!normalizeId(quotationId)) {
+//       return errorResponse(res, "Please select a quotation.");
+//     }
+
+//     if (!normalizeId(leadId)) {
+//       return errorResponse(res, "Please select a lead.");
+//     }
+
+//     if (!["asIs", "manual"].includes(mode)) {
+//       return errorResponse(res, "Mode must be either As Its or Manual.");
+//     }
+
+//     const fy = await getFinancialYearById(financialYearId, companyId);
+
+//     if (!fy) {
+//       return errorResponse(res, "Invalid Financial Year.");
+//     }
+
+//     // ========================================================
+//     // CHECK QUOTATION
+//     // ========================================================
+
+//     const quotationRows = await selectWithJoins(
+//       "quotation",
+//       [],
+//       {
+//         quotationId,
+//         companyId,
+//         financialYearId: fy.financialYearId,
+//         delete: 0,
+//       },
+//       ["quotationId", "qNo", "leadId", "finalPrice"],
+//     );
+
+//     if (!quotationRows.length) {
+//       return errorResponse(res, "Selected quotation was not found.");
+//     }
+
+//     const quotation = quotationRows[0];
+
+//     if (normalizeId(leadId) !== normalizeId(quotation.leadId)) {
+//       return errorResponse(
+//         res,
+//         "Selected lead does not belong to this quotation.",
+//       );
+//     }
+
+//     const leadRows = await selectWithJoins(
+//       "lead",
+//       [],
+//       { leadId: normalizeId(leadId), companyId, delete: 0 },
+//       ["leadId", "leadCode"],
+//     );
+//     if (!leadRows.length) {
+//       return errorResponse(res, "Selected lead was not found.");
+//     }
+//     const lead = leadRows[0];
+
+//     // ========================================================
+//     // DUPLICATE QUOTATION
+//     // ========================================================
+
+//     const duplicate = await selectWithJoins(
+//       "salesorder",
+//       [],
+//       {
+//         companyId,
+//         quotationId,
+//         delete: 0,
+//       },
+//       ["salesOrderId"],
+//     );
+
+//     const anotherSalesOrder = duplicate.find(
+//       (item) => String(item.salesOrderId) !== String(id),
+//     );
+
+//     if (anotherSalesOrder) {
+//       return errorResponse(
+//         res,
+//         "Another Sales Order already exists for this quotation.",
+//       );
+//     }
+
+//     // ========================================================
+//     // AMOUNT
+//     // ========================================================
+
+//     const finalQty = Number(qty) || 0;
+//     const finalUnitPrice = Number(unitPrice) || 0;
+
+//     if (finalQty <= 0) {
+//       return errorResponse(res, "Quantity must be greater than 0.");
+//     }
+
+//     if (finalUnitPrice < 0) {
+//       return errorResponse(res, "Amount cannot be negative.");
+//     }
+
+//     const finalTotalAmount = round2(finalQty * finalUnitPrice);
+
+//     // ========================================================
+//     // UPDATE DATA
+//     // ========================================================
+
+//     const updateData = {
+//       financialYearId: fy.financialYearId,
+
+//       quotationId: quotation.quotationId,
+//       leadId,
+
+//       mode,
+
+//       qty: finalQty,
+//       unitPrice: finalUnitPrice,
+//       totalAmount: finalTotalAmount,
+
+//       aadharNumber: aadharNumber || null,
+//       aadharImage,
+//       panNumber: panNumber || null,
+//       panImage,
+//       gstNumber: gstNumber || null,
+//       gstImage,
+
+//       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+
+//       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
+
+//       updated: new Date(),
+//     };
+
+//     // ========================================================
+//     // UPDATE
+//     // ========================================================
+
+//     await updateModelHelper("salesorder", updateData, {
+//       salesOrderId: id,
+//       companyId,
+//       delete: 0,
+//     });
+
+//     return successResponse(
+//       res,
+//       {
+//         salesOrderId: Number(id),
+
+//         soNo: existing.soNo,
+
+//         quotationId: quotation.quotationId,
+//         qNo: quotation.qNo,
+
+//         leadId,
+
+//         mode,
+//         ...leadDetails(lead),
+
+//         qty: finalQty,
+//         unitPrice: finalUnitPrice,
+//         totalAmount: finalTotalAmount,
+//       },
+//       "Sales Order updated successfully",
+//     );
+//   } catch (error) {
+//     if (error?.name === "SequelizeUniqueConstraintError") {
+//       return errorResponse(res, "This Sales Order already exists.");
+//     }
+
+//     return errorResponse(res, error.message || "Something Went Wrong", error);
+//   }
+// };
 const updateSalesOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -903,27 +1437,11 @@ const updateSalesOrder = async (req, res) => {
       return errorResponse(res, "Sales Order id is required.");
     }
 
-    // ========================================================
-    // EXISTING SALES ORDER
-    // ========================================================
-
     const existingRows = await selectWithJoins(
       "salesorder",
       [],
-      {
-        salesOrderId: id,
-        companyId,
-        delete: 0,
-      },
-      [
-        "salesOrderId",
-        "financialYearId",
-        "soNo",
-        "quotationId",
-        "aadharImage",
-        "panImage",
-        "gstImage",
-      ],
+      { salesOrderId: id, companyId, delete: 0 },
+      ["salesOrderId", "financialYearId", "soNo", "quotationId"],
     );
 
     if (!existingRows.length) {
@@ -936,36 +1454,14 @@ const updateSalesOrder = async (req, res) => {
       financialYearId,
       quotationId,
       leadId,
-
-      mode,
+      accountId,
 
       qty,
       unitPrice,
 
-      aadharNumber,
-      panNumber,
-      gstNumber,
-
       createdBy,
       createdType,
     } = req.body;
-
-    // ========================================================
-    // IMAGE UPLOADS (multer via req.files) — keep existing file
-    // if no new one was uploaded
-    // ========================================================
-
-    const aadharImage = req.files?.aadharImage?.[0]
-      ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
-      : existing.aadharImage || null;
-
-    const panImage = req.files?.panImage?.[0]
-      ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
-      : existing.panImage || null;
-
-    const gstImage = req.files?.gstImage?.[0]
-      ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
-      : existing.gstImage || null;
 
     // ========================================================
     // VALIDATION
@@ -986,14 +1482,29 @@ const updateSalesOrder = async (req, res) => {
       return errorResponse(res, "Please select a lead.");
     }
 
-    if (!["asIs", "manual"].includes(mode)) {
-      return errorResponse(res, "Mode must be either As Its or Manual.");
-    }
-
     const fy = await getFinancialYearById(financialYearId, companyId);
 
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
+    }
+
+    // ========================================================
+    // CHECK ACCOUNT
+    // ========================================================
+
+    let normalizedAccountId = normalizeId(accountId);
+
+    if (normalizedAccountId) {
+      const accountRows = await selectWithJoins(
+        "account",
+        [],
+        { id: normalizedAccountId, companyId, delete: 0 },
+        ["id"],
+      );
+
+      if (!accountRows.length) {
+        return errorResponse(res, "Selected party (account) was not found.");
+      }
     }
 
     // ========================================================
@@ -1043,11 +1554,7 @@ const updateSalesOrder = async (req, res) => {
     const duplicate = await selectWithJoins(
       "salesorder",
       [],
-      {
-        companyId,
-        quotationId,
-        delete: 0,
-      },
+      { companyId, quotationId, delete: 0 },
       ["salesOrderId"],
     );
 
@@ -1088,30 +1595,17 @@ const updateSalesOrder = async (req, res) => {
 
       quotationId: quotation.quotationId,
       leadId,
-
-      mode,
+      accountId: normalizedAccountId,
 
       qty: finalQty,
       unitPrice: finalUnitPrice,
       totalAmount: finalTotalAmount,
 
-      aadharNumber: aadharNumber || null,
-      aadharImage,
-      panNumber: panNumber || null,
-      panImage,
-      gstNumber: gstNumber || null,
-      gstImage,
-
       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-
       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
 
       updated: new Date(),
     };
-
-    // ========================================================
-    // UPDATE
-    // ========================================================
 
     await updateModelHelper("salesorder", updateData, {
       salesOrderId: id,
@@ -1123,15 +1617,13 @@ const updateSalesOrder = async (req, res) => {
       res,
       {
         salesOrderId: Number(id),
-
         soNo: existing.soNo,
 
         quotationId: quotation.quotationId,
         qNo: quotation.qNo,
 
         leadId,
-
-        mode,
+        accountId: normalizedAccountId,
         ...leadDetails(lead),
 
         qty: finalQty,
@@ -1144,11 +1636,9 @@ const updateSalesOrder = async (req, res) => {
     if (error?.name === "SequelizeUniqueConstraintError") {
       return errorResponse(res, "This Sales Order already exists.");
     }
-
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 // ============================================================
 // DELETE SALES ORDER
 // ============================================================

@@ -10,6 +10,19 @@ const {
 
 const { accountopeningbalance: AccountOpeningBalance } = require("../../../modelses");
 
+// ---------------- Date helpers ----------------
+// Sequelize's DATEONLY type casts the value with moment.js before binding it to the
+// SQL query. moment("").format() (or moment(<garbage>).format()) returns the literal
+// string "Invalid date" — which Postgres then rejects with
+// "invalid input syntax for type date". So ANY value that isn't a clean YYYY-MM-DD
+// string must become null before it reaches Sequelize.
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const normalizeDateOnly = (value) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return DATE_ONLY_REGEX.test(trimmed) ? trimmed : null;
+};
+
 // ---------------- CREATE ----------------
 const createAccount = async (req, res) => {
   try {
@@ -38,6 +51,17 @@ const createAccount = async (req, res) => {
       return errorResponse(res, "This mobile number is already registered for another account.");
     }
 
+    // Aadhar / PAN / GST images — multer se req.files me aayenge (uploadKycImages middleware)
+    const aadharImage = req.files?.aadharImage?.[0]
+      ? `/uploads/account-kyc/${req.files.aadharImage[0].filename}`
+      : "";
+    const panImage = req.files?.panImage?.[0]
+      ? `/uploads/account-kyc/${req.files.panImage[0].filename}`
+      : "";
+    const gstImage = req.files?.gstImage?.[0]
+      ? `/uploads/account-kyc/${req.files.gstImage[0].filename}`
+      : "";
+
     const payload = {
       companyId,
       accountName: accountName.trim(),
@@ -52,10 +76,12 @@ const createAccount = async (req, res) => {
       addressLine1, addressLine2: addressLine2 || "",
       pincode, phoneNo: phoneNo || "", mobileNo: mobileNo.trim(),
       email: email || "", contactPersonName: contactPersonName || "",
-      birthdayOn: birthdayOn || null, anniversary: anniversary || null,
+      birthdayOn: normalizeDateOnly(birthdayOn),
+      anniversary: normalizeDateOnly(anniversary),
       bankAccountNo: bankAccountNo || "", bankName: bankName || "",
       ifscCode: ifscCode || "", branchName: branchName || "",
       gstNo: gstNo || "", panCard: panCard || "", aadharCardNo: aadharCardNo || "",
+      aadharImage, panImage, gstImage,
       status: status || "active",
       delete: 0,
     };
@@ -194,6 +220,30 @@ const updateAccount = async (req, res) => {
       mobileNo: mobileNo.trim(),
       updated: new Date(),
     };
+
+    // ---- Date fix ----
+    // "" (empty string) ya kisi bhi non YYYY-MM-DD string ko null bana do, warna
+    // Sequelize ka DATEONLY caster moment.js se "Invalid date" literal bana ke
+    // Postgres ko bhej deta hai (jo DB error deta hai).
+    if (Object.prototype.hasOwnProperty.call(updatePayload, "birthdayOn")) {
+      updatePayload.birthdayOn = normalizeDateOnly(updatePayload.birthdayOn);
+    }
+    if (Object.prototype.hasOwnProperty.call(updatePayload, "anniversary")) {
+      updatePayload.anniversary = normalizeDateOnly(updatePayload.anniversary);
+    }
+
+    // Aadhar / PAN / GST images — sirf tabhi update karo jab naya file bheja gaya ho.
+    // File na bheje jaane par existing DB value untouched rehti hai (updateModelHelper
+    // sirf updatePayload me diye gaye columns hi update karta hai).
+    if (req.files?.aadharImage?.[0]) {
+      updatePayload.aadharImage = `/uploads/account-kyc/${req.files.aadharImage[0].filename}`;
+    }
+    if (req.files?.panImage?.[0]) {
+      updatePayload.panImage = `/uploads/account-kyc/${req.files.panImage[0].filename}`;
+    }
+    if (req.files?.gstImage?.[0]) {
+      updatePayload.gstImage = `/uploads/account-kyc/${req.files.gstImage[0].filename}`;
+    }
 
     if (openingChanged) {
       updatePayload.openingBalance = openingBalance || 0;
