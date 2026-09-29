@@ -6,18 +6,10 @@ const Joi = require("joi");
 // ============================================================
 
 const validateSalesOrder = Joi.object().keys({
-  // ==========================================================
-  // FINANCIAL YEAR
-  // ==========================================================
-
   financialYearId: Joi.number().required().messages({
     "number.base": "Financial Year Id is required",
     "any.required": "Financial Year Id is required",
   }),
-
-  // ==========================================================
-  // QUOTATION
-  // ==========================================================
 
   quotationId: Joi.number().required().messages({
     "number.base": "Please select a quotation",
@@ -30,32 +22,22 @@ const validateSalesOrder = Joi.object().keys({
   }),
 
   // ==========================================================
-  // MODE
+  // PARTY (ACCOUNT) — aadhar/pan/gst uske account record se aayega
   // ==========================================================
 
-  mode: Joi.string()
-    .valid("asIs", "manual")
-    .required()
-    .messages({
-      "any.only": "Mode must be either As Its or Manual",
-      "any.required": "Sales Order mode is required",
-    }),
+  accountId: Joi.number().integer().allow(null, "").optional(),
 
   // ==========================================================
   // SALES ORDER CUSTOMER DETAILS
   // ==========================================================
 
-    customerName: Joi.any().optional(),
-    mobile: Joi.any().optional(),
-    email: Joi.any().optional(),
-    address: Joi.any().optional(),
-    city: Joi.any().optional(),
-    model: Joi.any().optional(),
-    remark: Joi.any().optional(),
-
-  // ==========================================================
-  // QUANTITY / AMOUNT
-  // ==========================================================
+  customerName: Joi.any().optional(),
+  mobile: Joi.any().optional(),
+  email: Joi.any().optional(),
+  address: Joi.any().optional(),
+  city: Joi.any().optional(),
+  model: Joi.any().optional(),
+  remark: Joi.any().optional(),
 
   qty: Joi.number().positive().required().messages({
     "number.base": "Quantity must be a number",
@@ -75,27 +57,12 @@ const validateSalesOrder = Joi.object().keys({
     "any.required": "Total amount is required",
   }),
 
-  // ==========================================================
-  // KYC
-  // ==========================================================
-
-  aadharNumber: Joi.string().trim().allow("", null),
-
-  panNumber: Joi.string().trim().allow("", null),
-
-  gstNumber: Joi.string().trim().allow("", null),
-
-  // ==========================================================
-  // CREATED BY
-  // ==========================================================
-
   createdBy: Joi.alternatives()
     .try(Joi.number(), Joi.string())
     .allow(null, ""),
 
   createdType: Joi.string().allow(null, ""),
 });
-
 module.exports = {
   validateSalesOrder,
 };

@@ -74,6 +74,9 @@ module.exports = sequelize => {
     gstNo: { type: DataTypes.STRING(15), allowNull: true, field: "gstNo" },
     panCard: { type: DataTypes.STRING(10), allowNull: true, field: "panCard" },
     aadharCardNo: { type: DataTypes.STRING(12), allowNull: true, field: "aadharCardNo" },
+    aadharImage: { type: DataTypes.STRING(255), allowNull: true, field: "aadharImage" },
+    panImage: { type: DataTypes.STRING(255), allowNull: true, field: "panImage" },
+    gstImage: { type: DataTypes.STRING(255), allowNull: true, field: "gstImage" },
     status: {
       type: DataTypes.STRING(20),
       allowNull: false,
