@@ -296,16 +296,16 @@ const getBankPaymentList = async (req, res) => {
 //       fromDate,                // "YYYY-MM-DD"
 //       toDate,                  // "YYYY-MM-DD"
 //     } = req.query;
- 
+
 //     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
- 
+
 //     const where = {
 //       companyId,
 //       voucherType: "CASH PAYMENT",
 //       delete: 0,
 //     };
 //     if (financialYearId) where.financialYearId = financialYearId;
- 
+
 //     let rows = await selectWithJoins(
 //       "payment", [], where,
 //       [
@@ -314,18 +314,18 @@ const getBankPaymentList = async (req, res) => {
 //         "createdBy", "createdType",
 //       ]
 //     );
- 
+
 //     // ---- Date range filter ----
 //     // NOTE: if selectWithJoins supports range where-clauses in your helper,
 //     // move this into `where` above instead of filtering in memory.
 //     if (fromDate) rows = rows.filter((r) => String(r.date) >= fromDate);
 //     if (toDate) rows = rows.filter((r) => String(r.date) <= toDate);
- 
+
 //     // ---- Transaction type filter (matches the stored module code directly) ----
 //     if (transactionType && transactionType !== "ALL") {
 //       rows = rows.filter((r) => (r.paymentCollectedByModules || "") === transactionType);
 //     }
- 
+
 //     if (!rows.length) {
 //       return successResponse(
 //         res,
@@ -333,23 +333,23 @@ const getBankPaymentList = async (req, res) => {
 //         "Cash book fetched successfully"
 //       );
 //     }
- 
+
 //     // ---- Account names (self side + opp/party side) ----
 //     const accountIds = [...new Set([...rows.map((r) => r.selfAccountId), ...rows.map((r) => r.accountId)])];
 //     const accounts = await selectWithJoins("account", [], { id: accountIds, companyId, delete: 0 }, ["id", "accountName"]);
 //     const accMap = {};
 //     accounts.forEach((a) => { accMap[a.id] = a.accountName; });
- 
+
 //     // ---- Created By naam ----
 //     const createdByMap = await resolveCreatedByNames(rows);
- 
+
 //     // ---- Build rows + running totals ----
 //     // selfDrOrCr on the cash account tells us direction:
 //     //   "DR" -> cash came IN  (receipt)
 //     //   "CR" -> cash went OUT (payment)
 //     let totalReceipts = 0;
 //     let totalPayments = 0;
- 
+
 //     let list = rows
 //       .sort((a, b) => (new Date(b.date) - new Date(a.date)) || (b.paymentId - a.paymentId))
 //       .map((r) => {
@@ -358,7 +358,7 @@ const getBankPaymentList = async (req, res) => {
 //         const paymentAmt = !isReceipt ? Number(r.amount) : 0;
 //         totalReceipts += receiptAmt;
 //         totalPayments += paymentAmt;
- 
+
 //         return {
 //           id: String(r.paymentId),
 //           voucherNo: r.voucherNo,
@@ -373,7 +373,7 @@ const getBankPaymentList = async (req, res) => {
 //           createdBy: getCreatedByName(createdByMap, r.createdType, r.createdBy),
 //         };
 //       });
- 
+
 //     // ---- Free-text search (voucher no / account / party / narration) ----
 //     if (search) {
 //       const s = String(search).toLowerCase();
@@ -385,11 +385,11 @@ const getBankPaymentList = async (req, res) => {
 //           r.narration.toLowerCase().includes(s)
 //       );
 //     }
- 
+
 //     list = list.map((r, idx) => ({ sr: idx + 1, ...r }));
- 
+
 //     const closingBalance = totalReceipts - totalPayments;
- 
+
 //     return successResponse(
 //       res,
 //       {
@@ -1096,7 +1096,7 @@ const getCashReceiptList = async (req, res) => {
       "payment", [], where,
       [
         "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
-        "amount", "narration","paymentMode", "createdBy", "createdType",
+        "amount", "narration", "paymentMode", "createdBy", "createdType",
       ]
     );
 
@@ -1117,7 +1117,7 @@ const getCashReceiptList = async (req, res) => {
       oppAccount: accMap[r.accountId] || "",
       amount: String(r.amount),
       narration: r.narration || "",
-      paymentMode:r.paymentMode,
+      paymentMode: r.paymentMode,
       createdBy: getCreatedByName(createdByMap, r.createdType, r.createdBy),
       createdType: r.createdType || "",
     }));
@@ -1221,8 +1221,8 @@ const createContra = async (req, res) => {
     const contraType = String(type || "").toLowerCase();
     const moduleCode =
       contraType === "deposit" ? "CTD" :
-      contraType === "withdrawal" ? "CTW" :
-      contraType === "transfer" ? "CTT" : "CTR";
+        contraType === "withdrawal" ? "CTW" :
+          contraType === "transfer" ? "CTT" : "CTR";
 
     // ---- Contra logic: Self Account CR (paisa bahar gaya), Opp Account DR (paisa andar aaya) ----
     const payment = await saveModel("payment", {
@@ -1314,10 +1314,10 @@ module.exports = {
   getBankPaymentList,
   getCashBook,
   getBankBook,
-   createCashReceipt,
+  createCashReceipt,
   getCashReceiptList,
   createBankReceipt,
   getBankReceiptList,
-    createContra,      
+  createContra,
   getContraList
 };

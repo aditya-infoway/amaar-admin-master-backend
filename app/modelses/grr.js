@@ -21,7 +21,7 @@ module.exports = (sequelize) => {
       allowNull: false,
       defaultValue: "Completed",
     }, // Completed (verify happens client-side across two stages before save)
- createdBy: { type: DataTypes.INTEGER, allowNull: true },       
+    createdBy: { type: DataTypes.INTEGER, allowNull: true },
     createdType: { type: DataTypes.STRING(20), allowNull: true },
     created: {
       type: DataTypes.DATE,
