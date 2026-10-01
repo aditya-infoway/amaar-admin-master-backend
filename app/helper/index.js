@@ -13,6 +13,12 @@ const path = require("path");
 
 var sequelize = db.sequelize;
 
+// Base URL comes from .env (no trailing slash). Falls back to localhost for dev.
+const BASE_URL = (
+  process.env.BASE_URL || `http://localhost:${process.env.PORT || 8001}`
+).replace(/\/+$/, "");
+const UPLOAD_URL = `${BASE_URL}/Uploadimages/`;
+
 // success message
 const successResponse = (res, data = [], message = "success") => {
   code = 200;
@@ -52,7 +58,7 @@ function mysql_unreal_escape_string(string) {
 const getBlobTempPublicUrl = (blobName) => {
   return blobName == "" || blobName == undefined || blobName == null
     ? ""
-    : "http://localhost:8001/Uploadimages/" + blobName;
+    : UPLOAD_URL + blobName;
 };
 const categoryURL = (blobName) => {
   return blobName == "" || blobName == undefined || blobName == null
@@ -65,13 +71,12 @@ const videoUrl = (blobName) => {
     : getBlobTempPublicUrl("videos/" + blobName);
 };
 
-// ===== YE NAYA FUNCTION ADD KIYA — DB ka relative path le ke full URL banata hai =====
+// DB relative path -> full URL
 const toFullUrl = (relativePath) => {
   if (!relativePath) return null;
-  // agar path me already "Uploadimages/" laga hua hai (jaisa getFilePath deta hai),
-  // to usko hata do taaki URL me "Uploadimages" do baar na aaye
+  // remove leading "Uploadimages/" so it doesn't appear twice in the URL
   const cleanPath = relativePath.replace(/^Uploadimages[\\/]/, "");
-  return "http://localhost:8001/Uploadimages/" + cleanPath;
+  return UPLOAD_URL + cleanPath;
 };
 
 //catch error message

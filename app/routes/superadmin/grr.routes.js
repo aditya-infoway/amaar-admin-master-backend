@@ -18,6 +18,7 @@ module.exports = (app) => {
   routes.get("/next-grr-no", grr.getNextGrrNumber);
   routes.get("/po-list", grr.getPurchaseOrdersForGrr);
   routes.get("/po-items/:purchaseOrderId", grr.getPoItemsForGrr);
+  routes.get("/po-qty/:purchaseOrderId", grr.getGrrQtyByPo);
   routes.get("/list", grr.getGrrList);
   routes.get("/:id", grr.getGrrById);
 
