@@ -16,7 +16,14 @@ const buildChains = async (companyId, financialYearId) => {
   const base = { companyId, delete: 0 };
   if (financialYearId) base.financialYearId = financialYearId;
 
-  const empty = { chains: [], qcByGrr: {}, doneGrr: new Set(), doneQc: new Set() };
+  const empty = {
+    chains: [],
+    qcByGrr: {},
+    doneGrr: new Set(),
+    doneQc: new Set(),
+    grrHasDebit: new Set(),
+    qcHasDebit: new Set(),
+  };
 
   const purchases = await selectWithJoins("purchase", [], base, [
     "purchaseId",
@@ -49,6 +56,35 @@ const buildChains = async (companyId, financialYearId) => {
   const chains = grrs.filter((g) => g.supplierId && qcByGrr[g.grrId]);
   if (!chains.length) return empty;
 
+  // which GRR / QC actually have something to debit
+  const grrHasDebit = new Set();
+  const qcHasDebit = new Set();
+
+  const grrItems = await selectWithJoins(
+    "grritem",
+    [],
+    { companyId, delete: 0, grrId: chains.map((c) => c.grrId) },
+    ["grrId", "orderQty", "inQty"],
+  );
+  grrItems.forEach((r) => {
+    if ((Number(r.orderQty) || 0) - (Number(r.inQty) || 0) > 0)
+      grrHasDebit.add(r.grrId);
+  });
+
+  const qcItems = await selectWithJoins(
+    "qcitem",
+    [],
+    {
+      companyId,
+      delete: 0,
+      qcId: chains.map((c) => qcByGrr[c.grrId].qcId),
+    },
+    ["qcId", "rQty"],
+  );
+  qcItems.forEach((r) => {
+    if ((Number(r.rQty) || 0) > 0) qcHasDebit.add(r.qcId);
+  });
+
   // debit notes already raised (table may not exist yet -> everything pending)
   const doneGrr = new Set();
   const doneQc = new Set();
@@ -67,7 +103,7 @@ const buildChains = async (companyId, financialYearId) => {
     // debitnote table not created yet
   }
 
-  return { chains, qcByGrr, doneGrr, doneQc };
+  return { chains, qcByGrr, doneGrr, doneQc, grrHasDebit, qcHasDebit };
 };
 
 // ---------------- PAGE 1: VENDOR SUMMARY ----------------
@@ -77,10 +113,8 @@ const getVendorSummary = async (req, res) => {
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const { chains, qcByGrr, doneGrr, doneQc } = await buildChains(
-      companyId,
-      req.query.financialYearId,
-    );
+    const { chains, qcByGrr, doneGrr, doneQc, grrHasDebit, qcHasDebit } =
+      await buildChains(companyId, req.query.financialYearId);
     if (!chains.length)
       return successResponse(res, [], "Vendor list fetched successfully");
 
@@ -91,14 +125,24 @@ const getVendorSummary = async (req, res) => {
         complete: { grr: 0, qc: 0 },
       });
       const qc = qcByGrr[g.grrId];
-      s[doneGrr.has(g.grrId) ? "complete" : "pending"].grr += 1;
-      s[doneQc.has(qc.qcId) ? "complete" : "pending"].qc += 1;
+      if (doneGrr.has(g.grrId)) s.complete.grr += 1;
+      else if (grrHasDebit.has(g.grrId)) s.pending.grr += 1;
+
+      if (doneQc.has(qc.qcId)) s.complete.qc += 1;
+      else if (qcHasDebit.has(qc.qcId)) s.pending.qc += 1;
     });
+
+    const vendorIds = Object.keys(stats).filter((id) => {
+      const s = stats[id];
+      return s.pending.grr + s.pending.qc + s.complete.grr + s.complete.qc > 0;
+    });
+    if (!vendorIds.length)
+      return successResponse(res, [], "Vendor list fetched successfully");
 
     const accounts = await selectWithJoins(
       "account",
       [],
-      { id: Object.keys(stats), companyId, delete: 0 },
+      { id: vendorIds, companyId, delete: 0 },
       ["id", "accountName", "mobileNo"],
     );
 
@@ -129,17 +173,19 @@ const getVendorDocs = async (req, res) => {
     if (!["grr", "qc"].includes(type))
       return errorResponse(res, "Type must be grr or qc.");
 
-    const { chains, qcByGrr, doneGrr, doneQc } = await buildChains(
-      companyId,
-      req.query.financialYearId,
-    );
+    const { chains, qcByGrr, doneGrr, doneQc, grrHasDebit, qcHasDebit } =
+      await buildChains(companyId, req.query.financialYearId);
 
     // this vendor's chains, then keep only pending or complete
-    const mine = chains.filter((g) => String(g.supplierId) === String(vendorId));
+    const mine = chains.filter(
+      (g) => String(g.supplierId) === String(vendorId),
+    );
     const picked = mine.filter((g) => {
-      const done =
-        type === "grr" ? doneGrr.has(g.grrId) : doneQc.has(qcByGrr[g.grrId].qcId);
-      return status === "complete" ? done : !done;
+      const qcId = qcByGrr[g.grrId].qcId;
+      const done = type === "grr" ? doneGrr.has(g.grrId) : doneQc.has(qcId);
+      const hasDebit =
+        type === "grr" ? grrHasDebit.has(g.grrId) : qcHasDebit.has(qcId);
+      return status === "complete" ? done : !done && hasDebit;
     });
 
     // vendor header
@@ -169,17 +215,17 @@ const getVendorDocs = async (req, res) => {
       const qc = qcByGrr[g.grrId];
       return type === "grr"
         ? {
-          id: String(g.grrId),
-          docNo: g.grrNo,
-          docDate: g.grrDate,
-          poNo: poMap[g.purchaseOrderId] || "",
-        }
+            id: String(g.grrId),
+            docNo: g.grrNo,
+            docDate: g.grrDate,
+            poNo: poMap[g.purchaseOrderId] || "",
+          }
         : {
-          id: String(qc.qcId),
-          docNo: qc.qcNo,
-          docDate: qc.qcDate,
-          poNo: poMap[g.purchaseOrderId] || "",
-        };
+            id: String(qc.qcId),
+            docNo: qc.qcNo,
+            docDate: qc.qcDate,
+            poNo: poMap[g.purchaseOrderId] || "",
+          };
     });
 
     return successResponse(
@@ -195,7 +241,6 @@ const getVendorDocs = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 
 const today = () => new Date().toISOString().slice(0, 10);
 const round2 = (n) => Number(Number(n).toFixed(2));
@@ -391,7 +436,10 @@ const getDebitNoteSource = async (req, res) => {
     const src = await loadSource(companyId, type, id);
     if (!src) return errorResponse(res, "Document not found.");
     if (await debitNoteExists(companyId, type, src))
-      return errorResponse(res, "Debit note already created for this document.");
+      return errorResponse(
+        res,
+        "Debit note already created for this document.",
+      );
 
     return successResponse(res, src, "Debit note source fetched successfully");
   } catch (error) {
@@ -440,7 +488,10 @@ const createDebitNote = async (req, res) => {
     if (!src.items.length)
       return errorResponse(res, "Nothing to debit on this document.");
     if (await debitNoteExists(companyId, type, src))
-      return errorResponse(res, "Debit note already created for this document.");
+      return errorResponse(
+        res,
+        "Debit note already created for this document.",
+      );
 
     // cash / bank account for refund
     const refundAccountId = pType === "cash" ? cashAccountId : bankAccountId;
