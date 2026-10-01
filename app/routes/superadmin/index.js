@@ -40,4 +40,5 @@ module.exports = (app) => {
      require("./grr.routes")(app);
      require("./contractoremployee.routes")(app);
      require("./qc.routes")(app);
+     require("./debitnote.routes")(app);
 };
