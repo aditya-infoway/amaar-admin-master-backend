@@ -12,14 +12,15 @@ app.use(express.urlencoded({ extended: true }));
 
 var cron = require("node-cron");
 
-const bodyParser = require('body-parser');
+const bodyParser = require("body-parser");
 // app.use(express.json());
 app.use(bodyParser.json());
 
 const db = require("./app/modelses/index.js");
 
-// set alter :true when sync model with database   
-db.sequelize.sync({alter: true})
+// set alter :true when sync model with database
+db.sequelize
+  .sync({ alter: true })
   .then(() => {
     console.log("Synced db.");
   })

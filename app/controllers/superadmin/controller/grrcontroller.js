@@ -566,6 +566,50 @@ const getGrrById = async (req, res) => {
   }
 };
 
+
+
+// ---------------- RECEIVED QTY PER ITEM FOR A PO (used by purchase register) ----------------
+const getGrrQtyByPo = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { purchaseOrderId } = req.params;
+
+    const grrs = await selectWithJoins(
+      "grr",
+      [],
+      { purchaseOrderId, companyId, delete: 0, status: "Completed" },
+      ["grrId"],
+    );
+    if (!grrs.length) return successResponse(res, [], "No GRR for this PO");
+
+    const rows = await selectWithJoins(
+      "grritem",
+      [],
+      { grrId: grrs.map((g) => g.grrId), companyId, delete: 0 },
+      ["itemId", "inQty"],
+    );
+
+    // sum per item (safe even if more than one GRR is allowed later)
+    const qtyByItem = {};
+    rows.forEach((r) => {
+      qtyByItem[r.itemId] = (qtyByItem[r.itemId] || 0) + (Number(r.inQty) || 0);
+    });
+
+    const data = Object.keys(qtyByItem).map((itemId) => ({
+      itemId: Number(itemId),
+      inQty: qtyByItem[itemId],
+    }));
+
+    return successResponse(res, data, "GRR quantities fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
 module.exports = {
   getNextGrrNumber,
   getPurchaseOrdersForGrr,
@@ -573,4 +617,5 @@ module.exports = {
   createGrr,
   getGrrList,
   getGrrById,
+  getGrrQtyByPo,
 };
