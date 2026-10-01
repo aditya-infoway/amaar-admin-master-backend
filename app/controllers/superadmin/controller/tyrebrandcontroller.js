@@ -22,11 +22,14 @@ const createTyreBrand = async (req, res) => {
       "tyrebrand",
       [],
       { tyreBrandName: tyreBrandName.trim(), companyId, delete: 0 },
-      ["tyreBrandId"]
+      ["tyreBrandId"],
     );
 
     if (nameExists.length > 0) {
-      return errorResponse(res, "Tyre brand already exists. Please enter a different name.");
+      return errorResponse(
+        res,
+        "Tyre brand already exists. Please enter a different name.",
+      );
     }
 
     const payload = {
@@ -41,7 +44,10 @@ const createTyreBrand = async (req, res) => {
     return successResponse(res, tyreBrand, "Tyre brand created successfully");
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "Tyre brand already exists. Please enter a different name.");
+      return errorResponse(
+        res,
+        "Tyre brand already exists. Please enter a different name.",
+      );
     }
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -61,7 +67,7 @@ const getTyreBrandList = async (req, res) => {
       [],
       { companyId, delete: 0 },
       ["tyreBrandId", "companyId", "tyreBrandName", "status", "created"],
-      [["tyreBrandId", "DESC"]]
+      [["tyreBrandId", "DESC"]],
     );
 
     return successResponse(res, list, "Tyre brand list fetched successfully");
@@ -85,7 +91,7 @@ const getTyreBrandById = async (req, res) => {
       "tyrebrand",
       [],
       { tyreBrandId: id, companyId, delete: 0 },
-      ["tyreBrandId", "companyId", "tyreBrandName", "status", "created"]
+      ["tyreBrandId", "companyId", "tyreBrandName", "status", "created"],
     );
 
     if (rows.length === 0) {
@@ -113,7 +119,7 @@ const updateTyreBrand = async (req, res) => {
       "tyrebrand",
       [],
       { tyreBrandId, companyId, delete: 0 },
-      ["tyreBrandId"]
+      ["tyreBrandId"],
     );
 
     if (existing.length === 0) {
@@ -124,15 +130,18 @@ const updateTyreBrand = async (req, res) => {
       "tyrebrand",
       [],
       { tyreBrandName: tyreBrandName.trim(), companyId, delete: 0 },
-      ["tyreBrandId"]
+      ["tyreBrandId"],
     );
 
     const nameTakenByOther = nameExists.some(
-      (row) => String(row.tyreBrandId) !== String(tyreBrandId)
+      (row) => String(row.tyreBrandId) !== String(tyreBrandId),
     );
 
     if (nameTakenByOther) {
-      return errorResponse(res, "Tyre brand already exists. Please enter a different name.");
+      return errorResponse(
+        res,
+        "Tyre brand already exists. Please enter a different name.",
+      );
     }
 
     await updateModelHelper(
@@ -142,13 +151,16 @@ const updateTyreBrand = async (req, res) => {
         status,
         updated: new Date(),
       },
-      { tyreBrandId, companyId }
+      { tyreBrandId, companyId },
     );
 
     return successResponse(res, {}, "Tyre brand updated successfully");
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "Tyre brand already exists. Please enter a different name.");
+      return errorResponse(
+        res,
+        "Tyre brand already exists. Please enter a different name.",
+      );
     }
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -169,7 +181,7 @@ const deleteTyreBrand = async (req, res) => {
       "tyrebrand",
       [],
       { tyreBrandId, companyId, delete: 0 },
-      ["tyreBrandId"]
+      ["tyreBrandId"],
     );
 
     if (existing.length === 0) {
@@ -179,7 +191,7 @@ const deleteTyreBrand = async (req, res) => {
     await updateModelHelper(
       "tyrebrand",
       { delete: 1, updated: new Date() },
-      { tyreBrandId, companyId }
+      { tyreBrandId, companyId },
     );
 
     return successResponse(res, {}, "Tyre brand deleted successfully");
