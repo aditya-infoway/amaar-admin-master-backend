@@ -1,12 +1,15 @@
 const Joi = require("joi");
 
-const departmentValues = ["sale", "production", "security","hrms","canteen"];
+const departmentValues = ["sale", "production", "security", "hrms", "canteen"];
 
 const createEmployee = Joi.object().keys({
-  department: Joi.string().valid(...departmentValues).required().messages({
-    "any.only": "Please select a valid department",
-    "string.empty": "Department is required",
-  }),
+  department: Joi.string()
+    .valid(...departmentValues)
+    .required()
+    .messages({
+      "any.only": "Please select a valid department",
+      "string.empty": "Department is required",
+    }),
   branch: Joi.string().trim().required().messages({
     "string.empty": "Branch is required",
   }),
@@ -14,19 +17,27 @@ const createEmployee = Joi.object().keys({
     "number.base": "Please select a role",
     "any.required": "Please select a role",
   }),
-    accountId: Joi.number().allow(null, "").messages({
+  accountId: Joi.number().allow(null, "").messages({
     "number.base": "Invalid account selected",
   }),
   employeeName: Joi.string().trim().required().messages({
     "string.empty": "Employee name is required",
   }),
-  mobileNumber: Joi.string().trim().pattern(/^[0-9]{10}$/).required().messages({
-    "string.empty": "Mobile number is required",
-    "string.pattern.base": "Mobile number must be 10 digits",
-  }),
-  alternateNumber: Joi.string().trim().pattern(/^[0-9]{10}$/).allow("", null).messages({
-    "string.pattern.base": "Alternate number must be 10 digits",
-  }),
+  mobileNumber: Joi.string()
+    .trim()
+    .pattern(/^[0-9]{10}$/)
+    .required()
+    .messages({
+      "string.empty": "Mobile number is required",
+      "string.pattern.base": "Mobile number must be 10 digits",
+    }),
+  alternateNumber: Joi.string()
+    .trim()
+    .pattern(/^[0-9]{10}$/)
+    .allow("", null)
+    .messages({
+      "string.pattern.base": "Alternate number must be 10 digits",
+    }),
   email: Joi.string().trim().email().required().messages({
     "string.empty": "Email is required",
     "string.email": "Enter a valid email",
@@ -48,10 +59,13 @@ const updateEmployee = Joi.object().keys({
   employeeId: Joi.number().required().messages({
     "number.base": "Employee id is required",
   }),
-  department: Joi.string().valid(...departmentValues).required().messages({
-    "any.only": "Please select a valid department",
-    "string.empty": "Department is required",
-  }),
+  department: Joi.string()
+    .valid(...departmentValues)
+    .required()
+    .messages({
+      "any.only": "Please select a valid department",
+      "string.empty": "Department is required",
+    }),
   branch: Joi.string().trim().required().messages({
     "string.empty": "Branch is required",
   }),
@@ -59,16 +73,27 @@ const updateEmployee = Joi.object().keys({
     "number.base": "Please select a role",
     "any.required": "Please select a role",
   }),
+  accountId: Joi.number().allow(null, "").messages({
+    "number.base": "Invalid account selected",
+  }),
   employeeName: Joi.string().trim().required().messages({
     "string.empty": "Employee name is required",
   }),
-  mobileNumber: Joi.string().trim().pattern(/^[0-9]{10}$/).required().messages({
-    "string.empty": "Mobile number is required",
-    "string.pattern.base": "Mobile number must be 10 digits",
-  }),
-  alternateNumber: Joi.string().trim().pattern(/^[0-9]{10}$/).allow("", null).messages({
-    "string.pattern.base": "Alternate number must be 10 digits",
-  }),
+  mobileNumber: Joi.string()
+    .trim()
+    .pattern(/^[0-9]{10}$/)
+    .required()
+    .messages({
+      "string.empty": "Mobile number is required",
+      "string.pattern.base": "Mobile number must be 10 digits",
+    }),
+  alternateNumber: Joi.string()
+    .trim()
+    .pattern(/^[0-9]{10}$/)
+    .allow("", null)
+    .messages({
+      "string.pattern.base": "Alternate number must be 10 digits",
+    }),
   email: Joi.string().trim().email().required().messages({
     "string.empty": "Email is required",
     "string.email": "Enter a valid email",
@@ -84,12 +109,11 @@ const deleteEmployee = Joi.object().keys({
 });
 
 const registerEmployee = Joi.object().keys({
-
   employeeId: Joi.number().required().messages({
     "number.base": "Please select an employee",
     "any.required": "Please select an employee",
   }),
- financialYearId: Joi.number().required().messages({
+  financialYearId: Joi.number().required().messages({
     "number.base": "Financial year is invalid",
     "any.required": "Financial year is required",
   }),
@@ -126,13 +150,9 @@ const registerEmployee = Joi.object().keys({
       "string.pattern.base": "Personal mobile number must be 10 digits",
     }),
 
-  personalEmail: Joi.string()
-    .trim()
-    .email()
-    .allow("", null)
-    .messages({
-      "string.email": "Enter a valid email",
-    }),
+  personalEmail: Joi.string().trim().email().allow("", null).messages({
+    "string.email": "Enter a valid email",
+  }),
 
   aadharNumber: Joi.string().trim().allow("", null),
 
@@ -195,7 +215,7 @@ const registerEmployee = Joi.object().keys({
   }),
 
   noticePeriod: Joi.string().trim().allow("", null),
-   workingDays: Joi.string().trim().required().messages({
+  workingDays: Joi.string().trim().required().messages({
     "string.empty": "Working days are required",
   }),
 
@@ -215,7 +235,6 @@ const registerEmployee = Joi.object().keys({
     "string.empty": "Working shift is required",
   }),
 });
-
 
 // ================= EXPORT =================
 

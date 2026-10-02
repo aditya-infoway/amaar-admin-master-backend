@@ -23,15 +23,23 @@ const buildChains = async (companyId, financialYearId) => {
     doneQc: new Set(),
     grrHasDebit: new Set(),
     qcHasDebit: new Set(),
+    billByPo: {},
   };
 
   const purchases = await selectWithJoins("purchase", [], base, [
     "purchaseId",
     "purchaseOrderId",
+    "billNo",
   ]);
   const billedPoIds = [
     ...new Set(purchases.map((p) => p.purchaseOrderId).filter(Boolean)),
   ];
+
+  const billByPo = {};
+  purchases.forEach((p) => {
+    if (p.purchaseOrderId && !billByPo[p.purchaseOrderId])
+      billByPo[p.purchaseOrderId] = p.billNo;
+  });
   if (!billedPoIds.length) return empty;
 
   const grrs = await selectWithJoins(
@@ -103,7 +111,15 @@ const buildChains = async (companyId, financialYearId) => {
     // debitnote table not created yet
   }
 
-  return { chains, qcByGrr, doneGrr, doneQc, grrHasDebit, qcHasDebit };
+  return {
+    chains,
+    qcByGrr,
+    doneGrr,
+    doneQc,
+    grrHasDebit,
+    qcHasDebit,
+    billByPo,
+  };
 };
 
 // ---------------- PAGE 1: VENDOR SUMMARY ----------------
@@ -173,8 +189,15 @@ const getVendorDocs = async (req, res) => {
     if (!["grr", "qc"].includes(type))
       return errorResponse(res, "Type must be grr or qc.");
 
-    const { chains, qcByGrr, doneGrr, doneQc, grrHasDebit, qcHasDebit } =
-      await buildChains(companyId, req.query.financialYearId);
+    const {
+      chains,
+      qcByGrr,
+      doneGrr,
+      doneQc,
+      grrHasDebit,
+      qcHasDebit,
+      billByPo,
+    } = await buildChains(companyId, req.query.financialYearId);
 
     // this vendor's chains, then keep only pending or complete
     const mine = chains.filter(
@@ -219,12 +242,14 @@ const getVendorDocs = async (req, res) => {
             docNo: g.grrNo,
             docDate: g.grrDate,
             poNo: poMap[g.purchaseOrderId] || "",
+            billNo: billByPo[g.purchaseOrderId] || "",
           }
         : {
             id: String(qc.qcId),
             docNo: qc.qcNo,
             docDate: qc.qcDate,
             poNo: poMap[g.purchaseOrderId] || "",
+            billNo: billByPo[g.purchaseOrderId] || "",
           };
     });
 
@@ -301,7 +326,7 @@ const loadSource = async (companyId, type, id) => {
     "purchase",
     [],
     { purchaseOrderId, companyId, delete: 0 },
-    ["purchaseId"],
+    ["purchaseId", "billNo", "purchaseBillNo"],
   );
   const rateMap = {};
   if (bills.length) {
@@ -369,6 +394,9 @@ const loadSource = async (companyId, type, id) => {
     docDate: type === "grr" ? grr.grrDate : qc.qcDate,
     purchaseOrderId,
     poNo: pos[0]?.poNumber || "",
+    billNo: bills[0]?.billNo || "",
+    purchaseBillNo: bills[0]?.purchaseBillNo || "",
+    purchaseId: bills[0]?.purchaseId || null,
     supplierId,
     vendorName: accounts[0]?.accountName || "",
     items,
@@ -448,10 +476,7 @@ const getDebitNoteSource = async (req, res) => {
 };
 
 // ---------------- CREATE DEBIT NOTE ----------------
-// Accounting is written to the `payment` table (same as purchase / cash / bank vouchers):
 //   Credit -> vendor DR (payable reduced)
-//   Cash   -> vendor DR + CASH RECEIPT row (cash account DR, vendor CR); vendor net 0
-//   Bank   -> vendor DR + BANK RECEIPT row (bank account DR, vendor CR); vendor net 0
 const createDebitNote = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -460,9 +485,6 @@ const createDebitNote = async (req, res) => {
       type,
       sourceId,
       debitNoteDate,
-      paymentType,
-      cashAccountId,
-      bankAccountId,
       remarks,
       createdBy,
       createdType,
@@ -475,10 +497,6 @@ const createDebitNote = async (req, res) => {
     if (!["grr", "qc"].includes(type))
       return errorResponse(res, "Type must be grr or qc.");
     if (!sourceId) return errorResponse(res, "Source document is required.");
-
-    const pType = String(paymentType || "").toLowerCase();
-    if (!["credit", "cash", "bank"].includes(pType))
-      return errorResponse(res, "Payment type is required.");
 
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) return errorResponse(res, "Invalid Financial Year in session.");
@@ -493,30 +511,12 @@ const createDebitNote = async (req, res) => {
         "Debit note already created for this document.",
       );
 
-    // cash / bank account for refund
-    const refundAccountId = pType === "cash" ? cashAccountId : bankAccountId;
-    if (pType !== "credit") {
-      if (!refundAccountId)
-        return errorResponse(
-          res,
-          `${pType === "cash" ? "Cash" : "Bank"} account is required.`,
-        );
-      const accRows = await selectWithJoins(
-        "account",
-        [],
-        { id: refundAccountId, companyId, delete: 0 },
-        ["id"],
-      );
-      if (!accRows.length)
-        return errorResponse(res, "Selected account is invalid.");
-    }
-
     const { billNo } = await generateVoucherNo({
       companyId,
       financialYearId: fy.financialYearId,
       tableName: "debitnote",
       idColumn: "debitNoteId",
-      prefixFor: "DN",
+      prefixFor: "Debit Note",
     });
 
     const dnDate = debitNoteDate || today();
@@ -532,8 +532,8 @@ const createDebitNote = async (req, res) => {
       qcId: src.qcId,
       purchaseOrderId: src.purchaseOrderId,
       supplierId: src.supplierId,
-      paymentType: pType.charAt(0).toUpperCase() + pType.slice(1),
-      refundAccountId: pType === "credit" ? null : refundAccountId,
+      paymentType: "Credit",
+      refundAccountId: null,
       taxableValue: src.taxableValue,
       gstAmount: src.gstAmount,
       grandTotal: total,
@@ -563,7 +563,10 @@ const createDebitNote = async (req, res) => {
     }
 
     // ---- accounting entries ----
-    const narration = `Debit Note ${billNo} (${type.toUpperCase()} ${src.docNo})`;
+    const autoNarration = `Debit Note ${billNo} (${type.toUpperCase()} ${src.docNo})`;
+    const narration = remarks?.trim()
+      ? `${autoNarration} - ${remarks.trim()}`
+      : autoNarration;
 
     // vendor side: payable reduced (DR)
     await saveModel("payment", {
@@ -575,82 +578,19 @@ const createDebitNote = async (req, res) => {
       date: dnDate,
       selfAccountId: src.supplierId,
       selfDrOrCr: "DR",
-      accountId: src.supplierId, // single-sided entry, same as purchase
+      accountId: src.supplierId,
       accountDrOrCr: "DR",
       amount: total,
       narration,
       paymentMode: "CREDIT",
+      purchaseId: src.purchaseId,
       createdBy,
       createdType,
       status: "active",
       delete: 0,
     });
 
-    if (pType === "credit") {
-      await updateAccountBalance(src.supplierId, total, "DR", companyId);
-    }
-
-    if (pType === "cash") {
-      const { voucherNo } = await generateVoucherNo({
-        companyId,
-        financialYearId: fy.financialYearId,
-        tableName: "payment",
-        idColumn: "paymentId",
-        fixedPrefix: "CR",
-        extraWhere: { voucherType: "CASH RECEIPT" },
-      });
-      await saveModel("payment", {
-        companyId,
-        financialYearId: fy.financialYearId,
-        voucherType: "CASH RECEIPT",
-        paymentCollectedByModules: "DNC",
-        voucherNo,
-        date: dnDate,
-        selfAccountId: refundAccountId,
-        selfDrOrCr: "DR", // cash came in
-        accountId: src.supplierId,
-        accountDrOrCr: "CR",
-        amount: total,
-        narration,
-        paymentMode: "CASH",
-        createdBy,
-        createdType,
-        status: "active",
-        delete: 0,
-      });
-      await updateAccountBalance(refundAccountId, total, "DR", companyId);
-    }
-
-    if (pType === "bank") {
-      const { voucherNo } = await generateVoucherNo({
-        companyId,
-        financialYearId: fy.financialYearId,
-        tableName: "payment",
-        idColumn: "paymentId",
-        fixedPrefix: "BR",
-        extraWhere: { voucherType: "BANK RECEIPT" },
-      });
-      await saveModel("payment", {
-        companyId,
-        financialYearId: fy.financialYearId,
-        voucherType: "BANK RECEIPT",
-        paymentCollectedByModules: "DNB",
-        voucherNo,
-        date: dnDate,
-        selfAccountId: refundAccountId,
-        selfDrOrCr: "DR", // money came in
-        accountId: src.supplierId,
-        accountDrOrCr: "CR",
-        amount: total,
-        narration,
-        paymentMode: "BANK",
-        createdBy,
-        createdType,
-        status: "active",
-        delete: 0,
-      });
-      await updateAccountBalance(refundAccountId, total, "DR", companyId);
-    }
+    await updateAccountBalance(src.supplierId, total, "DR", companyId);
 
     return successResponse(
       res,

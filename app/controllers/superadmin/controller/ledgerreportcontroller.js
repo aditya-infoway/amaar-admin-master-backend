@@ -15,7 +15,8 @@ const CASH_BANK_GROUP_IDS = [1, 4];
 const getLedgerReportList = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { type = "ledger", search = "" } = req.query;
 
@@ -52,7 +53,7 @@ const getLedgerReportList = async (req, res) => {
       ],
       [["account.id", "DESC"]],
       0,
-      0
+      0,
     );
 
     const q = String(search).trim().toLowerCase();
@@ -60,7 +61,7 @@ const getLedgerReportList = async (req, res) => {
       ? list.filter((row) =>
           [row.accountName, row.cityName, row.stateName]
             .filter(Boolean)
-            .some((v) => String(v).toLowerCase().includes(q))
+            .some((v) => String(v).toLowerCase().includes(q)),
         )
       : list;
 
@@ -92,10 +93,11 @@ const PARTICULARS_LABELS = {
   OB: "Opening Balance",
   SALE: "Sale",
   FIN: "Finance",
-    CTD: "Contra Deposit",
+  CTD: "Contra Deposit",
   CTW: "Contra Withdrawal",
   CTT: "Contra Transfer",
   CTR: "Contra",
+  DN: "Debit Note",
 };
 
 const getParticularsLabel = (moduleCode, oppName) => {
@@ -309,7 +311,8 @@ const getParticularsLabel = (moduleCode, oppName) => {
 const getLedgerDetails = async (req, res) => {
   try {
     const companyId = req.companyId;
-    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
     const { accountId, fromDate, toDate, financialYearId } = req.query;
     if (!accountId) return errorResponse(res, "Account id is required.");
@@ -339,7 +342,7 @@ const getLedgerDetails = async (req, res) => {
       ],
       [],
       0,
-      0
+      0,
     );
 
     if (!accRows.length) return requiredmessage(res, "Account not found.");
@@ -348,8 +351,11 @@ const getLedgerDetails = async (req, res) => {
     const isCashBank = CASH_BANK_GROUP_IDS.includes(groupId);
 
     // ---- Financial Year ----
-    const fy = financialYearId ? await getFinancialYearById(financialYearId, companyId) : null;
-    const fyStartDate = fy?.startDate || fromDate || new Date().toISOString().slice(0, 10);
+    const fy = financialYearId
+      ? await getFinancialYearById(financialYearId, companyId)
+      : null;
+    const fyStartDate =
+      fy?.startDate || fromDate || new Date().toISOString().slice(0, 10);
     const effectiveFromDate = fromDate || fyStartDate;
     const effectiveToDate = toDate || new Date().toISOString().slice(0, 10);
 
@@ -361,8 +367,13 @@ const getLedgerDetails = async (req, res) => {
       const obRows = await selectWithJoins(
         "accountopeningbalance",
         [],
-        { companyId, financialYearId: fy.financialYearId, accountId: Number(accountId), delete: 0 },
-        ["openingBalance", "drOrCr"]
+        {
+          companyId,
+          financialYearId: fy.financialYearId,
+          accountId: Number(accountId),
+          delete: 0,
+        },
+        ["openingBalance", "drOrCr"],
       );
       if (obRows.length) {
         openingBalance = Number(obRows[0].openingBalance);
@@ -370,27 +381,39 @@ const getLedgerDetails = async (req, res) => {
       }
     }
 
-    const fyOpeningSigned = openingDrOrCr === "CR" ? -openingBalance : openingBalance;
+    const fyOpeningSigned =
+      openingDrOrCr === "CR" ? -openingBalance : openingBalance;
 
     // ---- Payment rows jisme ye account involve ho ----
     // ✅ CHANGED — Cash/Bank account Contra ki wajah se selfAccountId YA accountId, dono side aa sakta hai
     const paymentFields = [
-      "paymentId", "date", "voucherNo", "voucherType", "paymentCollectedByModules",
-      "selfAccountId", "selfDrOrCr", "accountId", "accountDrOrCr", "amount", "narration",
+      "paymentId",
+      "date",
+      "voucherNo",
+      "voucherType",
+      "paymentCollectedByModules",
+      "selfAccountId",
+      "selfDrOrCr",
+      "accountId",
+      "accountDrOrCr",
+      "amount",
+      "narration",
       "purchaseId",
     ];
 
     let rows;
     if (isCashBank) {
       const selfRows = await selectWithJoins(
-        "payment", [],
+        "payment",
+        [],
         { companyId, delete: 0, selfAccountId: Number(accountId) },
-        paymentFields
+        paymentFields,
       );
       const oppRows = await selectWithJoins(
-        "payment", [],
+        "payment",
+        [],
         { companyId, delete: 0, accountId: Number(accountId) },
-        paymentFields
+        paymentFields,
       );
       const seen = new Set();
       rows = [...selfRows, ...oppRows].filter((r) => {
@@ -400,47 +423,68 @@ const getLedgerDetails = async (req, res) => {
       });
     } else {
       rows = await selectWithJoins(
-        "payment", [],
+        "payment",
+        [],
         { companyId, delete: 0, accountId: Number(accountId) },
-        paymentFields
+        paymentFields,
       );
     }
 
     rows = rows.sort(
-      (a, b) => (new Date(a.date) - new Date(b.date)) || (a.paymentId - b.paymentId)
+      (a, b) =>
+        new Date(a.date) - new Date(b.date) || a.paymentId - b.paymentId,
     );
 
     // ✅ CHANGED — row-wise decide karo ki current account self hai ya opp
     const getOppIdForRow = (r) =>
-      Number(r.selfAccountId) === Number(accountId) ? r.accountId : r.selfAccountId;
+      Number(r.selfAccountId) === Number(accountId)
+        ? r.accountId
+        : r.selfAccountId;
 
     // ---- Opp account names (batch fetch) ----
-    const oppIds = [...new Set(rows.map((r) => getOppIdForRow(r)).filter(Boolean))];
+    const oppIds = [
+      ...new Set(rows.map((r) => getOppIdForRow(r)).filter(Boolean)),
+    ];
     let oppMap = {};
     if (oppIds.length) {
       const oppAccounts = await selectWithJoins(
-        "account", [], { id: oppIds, companyId, delete: 0 }, ["id", "accountName"]
+        "account",
+        [],
+        { id: oppIds, companyId, delete: 0 },
+        ["id", "accountName"],
       );
-      oppAccounts.forEach((a) => { oppMap[a.id] = a.accountName; });
+      oppAccounts.forEach((a) => {
+        oppMap[a.id] = a.accountName;
+      });
     }
 
     // ---- Purchase Bill No (batch fetch, jin rows me purchaseId set hai) ----
-    const purchaseIds = [...new Set(rows.map((r) => r.purchaseId).filter(Boolean))];
+    const purchaseIds = [
+      ...new Set(rows.map((r) => r.purchaseId).filter(Boolean)),
+    ];
     let purchaseBillMap = {};
     if (purchaseIds.length) {
       const purchases = await selectWithJoins(
-        "purchase", [], { purchaseId: purchaseIds, companyId, delete: 0 },
-        ["purchaseId", "billNo"]
+        "purchase",
+        [],
+        { purchaseId: purchaseIds, companyId, delete: 0 },
+        ["purchaseId", "billNo"],
       );
-      purchases.forEach((p) => { purchaseBillMap[p.purchaseId] = p.billNo; });
+      purchases.forEach((p) => {
+        purchaseBillMap[p.purchaseId] = p.billNo;
+      });
     }
 
     // ---- Split: FY start → fromDate (opening calc) vs fromDate → toDate (display) ----
     const beforeRows = rows.filter(
-      (r) => String(r.date) >= String(fyStartDate) && String(r.date) < String(effectiveFromDate)
+      (r) =>
+        String(r.date) >= String(fyStartDate) &&
+        String(r.date) < String(effectiveFromDate),
     );
     const inRangeRows = rows.filter(
-      (r) => String(r.date) >= String(effectiveFromDate) && String(r.date) <= String(effectiveToDate)
+      (r) =>
+        String(r.date) >= String(effectiveFromDate) &&
+        String(r.date) <= String(effectiveToDate),
     );
 
     // ✅ CHANGED — group se nahi, row-wise self/opp check karo
@@ -468,8 +512,12 @@ const getLedgerDetails = async (req, res) => {
         billNo: "-",
         type: "OB",
         particulars: "Opening Balance",
-        debit: openingBalanceForRange >= 0 ? openingBalanceForRange.toFixed(2) : "",
-        credit: openingBalanceForRange < 0 ? Math.abs(openingBalanceForRange).toFixed(2) : "",
+        debit:
+          openingBalanceForRange >= 0 ? openingBalanceForRange.toFixed(2) : "",
+        credit:
+          openingBalanceForRange < 0
+            ? Math.abs(openingBalanceForRange).toFixed(2)
+            : "",
         balance: `${Math.abs(openingBalanceForRange).toFixed(2)} ${openingBalanceForRange >= 0 ? "DR" : "CR"}`,
       },
     ];
@@ -491,7 +539,7 @@ const getLedgerDetails = async (req, res) => {
         sr: list.length + 1,
         date: r.date,
         voucherNo: r.voucherNo || "-",
-        billNo: r.purchaseId ? (purchaseBillMap[r.purchaseId] || "-") : "-",
+        billNo: r.purchaseId ? purchaseBillMap[r.purchaseId] || "-" : "-",
         type: moduleCode,
         particulars: getParticularsLabel(moduleCode, oppName),
         debit: debit ? debit.toFixed(2) : "",
@@ -518,7 +566,7 @@ const getLedgerDetails = async (req, res) => {
         closingBalanceLabel: `${Math.abs(runningBalance).toFixed(2)} ${runningBalance >= 0 ? "DR" : "CR"}`,
         list,
       },
-      "Ledger details fetched successfully"
+      "Ledger details fetched successfully",
     );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
