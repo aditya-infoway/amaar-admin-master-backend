@@ -82,10 +82,12 @@ const updateCreateMaster = Joi.object().keys({
           "string.empty": "Actual item id is required",
           "any.required": "Actual item id is required",
         }),
-
         name: Joi.string().trim().required().messages({
           "string.empty": "Actual item name is required",
           "any.required": "Actual item name is required",
+        }),
+        weight: Joi.number().allow(null, "").min(0).messages({
+          "number.base": "Actual item weight must be a number",
         }),
       }),
     )
@@ -97,20 +99,17 @@ const updateCreateMaster = Joi.object().keys({
       "any.required": "Actual item is required",
     }),
 
-  exShowroom: Joi.number().required().messages({
-    "number.base": "Ex-Showroom must be a valid number",
-    "any.required": "Ex-Showroom is required",
+  code: Joi.string().trim().required().messages({
+    "string.empty": "Code is required",
+    "any.required": "Code is required",
   }),
 
-  effectiveDate: Joi.string()
-    .trim()
-
-    .required()
-    .messages({
-      "string.empty": "Effective date is required",
-
-      "any.required": "Effective date is required",
-    }),
+  // 0 is allowed
+  totalWeight: Joi.number().min(0).required().messages({
+    "number.base": "Total weight must be a valid number",
+    "number.min": "Total weight cannot be negative",
+    "any.required": "Total weight is required",
+  }),
 
   status: Joi.string().valid("active", "inactive").required().messages({
     "any.only": "Status must be either active or inactive",
