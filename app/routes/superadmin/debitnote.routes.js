@@ -18,6 +18,7 @@ module.exports = (app) => {
   routes.get("/vendor/:vendorId/:type", debitNote.getVendorDocs); // page 2
   routes.get("/next-debit-note-no", debitNote.getNextDebitNoteNo); // page 3
   routes.get("/source/:type/:id", debitNote.getDebitNoteSource); // page 3 auto-fill
+  routes.get("/register", debitNote.getDebitNoteRegister);
 
   routes.post("/create", debitNote.createDebitNote);
   // routes.post("/create", validate(debitNoteValidation.createDebitNote), debitNote.createDebitNote);
