@@ -238,19 +238,19 @@ const getVendorDocs = async (req, res) => {
       const qc = qcByGrr[g.grrId];
       return type === "grr"
         ? {
-            id: String(g.grrId),
-            docNo: g.grrNo,
-            docDate: g.grrDate,
-            poNo: poMap[g.purchaseOrderId] || "",
-            billNo: billByPo[g.purchaseOrderId] || "",
-          }
+          id: String(g.grrId),
+          docNo: g.grrNo,
+          docDate: g.grrDate,
+          poNo: poMap[g.purchaseOrderId] || "",
+          billNo: billByPo[g.purchaseOrderId] || "",
+        }
         : {
-            id: String(qc.qcId),
-            docNo: qc.qcNo,
-            docDate: qc.qcDate,
-            poNo: poMap[g.purchaseOrderId] || "",
-            billNo: billByPo[g.purchaseOrderId] || "",
-          };
+          id: String(qc.qcId),
+          docNo: qc.qcNo,
+          docDate: qc.qcDate,
+          poNo: poMap[g.purchaseOrderId] || "",
+          billNo: billByPo[g.purchaseOrderId] || "",
+        };
     });
 
     return successResponse(
@@ -326,7 +326,7 @@ const loadSource = async (companyId, type, id) => {
     "purchase",
     [],
     { purchaseOrderId, companyId, delete: 0 },
-    ["purchaseId", "billNo", "purchaseBillNo"],
+    ["purchaseId", "billNo", "purchaseBillNo", "igstAmount"],
   );
   const rateMap = {};
   if (bills.length) {
@@ -385,6 +385,13 @@ const loadSource = async (companyId, type, id) => {
       };
     });
 
+
+  const gstTotal = round2(items.reduce((s, i) => s + i.gstAmount, 0));
+  const isInterState = Number(bills[0]?.igstAmount) > 0;
+  const cgstAmount = isInterState ? 0 : round2(gstTotal / 2);
+  const sgstAmount = isInterState ? 0 : round2(gstTotal - cgstAmount);
+  const igstAmount = isInterState ? gstTotal : 0;
+
   return {
     type,
     sourceId: String(type === "grr" ? grr.grrId : qc.qcId),
@@ -401,7 +408,11 @@ const loadSource = async (companyId, type, id) => {
     vendorName: accounts[0]?.accountName || "",
     items,
     taxableValue: round2(items.reduce((s, i) => s + i.taxable, 0)),
-    gstAmount: round2(items.reduce((s, i) => s + i.gstAmount, 0)),
+    gstAmount: gstTotal,
+    isInterState,
+    cgstAmount,
+    sgstAmount,
+    igstAmount,
     total: round2(items.reduce((s, i) => s + i.net, 0)),
   };
 };
@@ -602,10 +613,131 @@ const createDebitNote = async (req, res) => {
   }
 };
 
+
+
+// ---------------- DEBIT NOTE REGISTER ----------------
+// GET /debit-note/register?financialYearId=&fromDate=&toDate=
+const getDebitNoteRegister = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { financialYearId, fromDate, toDate } = req.query;
+
+    const where = { companyId, delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    let notes = await selectWithJoins("debitnote", [], where, [
+      "debitNoteId",
+      "debitNoteNo",
+      "debitNoteDate",
+      "supplierId",
+      "purchaseOrderId",
+      "taxableValue",
+      "gstAmount",
+      "grandTotal",
+      "remarks",
+      "createdBy",
+      "created",
+    ]);
+
+    // optional date filter (YYYY-MM-DD strings compare correctly)
+    if (fromDate) notes = notes.filter((n) => n.debitNoteDate >= fromDate);
+    if (toDate) notes = notes.filter((n) => n.debitNoteDate <= toDate);
+
+    if (!notes.length)
+      return successResponse(res, [], "Debit note register fetched successfully");
+
+    // ---- vendor names ----
+    const supplierIds = [...new Set(notes.map((n) => n.supplierId))];
+    const accounts = await selectWithJoins(
+      "account",
+      [],
+      { id: supplierIds, companyId, delete: 0 },
+      ["id", "accountName"],
+    );
+    const accountMap = {};
+    accounts.forEach((a) => (accountMap[a.id] = a.accountName));
+
+    // ---- purchase bill no (via PO) ----
+    const poIds = [
+      ...new Set(notes.map((n) => n.purchaseOrderId).filter(Boolean)),
+    ];
+    const billMap = {};
+    if (poIds.length) {
+      const bills = await selectWithJoins(
+        "purchase",
+        [],
+        { purchaseOrderId: poIds, companyId, delete: 0 },
+        ["purchaseOrderId", "purchaseBillNo", "purchaseDate"],
+      );
+      bills.forEach((b) => {
+        if (!billMap[b.purchaseOrderId])
+          billMap[b.purchaseOrderId] = {
+            billNo: b.purchaseBillNo,
+            billDate: b.purchaseDate,
+          };
+      });
+    }
+
+    // ---- created by (company or employee) ----
+    const createdByIds = [
+      ...new Set(notes.map((n) => n.createdBy).filter(Boolean)),
+    ];
+    const companyMap = {};
+    const employeeMap = {};
+    if (createdByIds.length) {
+      const companies = await selectWithJoins(
+        "company",
+        [],
+        { companyId: createdByIds, delete: 0 },
+        ["companyId", "companyName"],
+      );
+      companies.forEach((c) => (companyMap[String(c.companyId)] = c.companyName));
+
+      const employees = await selectWithJoins(
+        "employee",
+        [],
+        { employeeId: createdByIds, delete: 0 },
+        ["employeeId", "employeeName"],
+      );
+      employees.forEach(
+        (e) => (employeeMap[String(e.employeeId)] = e.employeeName),
+      );
+    }
+
+    const data = notes
+      .map((n) => ({
+        id: String(n.debitNoteId),
+        debitNoteNo: n.debitNoteNo,
+        debitNoteDate: n.debitNoteDate,
+        supplierName: accountMap[n.supplierId] || "",
+        supplierInvoiceNo: billMap[n.purchaseOrderId]?.billNo || "",
+        invoiceDate: billMap[n.purchaseOrderId]?.billDate || "",
+        reason: n.remarks || "",
+        taxableAmount: Number(n.taxableValue) || 0,
+        gstAmount: Number(n.gstAmount) || 0,
+        totalAmount: Number(n.grandTotal) || 0,
+        createdBy:
+          companyMap[String(n.createdBy)] ||
+          employeeMap[String(n.createdBy)] ||
+          "",
+        created: n.created,
+      }))
+      .sort((a, b) => Number(b.id) - Number(a.id)); // newest first
+
+    return successResponse(res, data, "Debit note register fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getVendorSummary,
   getVendorDocs,
   getNextDebitNoteNo,
   getDebitNoteSource,
   createDebitNote,
+  getDebitNoteRegister,
 };
