@@ -733,6 +733,117 @@ const getDebitNoteRegister = async (req, res) => {
   }
 };
 
+
+
+// ---------------- COMPLETE LIST: DEBIT NOTES OF ONE VENDOR ----------------
+// GET /debit-note/vendor-complete/:vendorId/:type
+const getVendorCompleted = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { vendorId, type } = req.params;
+    if (!["grr", "qc"].includes(type))
+      return errorResponse(res, "Type must be grr or qc.");
+
+    const where = {
+      companyId,
+      delete: 0,
+      supplierId: vendorId,
+      sourceType: type.toUpperCase(),
+    };
+    if (req.query.financialYearId)
+      where.financialYearId = req.query.financialYearId;
+
+    const notes = await selectWithJoins("debitnote", [], where, [
+      "debitNoteId",
+      "debitNoteNo",
+      "debitNoteDate",
+      "grrId",
+      "qcId",
+      "purchaseOrderId",
+      "taxableValue",
+      "gstAmount",
+      "grandTotal",
+      "remarks",
+    ]);
+
+    // vendor
+    const accRows = await selectWithJoins(
+      "account",
+      [],
+      { id: vendorId, companyId, delete: 0 },
+      ["id", "accountName", "mobileNo"],
+    );
+    const vendor = accRows[0] || {};
+
+    // GRR / QC numbers
+    const docNoMap = {};
+    if (notes.length) {
+      if (type === "grr") {
+        const grrs = await selectWithJoins(
+          "grr",
+          [],
+          { grrId: notes.map((n) => n.grrId), companyId },
+          ["grrId", "grrNo"],
+        );
+        grrs.forEach((g) => (docNoMap[g.grrId] = g.grrNo));
+      } else {
+        const qcs = await selectWithJoins(
+          "qc",
+          [],
+          { qcId: notes.map((n) => n.qcId), companyId },
+          ["qcId", "qcNo"],
+        );
+        qcs.forEach((q) => (docNoMap[q.qcId] = q.qcNo));
+      }
+    }
+
+    // purchase bill (via PO)
+    const billMap = {};
+    const poIds = [
+      ...new Set(notes.map((n) => n.purchaseOrderId).filter(Boolean)),
+    ];
+    if (poIds.length) {
+      const bills = await selectWithJoins(
+        "purchase",
+        [],
+        { purchaseOrderId: poIds, companyId, delete: 0 },
+        ["purchaseOrderId", "billNo", "purchaseDate"],
+      );
+      bills.forEach((b) => {
+        if (!billMap[b.purchaseOrderId])
+          billMap[b.purchaseOrderId] = {
+            billNo: b.billNo,
+            purchaseDate: b.purchaseDate,
+          };
+      });
+    }
+
+    const rows = notes
+      .map((n) => ({
+        id: String(n.debitNoteId),
+        debitNoteNo: n.debitNoteNo,
+        debitNoteDate: n.debitNoteDate,
+        docNo: docNoMap[type === "grr" ? n.grrId : n.qcId] || "",
+        supplierName: vendor.accountName || "",
+        number: vendor.mobileNo || "",
+        purchaseDate: billMap[n.purchaseOrderId]?.purchaseDate || "",
+        purNo: billMap[n.purchaseOrderId]?.billNo || "",
+        taxableAmount: Number(n.taxableValue) || 0,
+        gstAmount: Number(n.gstAmount) || 0,
+        totalAmount: Number(n.grandTotal) || 0,
+        narration: n.remarks || "",
+      }))
+      .sort((a, b) => Number(b.id) - Number(a.id));
+
+    return successResponse(res, rows, "Completed list fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getVendorSummary,
   getVendorDocs,
@@ -740,4 +851,5 @@ module.exports = {
   getDebitNoteSource,
   createDebitNote,
   getDebitNoteRegister,
+  getVendorCompleted,
 };
