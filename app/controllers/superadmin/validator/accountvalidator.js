@@ -47,6 +47,7 @@ const baseSchema = {
     "any.required": "Group is required",
     "number.base": "Group is required",
   }),
+  subGroupId: Joi.number().allow("", null),
   drOrCr: Joi.string().valid("DR", "CR").required().messages({
     "any.only": "Dr./Cr. must be either DR or CR",
     "string.empty": "Dr./Cr. is required",

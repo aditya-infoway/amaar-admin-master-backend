@@ -8,6 +8,7 @@ const {
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const { updateAccountBalance } = require("../../../helper/accountBalance.js");
+const { postDebitNoteGst } = require("../../../helper/gstLedger.js");
 
 // ---------------- SHARED: build the valid chains ----------------
 // Chain = Purchase Order -> GRR (Completed) -> QC (Completed) -> Purchase Register bill
@@ -602,6 +603,18 @@ const createDebitNote = async (req, res) => {
     });
 
     await updateAccountBalance(src.supplierId, total, "DR", companyId);
+
+
+    await postDebitNoteGst({
+      companyId,
+      financialYearId: fy.financialYearId,
+      date: dnDate,
+      cgst: src.cgstAmount, sgst: src.sgstAmount, igst: src.igstAmount,
+      debitNoteNo: billNo,
+      supplierName: src.vendorName,
+      purchaseId: src.purchaseId,
+      createdBy, createdType,
+    });
 
     return successResponse(
       res,

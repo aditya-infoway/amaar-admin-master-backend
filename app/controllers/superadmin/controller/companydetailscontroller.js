@@ -202,6 +202,7 @@ const createCompanyDetails = async (req, res) => {
     }
 
     await syncDefaultItemCategories(companyId);
+    await syncDefaultGstAccounts(companyId);
 
     return successResponse(
       res,
