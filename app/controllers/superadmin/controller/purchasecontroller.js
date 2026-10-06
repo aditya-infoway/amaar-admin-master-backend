@@ -9,6 +9,7 @@ const {
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const { updateAccountBalance } = require("../../../helper/accountBalance.js");
+const { postPurchaseGst } = require("../../../helper/gstLedger.js");
 
 // ---------------- Normalize state string for comparison ----------------
 const normalizeState = (s) =>
@@ -53,7 +54,7 @@ const createPurchase = async (req, res) => {
       cashAccountId, bankAccountId, paymentMode, chequeNo, chequeDate, chequeClearDate, bankNarration,
       items,
       createdBy, createdType,
-        purchaseOrderId,
+      purchaseOrderId,
     } = req.body;
 
     if (!accountId) return errorResponse(res, "Party is required.");
@@ -62,7 +63,7 @@ const createPurchase = async (req, res) => {
       return errorResponse(res, "Please add at least one item.");
     }
 
-   
+
 
     // ---- Financial Year validate ----
     const fy = await getFinancialYearById(financialYearId, companyId);
@@ -188,7 +189,7 @@ const createPurchase = async (req, res) => {
     const purchase = await saveModel("purchase", {
       companyId,
       financialYearId: fy.financialYearId,
-       purchaseOrderId: purchaseOrderId || null,
+      purchaseOrderId: purchaseOrderId || null,
       date: new Date(),
       terms,
       accountId,
@@ -214,7 +215,7 @@ const createPurchase = async (req, res) => {
       grandTotal: Number(grandTotal.toFixed(2)),
 
       billStatus: "pending",
-        createdBy,
+      createdBy,
       createdType,
       delete: 0,
     });
@@ -240,13 +241,13 @@ const createPurchase = async (req, res) => {
         delete: 0,
       });
     }
-if (purchaseOrderId) {
-  await updateModelHelper(
-    "purchaseorder",
-    { status: "Billed", updated: new Date() },
-    { purchaseOrderId, companyId },
-  );
-}
+    if (purchaseOrderId) {
+      await updateModelHelper(
+        "purchaseorder",
+        { status: "Billed", updated: new Date() },
+        { purchaseOrderId, companyId },
+      );
+    }
     // =========================================================
     // Payment entry + balance update (terms wise)
     // =========================================================
@@ -268,7 +269,7 @@ if (purchaseOrderId) {
       narration: narration || "",
       paymentMode: "CREDIT",
       purchaseId: purchase.purchaseId,   // ledger report join ke liye
-          createdBy,
+      createdBy,
       createdType,
       status: "active",
       delete: 0,
@@ -305,8 +306,8 @@ if (purchaseOrderId) {
         narration: narration || "",
         paymentMode: "CASH",
         purchaseId: purchase.purchaseId,   // ledger report join ke liye
-          createdBy,
-      createdType,
+        createdBy,
+        createdType,
         status: "active",
         delete: 0,
       });
@@ -345,8 +346,8 @@ if (purchaseOrderId) {
         chequeDate: modeUpper === "CHEQUE" ? chequeDate : null,
         chequeClearDate: modeUpper === "CHEQUE" ? (chequeClearDate || null) : null,
         purchaseId: purchase.purchaseId,   // ledger report join ke liye
-           createdBy,
-      createdType,
+        createdBy,
+        createdType,
         status: "active",
         delete: 0,
       });
@@ -354,6 +355,21 @@ if (purchaseOrderId) {
       // Sirf bank account credited hoga (paisa bahar gaya)
       await updateAccountBalance(bankAccountId, roundedGrandTotal, "CR", companyId);
     }
+
+
+
+    await postPurchaseGst({
+      companyId,
+      financialYearId: fy.financialYearId,
+      purchaseId: purchase.purchaseId,
+      date: purchaseDate,
+      cgst: finalCgst, sgst: finalSgst, igst: finalIgst,
+      supplierName: party.accountName,
+      purchaseBillNo,
+      createdBy, createdType,
+    });
+
+
 
     return successResponse(
       res,
@@ -379,12 +395,12 @@ const getPurchaseList = async (req, res) => {
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
- 
+
     const { financialYearId } = req.query;
- 
+
     const purchaseWhere = { companyId, delete: 0 };
     if (financialYearId) purchaseWhere.financialYearId = financialYearId;
- 
+
     const purchases = await selectWithJoins(
       "purchase",
       [],
@@ -397,11 +413,11 @@ const getPurchaseList = async (req, res) => {
         "createdBy", "createdType",
       ]
     );
- 
+
     if (!purchases.length) {
       return successResponse(res, [], "Purchase list fetched successfully");
     }
- 
+
     // ---- Related suppliers (account) ----
     const accountIds = [...new Set(purchases.map((p) => p.accountId).filter(Boolean))];
     let accountMap = {};
@@ -411,7 +427,7 @@ const getPurchaseList = async (req, res) => {
       );
       accounts.forEach((a) => { accountMap[a.id] = a; });
     }
- 
+
     // ---- Related branch / location ----
     const branchIds = [...new Set(purchases.map((p) => p.branchId).filter(Boolean))];
     let branchMap = {};
@@ -425,7 +441,7 @@ const getPurchaseList = async (req, res) => {
         branchMap = {};
       }
     }
- 
+
     // ---- Total qty per purchase (from purchasedetails) ----
     const purchaseIds = purchases.map((p) => p.purchaseId);
     const details = await selectWithJoins(
@@ -466,7 +482,7 @@ const getPurchaseList = async (req, res) => {
         return acc;
       }, {});
     }
- 
+
     const data = purchases.map((p) => {
       const account = accountMap[p.accountId] || {};
       const branch = branchMap[p.branchId] || {};
@@ -495,7 +511,7 @@ const getPurchaseList = async (req, res) => {
         createdType: p.createdType || "",
       };
     });
- 
+
     return successResponse(res, data, "Purchase list fetched successfully");
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);

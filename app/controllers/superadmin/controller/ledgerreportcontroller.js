@@ -6,9 +6,10 @@ const {
   selectWithJoinsV2,
 } = require("../../../helper/index.js");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
+const { ALL_GST_CODES } = require("../../../helper/gstLedger.js");
 
 // ---------------- LEDGER REPORT LIST (existing) ----------------
-const LEDGER_GROUP_IDS = [1, 4, 30, 31, 34, 35, 36];
+const LEDGER_GROUP_IDS = [1, 4, 8, 30, 31, 34, 35, 36];
 const DEFAULT_GROUP_IDS = [8, 24, 27, 38, 39];
 const CASH_BANK_GROUP_IDS = [1, 4];
 
@@ -59,10 +60,10 @@ const getLedgerReportList = async (req, res) => {
     const q = String(search).trim().toLowerCase();
     const filtered = q
       ? list.filter((row) =>
-          [row.accountName, row.cityName, row.stateName]
-            .filter(Boolean)
-            .some((v) => String(v).toLowerCase().includes(q)),
-        )
+        [row.accountName, row.cityName, row.stateName]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(q)),
+      )
       : list;
 
     return successResponse(res, filtered, "Ledger report fetched successfully");
@@ -98,6 +99,8 @@ const PARTICULARS_LABELS = {
   CTT: "Contra Transfer",
   CTR: "Contra",
   DN: "Debit Note",
+  PCGST: "Purchase CGST", PSGST: "Purchase SGST", PIGST: "Purchase IGST",
+  DCGST: "Debit Note CGST", DSGST: "Debit Note SGST", DIGST: "Debit Note IGST",
 };
 
 const getParticularsLabel = (moduleCode, oppName) => {
@@ -532,7 +535,9 @@ const getLedgerDetails = async (req, res) => {
       runningBalance += debit - credit;
 
       const oppId = getOppIdForRow(r);
-      const oppName = oppMap[oppId] || "";
+      const oppName = ALL_GST_CODES.includes(r.paymentCollectedByModules)
+        ? (r.narration || "")              // "bill / DN no — supplier"
+        : (oppMap[oppId] || "");
       const moduleCode = r.paymentCollectedByModules || r.voucherType || "";
 
       list.push({

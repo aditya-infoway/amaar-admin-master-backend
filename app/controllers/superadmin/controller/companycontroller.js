@@ -11,6 +11,8 @@ const {
 const { Op } = require("sequelize");
 const db = require("../../../modelses/index.js"); // adjust path if needed
 const { todayIST } = require("../../../helper/checkCompanyToken.js");
+const { syncDefaultGstAccounts } = require("../../../helper/gstLedger.js");
+
 
 // ---- Login ----
 const companyLogin = async (req, res) => {
@@ -85,6 +87,15 @@ const companyLogin = async (req, res) => {
       });
       token = fresh.token;
     }
+
+
+    try {
+      await syncDefaultGstAccounts(company.companyId);
+    } catch (e) {
+      console.log("GST account sync failed:", e.message); // never block login
+    }
+
+
     const responseData = {
       companyId: company.companyId,
       companyName: company.companyName,
