@@ -28,6 +28,11 @@ module.exports = sequelize => {
       allowNull: false,
       field: "groupId"
     },
+    subGroupId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "subGroupId"
+    },
     openingBalance: {
       type: DataTypes.DECIMAL(15, 2),
       allowNull: false,

@@ -9,6 +9,7 @@ const {
 } = require("../../../helper/index.js");
 
 const { accountopeningbalance: AccountOpeningBalance } = require("../../../modelses");
+const { isProtectedGstAccount } = require("../../../helper/gstLedger.js");
 
 // ---------------- Date helpers ----------------
 // Sequelize's DATEONLY type casts the value with moment.js before binding it to the
@@ -22,6 +23,8 @@ const normalizeDateOnly = (value) => {
   const trimmed = value.trim();
   return DATE_ONLY_REGEX.test(trimmed) ? trimmed : null;
 };
+
+
 
 // ---------------- CREATE ----------------
 const createAccount = async (req, res) => {
@@ -38,6 +41,7 @@ const createAccount = async (req, res) => {
       bankAccountNo, bankName, ifscCode, branchName,
       gstNo, panCard, aadharCardNo, status, financialYearId,
     } = req.body;
+
 
     // mobile number companyId ke andar unique - ek hi baar allow
     const mobileExists = await selectWithJoins(
@@ -131,6 +135,7 @@ const getAccountList = async (req, res) => {
       [
         "account.id",
         'account."accountName"',
+        'account."groupId"',
         'account."printName"',
         'g."groupName" AS "groupName"',
         'account."drOrCr"',
@@ -151,7 +156,11 @@ const getAccountList = async (req, res) => {
       0
     );
 
-    return successResponse(res, list, "Account list fetched successfully");
+    const data = list.map((r) => {
+      const isDefault = isProtectedGstAccount(r);
+      return { ...r, mobileNo: isDefault ? "-" : r.mobileNo, isDefault };
+    });
+    return successResponse(res, data, "Account list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -174,7 +183,9 @@ const getAccountById = async (req, res) => {
 
     if (rows.length === 0) return requiredmessage(res, "Account not found");
 
-    return successResponse(res, rows[0], "Account fetched successfully");
+    const acc = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+    const isDefault = isProtectedGstAccount(acc);
+    return successResponse(res, { ...acc, mobileNo: isDefault ? "-" : acc.mobileNo, isDefault }, "Account fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
@@ -192,22 +203,32 @@ const updateAccount = async (req, res) => {
       "account",
       [],
       { id: accountId, companyId, delete: 0 },
-      ["id", "openingBalance", "drOrCr", "currentBalance", "currentDrOrCr"]
+      ["id", "accountName", "groupId", "openingBalance", "drOrCr", "currentBalance", "currentDrOrCr"]
     );
 
     if (existing.length === 0) return requiredmessage(res, "Account not found");
 
-    const mobileExists = await selectWithJoins(
-      "account",
-      [],
-      { mobileNo: mobileNo.trim(), companyId, delete: 0 },
-      ["id"]
-    );
-    const mobileTakenByOther = mobileExists.some(
-      (row) => String(row.id) !== String(accountId)
-    );
-    if (mobileTakenByOther) {
-      return errorResponse(res, "This mobile number is already registered for another account.");
+    // default GST accounts: address/email etc. editable, but name, group and mobile are fixed
+    const isDefaultAcc = isProtectedGstAccount(existing[0]);
+    if (isDefaultAcc) {
+      delete rest.accountName;
+      delete rest.groupId;
+      delete rest.subGroupId;
+    }
+
+    if (!isDefaultAcc) {
+      const mobileExists = await selectWithJoins(
+        "account",
+        [],
+        { mobileNo: mobileNo.trim(), companyId, delete: 0 },
+        ["id"]
+      );
+      const mobileTakenByOther = mobileExists.some(
+        (row) => String(row.id) !== String(accountId)
+      );
+      if (mobileTakenByOther) {
+        return errorResponse(res, "This mobile number is already registered for another account.");
+      }
     }
 
     const current = existing[0];
@@ -217,9 +238,10 @@ const updateAccount = async (req, res) => {
 
     const updatePayload = {
       ...rest,
-      mobileNo: mobileNo.trim(),
       updated: new Date(),
     };
+
+    if (!isDefaultAcc) updatePayload.mobileNo = mobileNo.trim();
 
     // ---- Date fix ----
     // "" (empty string) ya kisi bhi non YYYY-MM-DD string ko null bana do, warna
@@ -288,10 +310,14 @@ const deleteAccount = async (req, res) => {
       "account",
       [],
       { id: accountId, companyId, delete: 0 },
-      ["id"]
+      ["id", "accountName", "groupId"]
     );
 
     if (existing.length === 0) return requiredmessage(res, "Account not found");
+
+    if (isProtectedGstAccount(existing[0])) {
+      return errorResponse(res, "Default GST accounts cannot be deleted.");
+    }
 
     await updateModelHelper(
       "account",
@@ -384,7 +410,7 @@ const getSupplierAccountList = async (req, res) => {
         "account.id",
         'account."accountName"',
         'account."mobileNo"',
-        'account."email"',          
+        'account."email"',
         'account."cityName"',
         'account."currentBalance"',
         'account."currentDrOrCr"',
@@ -418,7 +444,7 @@ const getCustomerAccountList = async (req, res) => {
         "account.id",
         'account."accountName"',
         'account."mobileNo"',
-        'account."email"',         
+        'account."email"',
         'account."cityName"',
         'account."currentBalance"',
         'account."currentDrOrCr"',
@@ -470,7 +496,7 @@ const getSundryCreditorAccountList = async (req, res) => {
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
- 
+
     const list = await selectWithJoinsV2(
       "account",
       [],
@@ -493,7 +519,7 @@ const getSundryCreditorAccountList = async (req, res) => {
       0,
       0
     );
- 
+
     return successResponse(res, list, "Sundry Creditor account list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);

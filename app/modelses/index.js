@@ -77,6 +77,7 @@ db.qc = require("./qc.js")(sequelize, Sequelize.DataTypes);
 db.qcitem = require("./qcitem.js")(sequelize, Sequelize.DataTypes);
 db.debitnote = require("./debitnote")(sequelize);
 db.debitnoteitem = require("./debitnoteitem.js")(sequelize);
+db.accountgroup = require("./accountgroup.js")(sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
