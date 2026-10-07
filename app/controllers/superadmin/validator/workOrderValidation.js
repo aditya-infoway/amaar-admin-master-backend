@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const { WORK_ORDER_STAGES } = require("../../../helper/workOrderStages.js");
 
 const validateWorkOrder = Joi.object().keys({
   financialYearId: Joi.number().required().messages({
@@ -56,6 +57,21 @@ const validateWorkOrder = Joi.object().keys({
     "number.min": "Grand Total cannot be negative",
     "any.required": "Grand Total is required",
   }),
+
+
+  stages: Joi.object(
+    Object.fromEntries(
+      WORK_ORDER_STAGES.map((s) => [
+        s.key,
+        Joi.number().integer().positive().required().messages({
+          "number.base": `Please select an employee for ${s.label}`,
+          "any.required": `Please select an employee for ${s.label}`,
+        }),
+      ]),
+    ),
+  )
+    .required()
+    .messages({ "any.required": "Please select employees for all stages" }),
 
   createdBy: Joi.alternatives()
     .try(Joi.number(), Joi.string())

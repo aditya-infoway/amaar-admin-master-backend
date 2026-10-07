@@ -1,5 +1,6 @@
 const Joi = require("joi");
 
+
 const departmentValues = ["sale", "production", "security", "hrms", "canteen"];
 
 const createEmployee = Joi.object().keys({
@@ -236,6 +237,36 @@ const registerEmployee = Joi.object().keys({
   }),
 });
 
+
+
+const CONTRACTOR_TYPES = [
+  "Cutting Manager",
+  "Welding Manager",
+  "Fitting Manager",
+  "Blasting Manager",
+  "Paint Manager",
+  "Washing Manager",
+  "Qc Manager"
+];
+
+const updateContractorType = Joi.object().keys({
+  employeeId: Joi.number().required().messages({
+    "number.base": "Employee id is required",
+    "any.required": "Employee id is required",
+  }),
+  contractorTypes: Joi.array()
+    .items(Joi.string().valid(...CONTRACTOR_TYPES))
+    .min(1)
+    .unique()
+    .required()
+    .messages({
+      "array.min": "Select at least one type",
+      "any.only": "Invalid contractor type",
+      "any.required": "Select at least one type",
+    }),
+});
+
+
 // ================= EXPORT =================
 
 module.exports = {
@@ -243,4 +274,5 @@ module.exports = {
   updateEmployee,
   deleteEmployee,
   registerEmployee,
+  updateContractorType,
 };
