@@ -1063,7 +1063,7 @@ const getStageEmployees = async (req, res) => {
     const employees = await selectWithJoins(
       "employee",
       [],
-        {
+      {
         companyId: req.companyId,
         roleId: WORK_ORDER_STAGES.map((s) => s.roleId),
         delete: 0,
@@ -1091,6 +1091,7 @@ const getStageEmployees = async (req, res) => {
 const getMyWorkOrderTasks = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
+    const { status } = req.query;
     if (!companyId || !employeeId) {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
@@ -1098,8 +1099,8 @@ const getMyWorkOrderTasks = async (req, res) => {
     const mine = await selectWithJoins(
       "workorderstage",
       [],
-      { companyId, employeeId, delete: 0 },
-      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status", "completedAt"],
+      { companyId, employeeId, delete: 0, ...(status ? { status } : {}) },
+      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status", "completedAt", "startTime", "endTime"],
       [["workOrderStageId", "DESC"]],
     );
     if (!mine.length) return successResponse(res, [], "No tasks assigned");
@@ -1117,7 +1118,7 @@ const getMyWorkOrderTasks = async (req, res) => {
         "workorder",
         [],
         { workOrderId: workOrderIds, companyId, delete: 0 },
-        ["workOrderId", "workOrderNo", "customerName", "model", "qty"],
+        ["workOrderId", "workOrderNo", "customerName", "model", "qty", "created"],
       ),
     ]);
 
@@ -1138,6 +1139,7 @@ const getMyWorkOrderTasks = async (req, res) => {
           workOrderStageId: m.workOrderStageId,
           workOrderId: m.workOrderId,
           workOrderNo: wo.workOrderNo,
+          workOrderDate: wo.created,
           customerName: wo.customerName,
           model: wo.model,
           qty: wo.qty,
@@ -1147,6 +1149,8 @@ const getMyWorkOrderTasks = async (req, res) => {
           status: m.status,
           isUnlocked,
           completedAt: m.completedAt,
+          startTime: m.startTime,
+          endTime: m.endTime,
         };
       });
 
@@ -1156,6 +1160,172 @@ const getMyWorkOrderTasks = async (req, res) => {
   }
 };
 
+
+
+const updateWorkOrderStages = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { id } = req.params;
+    const { stages } = req.body;
+
+    const existing = await selectWithJoins(
+      "workorder",
+      [],
+      { workOrderId: id, companyId, delete: 0 },
+      ["workOrderId"],
+    );
+    if (!existing.length) {
+      return requiredmessage(res, "Work Order not found.");
+    }
+
+    const stageCheck = await validateStageAssignments(stages, companyId);
+    if (stageCheck.error) {
+      return errorResponse(res, stageCheck.error);
+    }
+
+    const currentRows = await selectWithJoins(
+      "workorderstage",
+      [],
+      { workOrderId: id, companyId, delete: 0 },
+      ["workOrderStageId", "stage", "employeeId", "status"],
+    );
+    const currentByStage = new Map(currentRows.map((r) => [r.stage, r]));
+
+    // Only Pending stages can be reassigned
+    for (const r of stageCheck.rows) {
+      const current = currentByStage.get(r.stage);
+      if (
+        current &&
+        String(current.employeeId) !== String(r.employeeId) &&
+        current.status !== "Pending"
+      ) {
+        return errorResponse(
+          res,
+          `${r.label} is already ${String(current.status).toLowerCase()} and cannot be reassigned.`,
+        );
+      }
+    }
+
+    for (const r of stageCheck.rows) {
+      const current = currentByStage.get(r.stage);
+
+      if (!current) {
+        // work order created before stages existed
+        await db.workorderstage.create({
+          companyId,
+          workOrderId: Number(id),
+          stage: r.stage,
+          stageOrder: r.stageOrder,
+          employeeId: r.employeeId,
+          status: "Pending",
+          delete: 0,
+        });
+      } else if (String(current.employeeId) !== String(r.employeeId)) {
+        await db.workorderstage.update(
+          { employeeId: r.employeeId, updated: new Date() },
+          { where: { workOrderStageId: current.workOrderStageId } },
+        );
+      }
+    }
+
+    return successResponse(
+      res,
+      { workOrderId: Number(id) },
+      "Stage employees updated successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
+
+const startWorkOrderStage = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const workOrderStageId = normalizeId(req.body.workOrderStageId);
+    if (!workOrderStageId) {
+      return errorResponse(res, "Please select a Work Order.");
+    }
+
+    // the task must belong to this employee
+    const rows = await selectWithJoins(
+      "workorderstage",
+      [],
+      { workOrderStageId, companyId, employeeId, delete: 0 },
+      ["workOrderStageId", "workOrderId", "stageOrder", "status"],
+    );
+    if (!rows.length) {
+      return errorResponse(res, "Work order task not found.");
+    }
+    const task = rows[0];
+
+    const workOrderRows = await selectWithJoins(
+      "workorder",
+      [],
+      { workOrderId: task.workOrderId, companyId, delete: 0 },
+      ["workOrderId"],
+    );
+    if (!workOrderRows.length) {
+      return errorResponse(res, "Work Order not found.");
+    }
+
+    if (task.status !== "Pending") {
+      return errorResponse(res, "This work order has already been started.");
+    }
+
+    // stages run in order: earlier stages must be Completed
+    const siblings = await selectWithJoins(
+      "workorderstage",
+      [],
+      { workOrderId: task.workOrderId, delete: 0 },
+      ["stageOrder", "status"],
+    );
+    const blocked = siblings.some(
+      (s) => s.stageOrder < task.stageOrder && s.status !== "Completed",
+    );
+    if (blocked) {
+      return errorResponse(res, "The previous stage is not completed yet.");
+    }
+
+    const startTime = new Date();
+
+    // only one request can flip Pending -> In Progress
+    const [updated] = await db.workorderstage.update(
+      { status: "In Progress", startTime, updated: startTime },
+      {
+        where: {
+          workOrderStageId,
+          companyId,
+          employeeId,
+          status: "Pending",
+          delete: 0,
+        },
+      },
+    );
+    if (!updated) {
+      return errorResponse(res, "This work order has already been started.");
+    }
+
+    return successResponse(
+      res,
+      { workOrderStageId, startTime },
+      "Work started successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
 
 module.exports = {
   getNextWorkOrderNo,
@@ -1167,4 +1337,6 @@ module.exports = {
   assignWorkOrder,
   getStageEmployees,
   getMyWorkOrderTasks,
+  updateWorkOrderStages,
+  startWorkOrderStage,
 };

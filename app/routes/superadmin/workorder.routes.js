@@ -55,6 +55,9 @@ module.exports = (app) => {
     workOrder.createWorkOrder
   );
 
+
+  routes.put("/:id/stages", workOrder.updateWorkOrderStages);
+
   // Update Work Order
   routes.put(
     "/:id",
