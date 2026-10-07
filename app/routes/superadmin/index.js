@@ -43,4 +43,5 @@ module.exports = (app) => {
     require("./debitnote.routes")(app);
     require("./accountgroup.routes")(app);
     require("./contractortype.routes")(app);
+    require("./itemcategorystage.routes")(app);
 };
