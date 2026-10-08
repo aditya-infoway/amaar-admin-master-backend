@@ -83,14 +83,14 @@ const getMaterialStatusMap = async (workOrderIds, companyId) => {
     const purchasedPo = new Set(purchases.map((p) => String(p.purchaseOrderId)));
 
     // level of one PO: 2 = PO, 3 = GRR, 4 = QC, 5 = Purchase
-// level of one PO: 2 = PO, 3 = GRR, 4 = QC, 5 = Purchase
-const levelOf = (po) => {
-    const poKey = String(po.purchaseOrderId);
-    if (purchasedPo.has(poKey)) return 5;   // purchase ban gayi to complete
-    if (!grrByPo.has(poKey)) return 2;
-    if (!qcDoneGrr.has(grrByPo.get(poKey))) return 3;
-    return 4;
-};
+    // level of one PO: 2 = PO, 3 = GRR, 4 = QC, 5 = Purchase
+    const levelOf = (po) => {
+        const poKey = String(po.purchaseOrderId);
+        if (purchasedPo.has(poKey)) return 5;   // purchase ban gayi to complete
+        if (!grrByPo.has(poKey)) return 2;
+        if (!qcDoneGrr.has(grrByPo.get(poKey))) return 3;
+        return 4;
+    };
 
     // a work order is only as far along as its slowest PO
     const levelByWorkOrder = new Map();
