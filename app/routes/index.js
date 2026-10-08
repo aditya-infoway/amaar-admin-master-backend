@@ -7,4 +7,5 @@ module.exports = (app) => {
     require("./storemanager")(app);
     require("./contractor")(app);
     require("./employeereusable.routes.js")(app);
+    require("./cutting")(app);
 };
