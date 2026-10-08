@@ -1096,7 +1096,7 @@ const getMyWorkOrderTasks = async (req, res) => {
         "workorderstage",
         [],
         { workOrderId: workOrderIds, delete: 0 },
-        ["workOrderId", "stageOrder", "status"],
+        ["workOrderId", "stage", "stageOrder", "status"],
       ),
       selectWithJoins(
         "workorder",
@@ -1120,16 +1120,36 @@ const getMyWorkOrderTasks = async (req, res) => {
     );
     const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
 
+    const stagesByWo = new Map();
+    allStages.forEach((s) => {
+      const key = String(s.workOrderId);
+      if (!stagesByWo.has(key)) stagesByWo.set(key, []);
+      stagesByWo.get(key).push(s);
+    });
+
     const data = mine
       .filter((m) => woById.has(String(m.workOrderId)))
       .map((m) => {
         const wo = woById.get(String(m.workOrderId));
-        const isUnlocked = !allStages.some(
-          (s) =>
-            String(s.workOrderId) === String(m.workOrderId) &&
-            s.stageOrder < m.stageOrder &&
-            s.status !== "Completed",
+        const siblings = stagesByWo.get(String(m.workOrderId)) || [];
+
+        const isUnlocked = !siblings.some(
+          (s) => s.stageOrder < m.stageOrder && s.status !== "Completed",
         );
+
+        const previous = siblings
+          .filter((s) => s.stageOrder < m.stageOrder)
+          .sort((a, b) => b.stageOrder - a.stageOrder)[0];
+
+        let stageProgressStatus = null;
+        if (previous) {
+          const prevLabel = labelByKey.get(previous.stage) || previous.stage;
+          stageProgressStatus =
+            previous.status === "Completed"
+              ? `${prevLabel} Complete`.trim()
+              : `Pending ${prevLabel}`.trim();
+        }
+
         return {
           workOrderStageId: m.workOrderStageId,
           workOrderId: m.workOrderId,
@@ -1138,6 +1158,7 @@ const getMyWorkOrderTasks = async (req, res) => {
           materialStatus:
             materialStatusMap.get(String(m.workOrderId)) ||
             MATERIAL_STATUS.PENDING_MATERIAL,
+          stageProgressStatus,
           customerName: wo.customerName,
           model: wo.model,
           qty: wo.qty,
@@ -1258,7 +1279,7 @@ const startWorkOrderStage = async (req, res) => {
       "workorderstage",
       [],
       { workOrderStageId, companyId, employeeId, delete: 0 },
-      ["workOrderStageId", "workOrderId", "stageOrder", "status"],
+      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status"],
     );
     if (!rows.length) {
       return errorResponse(res, "Work order task not found.");
@@ -1280,17 +1301,24 @@ const startWorkOrderStage = async (req, res) => {
     }
 
 
-    const materialStatusMap = await getMaterialStatusMap(
-      [task.workOrderId],
-      companyId,
-    );
-    if (
-      materialStatusMap.get(String(task.workOrderId)) !==
-      MATERIAL_STATUS.PURCHASE
-    ) {
-      return errorResponse(res, "Material for this work order is not complete yet.");
-    }
+    const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
 
+    // material check only for Cutting (first stage)
+    if (stageDef?.order === 1) {
+      const materialStatusMap = await getMaterialStatusMap(
+        [task.workOrderId],
+        companyId,
+      );
+      if (
+        materialStatusMap.get(String(task.workOrderId)) !==
+        MATERIAL_STATUS.PURCHASE
+      ) {
+        return errorResponse(
+          res,
+          "Material for this work order is not complete yet.",
+        );
+      }
+    }
 
     // stages run in order: earlier stages must be Completed
     const siblings = await selectWithJoins(
@@ -1306,11 +1334,21 @@ const startWorkOrderStage = async (req, res) => {
       return errorResponse(res, "The previous stage is not completed yet.");
     }
 
+
+    const needsItems = stageDef?.requiresItemVerification === true;
+
     const startTime = new Date();
 
     // only one request can flip Pending -> In Progress
     const [updated] = await db.workorderstage.update(
-      { status: "In Progress", startTime, updated: startTime },
+      {
+        status: "In Progress",
+        startTime,
+        // stages that don't need item verification are auto-verified
+        itemsVerified: needsItems ? false : true,
+        itemsVerifiedAt: needsItems ? null : startTime,
+        updated: startTime,
+      },
       {
         where: {
           workOrderStageId,
@@ -1479,25 +1517,30 @@ const endWorkOrderStage = async (req, res) => {
     if (task.status !== "In Progress") {
       return errorResponse(res, "Work has not been started.");
     }
-    if (!task.itemsVerified) {
+    const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
+    const needsItems = stageDef?.requiresItemVerification === true;
+
+    if (needsItems && !task.itemsVerified) {
       return errorResponse(res, "Please verify and save the items first.");
     }
 
     const endTime = new Date();
 
     // only one request can flip In Progress -> Completed
+    const where = {
+      workOrderStageId,
+      companyId,
+      employeeId,
+      status: "In Progress",
+      delete: 0,
+    };
+    if (needsItems) {
+      where.itemsVerified = true;
+    }
+
     const [updated] = await db.workorderstage.update(
       { status: "Completed", endTime, updated: endTime },
-      {
-        where: {
-          workOrderStageId,
-          companyId,
-          employeeId,
-          status: "In Progress",
-          itemsVerified: true,
-          delete: 0,
-        },
-      },
+      { where },
     );
     if (!updated) {
       return errorResponse(res, "This work is already completed.");
