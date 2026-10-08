@@ -41,7 +41,7 @@ module.exports = (app) => {
   );
 
   routes.get("/stage-employees", workOrder.getStageEmployees);
-
+routes.get("/model-items/:id", workOrder.getWorkOrderModelItems);
   // Get Work Order by ID
   routes.get(
     "/:id",

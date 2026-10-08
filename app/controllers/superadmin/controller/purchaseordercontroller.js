@@ -56,43 +56,95 @@ const getItemSupplierInfo = async (req, res) => {
     const { itemId } = req.params;
     if (!itemId) return errorResponse(res, "Item id is required.");
 
-    // ---- directly list Sundry Creditor / Supplier accounts (groupId 30, 34) ----
-    const supplierRows = await selectWithJoinsV2(
-      "account",
-      [],
+    // 1) Is item ki purchase history (purchase register / bill se), latest pehle
+    const history = await selectWithJoinsV2(
+      "purchasedetails",
+      [
+        {
+          table: "purchase",
+          alias: "p",
+          onClause: {
+            'p."purchaseId"': { "=": 'purchasedetails."purchaseId"' },
+          },
+        },
+      ],
       {
-        'account."companyId"': companyId,
-        'account."groupId"': { IN: "(30,34)" },
-        'account."delete"': 0,
+        'purchasedetails."itemId"': itemId,
+        'purchasedetails."companyId"': companyId,
+        'purchasedetails."delete"': 0,
+        'p."delete"': 0,
       },
       [
-        'account.id AS "supplierId"',
-        'account."accountName" AS "supplierName"',
-        'account."mobileNo"',
-        'account."stateName"',
+        'p."accountId" AS "supplierId"',
+        'p."purchaseDate" AS "purchaseDate"',
+        'p."purchaseBillNo" AS "purchaseBillNo"',
+        'purchasedetails."rate" AS "rate"',
+        'purchasedetails."qty" AS "qty"',
       ],
-      [['account."accountName"', "ASC"]],
+      [['p."purchaseId"', "DESC"]],
       0,
       0,
     );
 
-    // ---- koi purchase history nahi mili to itemmaster se fallback rate ----
+    // 2) Har supplier ka sirf LATEST rate (list DESC hai, pehli entry latest)
+    const lastBySupplier = new Map();
+    for (const h of history) {
+      const sid = Number(h.supplierId);
+      if (!sid || lastBySupplier.has(sid)) continue;
+      lastBySupplier.set(sid, {
+        supplierId: sid,
+        lastRate: Number(h.rate) || 0,
+        lastQty: Number(h.qty) || 0,
+        lastDate: h.purchaseDate,
+        lastBillNo: h.purchaseBillNo,
+      });
+    }
+
+    // 3) Item master: fallback values + item ka created supplier
+    // NOTE: itemmaster me supplier ka column naam confirm karna (neeche "supplierId" guess hai)
     let fallback = null;
-    const itemRows = await selectWithJoins(
-      "itemmaster",
-      [],
-      { itemId, companyId, delete: 0 },
-      ["taxSlab", "unit", "hsnCode"],
-    );
-    if (itemRows.length > 0) fallback = itemRows[0];
+    let itemSupplierId = null;
+    try {
+      const itemRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId, companyId, delete: 0 },
+        ["taxSlab", "unit", "hsnCode", "supplierId"],
+      );
+      if (itemRows.length > 0) {
+        fallback = itemRows[0];
+        itemSupplierId = Number(itemRows[0].supplierId) || null;
+      }
+    } catch (e) {
+      console.error("Item supplier column lookup failed:", e.message);
+      const itemRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId, companyId, delete: 0 },
+        ["taxSlab", "unit", "hsnCode"],
+      );
+      fallback = itemRows[0] || null;
+    }
+
+    // 4) Frontend ke liye supplier-wise info
+    const suppliers = [...lastBySupplier.values()].map((s) => ({
+      ...s,
+      isItemSupplier: s.supplierId === itemSupplierId,
+    }));
+    if (itemSupplierId && !lastBySupplier.has(itemSupplierId)) {
+      suppliers.push({
+        supplierId: itemSupplierId,
+        lastRate: null,
+        lastQty: null,
+        lastDate: null,
+        lastBillNo: null,
+        isItemSupplier: true,
+      });
+    }
 
     return successResponse(
       res,
-      {
-        suppliers: supplierRows, // all Sundry Creditor / Supplier accounts
-        lastPurchase: null,
-        fallback,
-      },
+      { suppliers, lastPurchase: null, fallback },
       "Item supplier info fetched successfully",
     );
   } catch (error) {
