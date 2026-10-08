@@ -16,6 +16,11 @@ const {
 } = require("../../../helper/leadDetails.js");
 const db = require("../../../modelses");
 const { WORK_ORDER_STAGES } = require("../../../helper/workOrderStages.js");
+const {
+  MATERIAL_STATUS,
+  getMaterialStatusMap,
+} = require("../../../helper/workOrderMaterialStatus.js");
+const { getStageItems } = require("../../../helper/workOrderStageItems.js");
 
 // ============================================================
 // HELPERS
@@ -40,18 +45,13 @@ const liveDetails = (workOrder, lead) =>
   lead
     ? leadDetails(lead)
     : {
-      customerName: workOrder.customerName || "",
-      mobile: workOrder.mobile || "",
-      email: workOrder.email || "",
-      address: workOrder.address || "",
-      city: workOrder.city || "",
-      model: workOrder.model || "",
-    };
-
-
-
-
-
+        customerName: workOrder.customerName || "",
+        mobile: workOrder.mobile || "",
+        email: workOrder.email || "",
+        address: workOrder.address || "",
+        city: workOrder.city || "",
+        model: workOrder.model || "",
+      };
 
 // Validates { CUTTING: 12, WELDING: 15, ... } -> { rows } or { error }
 const validateStageAssignments = async (stages, companyId) => {
@@ -91,7 +91,7 @@ const validateStageAssignments = async (stages, companyId) => {
   return { rows };
 };
 
-// Map<workOrderId, stage[]> with employee names, ordered by stageOrder
+// Map<workOrderId, stage[]> with employee names + mobile, ordered by stageOrder
 const getStageMap = async (workOrderIds) => {
   const map = new Map();
   const ids = [...new Set((workOrderIds || []).filter(Boolean))];
@@ -101,43 +101,53 @@ const getStageMap = async (workOrderIds) => {
     "workorderstage",
     [],
     { workOrderId: ids, delete: 0 },
-    ["workOrderId", "stage", "stageOrder", "employeeId", "status", "completedAt"],
+    [
+      "workOrderId",
+      "stage",
+      "stageOrder",
+      "employeeId",
+      "status",
+      "completedAt",
+      "startTime",
+      "endTime",
+      "created",
+    ],
     [["stageOrder", "ASC"]],
   );
   if (!rows.length) return map;
 
+  const employeeIds = [...new Set(rows.map((r) => r.employeeId))];
+
   const employees = await selectWithJoins(
     "employee",
     [],
-    { employeeId: [...new Set(rows.map((r) => r.employeeId))] },
-    ["employeeId", "employeeName"],
+    { employeeId: employeeIds },
+    ["employeeId", "employeeName", "mobileNumber"],
   );
-  const nameById = new Map(
-    employees.map((e) => [String(e.employeeId), e.employeeName || ""]),
-  );
+  const empById = new Map(employees.map((e) => [String(e.employeeId), e]));
   const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
 
   rows.forEach((r) => {
     const key = String(r.workOrderId);
     if (!map.has(key)) map.set(key, []);
+    const emp = empById.get(String(r.employeeId)) || {};
     map.get(key).push({
       stage: r.stage,
       label: labelByKey.get(r.stage) || r.stage,
       order: r.stageOrder,
       employeeId: String(r.employeeId),
-      employeeName: nameById.get(String(r.employeeId)) || "",
+      employeeName: emp.employeeName || "",
+      mobileNumber: emp.mobileNumber || "",
       status: r.status,
+      assignedAt: r.created,
+      startTime: r.startTime,
+      endTime: r.endTime,
       completedAt: r.completedAt,
     });
   });
 
   return map;
 };
-
-
-
-
-
 
 // ============================================================
 // GET NEXT WORK ORDER NO
@@ -370,8 +380,6 @@ const createWorkOrder = async (req, res) => {
       }
     }
 
-
-
     const stageCheck = await validateStageAssignments(stages, companyId);
     if (stageCheck.error) {
       return errorResponse(res, stageCheck.error);
@@ -407,8 +415,6 @@ const createWorkOrder = async (req, res) => {
       delete: 0,
     });
 
-
-
     try {
       await db.workorderstage.bulkCreate(
         stageCheck.rows.map((r) => ({
@@ -429,7 +435,6 @@ const createWorkOrder = async (req, res) => {
       );
       throw stageError;
     }
-
 
     return successResponse(
       res,
@@ -582,7 +587,6 @@ const getWorkOrderList = async (req, res) => {
         console.error("Error fetching models:", err.message);
       }
     }
-
 
     const stageMap = await getStageMap(workOrders.map((w) => w.workOrderId));
 
@@ -831,8 +835,9 @@ const updateWorkOrder = async (req, res) => {
     if (conflictsWithAnother) {
       return errorResponse(
         res,
-        `Work Order already exists for this Sales Order (${duplicate.find((row) => String(row.workOrderId) !== String(id))
-          ?.workOrderNo
+        `Work Order already exists for this Sales Order (${
+          duplicate.find((row) => String(row.workOrderId) !== String(id))
+            ?.workOrderNo
         }).`,
       );
     }
@@ -961,9 +966,6 @@ const deleteWorkOrder = async (req, res) => {
   }
 };
 
-
-
-
 const assignWorkOrder = async (req, res) => {
   try {
     const { workOrderId, contractorManagerId } = req.body;
@@ -985,21 +987,12 @@ const assignWorkOrder = async (req, res) => {
         delete: 0,
         roleId: 18,
       },
-      [
-        "employeeId",
-        "employeeName",
-        "department",
-        "branch",
-        "roleId",
-      ],
-      [["employeeId", "ASC"]]
+      ["employeeId", "employeeName", "department", "branch", "roleId"],
+      [["employeeId", "ASC"]],
     );
 
     if (!contractorManager || contractorManager.length === 0) {
-      return errorResponse(
-        res,
-        "Contractor Manager not found"
-      );
+      return errorResponse(res, "Contractor Manager not found");
     }
 
     // Check Work Order
@@ -1011,13 +1004,10 @@ const assignWorkOrder = async (req, res) => {
         delete: 0,
       },
       ["workOrderId"],
-      [["workOrderId", "ASC"]]
+      [["workOrderId", "ASC"]],
     );
     if (!workOrderData || workOrderData.length === 0) {
-      return errorResponse(
-        res,
-        "Work Order not found"
-      );
+      return errorResponse(res, "Work Order not found");
     }
 
     await db.workorder.update(
@@ -1029,7 +1019,7 @@ const assignWorkOrder = async (req, res) => {
           workOrderId: workOrderId,
           delete: 0,
         },
-      }
+      },
     );
 
     return successResponse(
@@ -1038,21 +1028,14 @@ const assignWorkOrder = async (req, res) => {
         workOrderId,
         contractorManagerId,
       },
-      "Work Order assigned successfully"
+      "Work Order assigned successfully",
     );
   } catch (error) {
     console.error("Assign Work Order error:", error);
 
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
-
-
-
 
 const getStageEmployees = async (req, res) => {
   try {
@@ -1087,7 +1070,6 @@ const getStageEmployees = async (req, res) => {
   }
 };
 
-
 const getMyWorkOrderTasks = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
@@ -1100,7 +1082,17 @@ const getMyWorkOrderTasks = async (req, res) => {
       "workorderstage",
       [],
       { companyId, employeeId, delete: 0, ...(status ? { status } : {}) },
-      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status", "completedAt", "startTime", "endTime"],
+      [
+        "workOrderStageId",
+        "workOrderId",
+        "stage",
+        "stageOrder",
+        "status",
+        "completedAt",
+        "startTime",
+        "endTime",
+        "itemsVerified",
+      ],
       [["workOrderStageId", "DESC"]],
     );
     if (!mine.length) return successResponse(res, [], "No tasks assigned");
@@ -1112,34 +1104,69 @@ const getMyWorkOrderTasks = async (req, res) => {
         "workorderstage",
         [],
         { workOrderId: workOrderIds, delete: 0 },
-        ["workOrderId", "stageOrder", "status"],
+        ["workOrderId", "stage", "stageOrder", "status"],
       ),
       selectWithJoins(
         "workorder",
         [],
         { workOrderId: workOrderIds, companyId, delete: 0 },
-        ["workOrderId", "workOrderNo", "customerName", "model", "qty", "created"],
+        [
+          "workOrderId",
+          "workOrderNo",
+          "customerName",
+          "model",
+          "qty",
+          "created",
+        ],
       ),
     ]);
 
     const woById = new Map(workOrders.map((w) => [String(w.workOrderId), w]));
+    const materialStatusMap = await getMaterialStatusMap(
+      workOrderIds,
+      companyId,
+    );
     const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
+
+    const stagesByWo = new Map();
+    allStages.forEach((s) => {
+      const key = String(s.workOrderId);
+      if (!stagesByWo.has(key)) stagesByWo.set(key, []);
+      stagesByWo.get(key).push(s);
+    });
 
     const data = mine
       .filter((m) => woById.has(String(m.workOrderId)))
       .map((m) => {
         const wo = woById.get(String(m.workOrderId));
-        const isUnlocked = !allStages.some(
-          (s) =>
-            String(s.workOrderId) === String(m.workOrderId) &&
-            s.stageOrder < m.stageOrder &&
-            s.status !== "Completed",
+        const siblings = stagesByWo.get(String(m.workOrderId)) || [];
+
+        const isUnlocked = !siblings.some(
+          (s) => s.stageOrder < m.stageOrder && s.status !== "Completed",
         );
+
+        const previous = siblings
+          .filter((s) => s.stageOrder < m.stageOrder)
+          .sort((a, b) => b.stageOrder - a.stageOrder)[0];
+
+        let stageProgressStatus = null;
+        if (previous) {
+          const prevLabel = labelByKey.get(previous.stage) || previous.stage;
+          stageProgressStatus =
+            previous.status === "Completed"
+              ? `${prevLabel} Complete`.trim()
+              : `Pending ${prevLabel}`.trim();
+        }
+
         return {
           workOrderStageId: m.workOrderStageId,
           workOrderId: m.workOrderId,
           workOrderNo: wo.workOrderNo,
           workOrderDate: wo.created,
+          materialStatus:
+            materialStatusMap.get(String(m.workOrderId)) ||
+            MATERIAL_STATUS.PENDING_MATERIAL,
+          stageProgressStatus,
           customerName: wo.customerName,
           model: wo.model,
           qty: wo.qty,
@@ -1151,6 +1178,7 @@ const getMyWorkOrderTasks = async (req, res) => {
           completedAt: m.completedAt,
           startTime: m.startTime,
           endTime: m.endTime,
+          itemsVerified: Boolean(m.itemsVerified),
         };
       });
 
@@ -1159,8 +1187,6 @@ const getMyWorkOrderTasks = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
-
 
 const updateWorkOrderStages = async (req, res) => {
   try {
@@ -1243,8 +1269,6 @@ const updateWorkOrderStages = async (req, res) => {
   }
 };
 
-
-
 const startWorkOrderStage = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
@@ -1263,7 +1287,7 @@ const startWorkOrderStage = async (req, res) => {
       "workorderstage",
       [],
       { workOrderStageId, companyId, employeeId, delete: 0 },
-      ["workOrderStageId", "workOrderId", "stageOrder", "status"],
+      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status"],
     );
     if (!rows.length) {
       return errorResponse(res, "Work order task not found.");
@@ -1284,6 +1308,25 @@ const startWorkOrderStage = async (req, res) => {
       return errorResponse(res, "This work order has already been started.");
     }
 
+    const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
+
+    // material check only for Cutting (first stage)
+    if (stageDef?.order === 1) {
+      const materialStatusMap = await getMaterialStatusMap(
+        [task.workOrderId],
+        companyId,
+      );
+      if (
+        materialStatusMap.get(String(task.workOrderId)) !==
+        MATERIAL_STATUS.PURCHASE
+      ) {
+        return errorResponse(
+          res,
+          "Material for this work order is not complete yet.",
+        );
+      }
+    }
+
     // stages run in order: earlier stages must be Completed
     const siblings = await selectWithJoins(
       "workorderstage",
@@ -1298,11 +1341,20 @@ const startWorkOrderStage = async (req, res) => {
       return errorResponse(res, "The previous stage is not completed yet.");
     }
 
+    const needsItems = stageDef?.requiresItemVerification === true;
+
     const startTime = new Date();
 
     // only one request can flip Pending -> In Progress
     const [updated] = await db.workorderstage.update(
-      { status: "In Progress", startTime, updated: startTime },
+      {
+        status: "In Progress",
+        startTime,
+        // stages that don't need item verification are auto-verified
+        itemsVerified: needsItems ? false : true,
+        itemsVerifiedAt: needsItems ? null : startTime,
+        updated: startTime,
+      },
       {
         where: {
           workOrderStageId,
@@ -1327,6 +1379,410 @@ const startWorkOrderStage = async (req, res) => {
   }
 };
 
+// the logged-in employee's own stage row, or null
+const loadMyStage = async (req, workOrderStageId) => {
+  const rows = await selectWithJoins(
+    "workorderstage",
+    [],
+    {
+      workOrderStageId,
+      companyId: req.companyId,
+      employeeId: req.employeeId,
+      delete: 0,
+    },
+    [
+      "workOrderStageId",
+      "workOrderId",
+      "stage",
+      "status",
+      "itemsVerified",
+      "startTime",
+    ],
+  );
+  return rows[0] || null;
+};
+
+// Items to verify for one stage task
+const getMyStageItems = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const workOrderStageId = normalizeId(req.query.workOrderStageId);
+    if (!workOrderStageId) {
+      return errorResponse(res, "Work order task is required.");
+    }
+
+    const task = await loadMyStage(req, workOrderStageId);
+    if (!task) return errorResponse(res, "Work order task not found.");
+
+    const result = await getStageItems({
+      companyId,
+      workOrderId: task.workOrderId,
+      stageKey: task.stage,
+    });
+    if (result.error) return errorResponse(res, result.error);
+
+    return successResponse(
+      res,
+      {
+        workOrderStageId,
+        workOrderNo: result.workOrder.workOrderNo,
+        status: task.status,
+        itemsVerified: Boolean(task.itemsVerified),
+        items: result.items,
+      },
+      "Stage items fetched successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// Save: every item of the stage must be verified
+const saveStageItemVerification = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const workOrderStageId = normalizeId(req.body.workOrderStageId);
+    if (!workOrderStageId) {
+      return errorResponse(res, "Work order task is required.");
+    }
+    const submitted = new Set(
+      (Array.isArray(req.body.bomItemIds) ? req.body.bomItemIds : []).map(
+        String,
+      ),
+    );
+
+    const task = await loadMyStage(req, workOrderStageId);
+    if (!task) return errorResponse(res, "Work order task not found.");
+
+    if (task.status !== "In Progress") {
+      return errorResponse(res, "Work is not in progress.");
+    }
+    if (task.itemsVerified) {
+      return errorResponse(res, "Items are already verified.");
+    }
+
+    // the server decides which items count, not the client
+    const result = await getStageItems({
+      companyId,
+      workOrderId: task.workOrderId,
+      stageKey: task.stage,
+    });
+    if (result.error) return errorResponse(res, result.error);
+
+    if (result.items.some((i) => !submitted.has(String(i.bomItemId)))) {
+      return errorResponse(res, "Please verify all items before saving.");
+    }
+
+    const now = new Date();
+    const [updated] = await db.workorderstage.update(
+      { itemsVerified: true, itemsVerifiedAt: now, updated: now },
+      {
+        where: {
+          workOrderStageId,
+          companyId,
+          employeeId,
+          status: "In Progress",
+          itemsVerified: false,
+          delete: 0,
+        },
+      },
+    );
+    if (!updated) {
+      return errorResponse(
+        res,
+        "Unable to save. Please refresh and try again.",
+      );
+    }
+
+    return successResponse(
+      res,
+      { workOrderStageId, itemsVerified: true },
+      "Items verified successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// End Time: finish the stage
+const endWorkOrderStage = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const workOrderStageId = normalizeId(req.body.workOrderStageId);
+    if (!workOrderStageId) {
+      return errorResponse(res, "Work order task is required.");
+    }
+
+    const task = await loadMyStage(req, workOrderStageId);
+    if (!task) return errorResponse(res, "Work order task not found.");
+
+    if (task.status === "Completed") {
+      return errorResponse(res, "This work is already completed.");
+    }
+    if (task.status !== "In Progress") {
+      return errorResponse(res, "Work has not been started.");
+    }
+
+    const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
+    const needsItems = stageDef?.requiresItemVerification === true;
+
+    if (needsItems && !task.itemsVerified) {
+      return errorResponse(res, "Please verify and save the items first.");
+    }
+
+    const endTime = new Date();
+
+    // only one request can flip In Progress -> Completed
+    const where = {
+      workOrderStageId,
+      companyId,
+      employeeId,
+      status: "In Progress",
+      delete: 0,
+    };
+    if (needsItems) {
+      where.itemsVerified = true;
+    }
+
+    const [updated] = await db.workorderstage.update(
+      { status: "Completed", endTime, updated: endTime },
+      { where },
+    );
+    if (!updated) {
+      return errorResponse(res, "This work is already completed.");
+    }
+
+    const durationSeconds = task.startTime
+      ? Math.max(0, Math.floor((endTime - new Date(task.startTime)) / 1000))
+      : 0;
+
+    return successResponse(
+      res,
+      { workOrderStageId, endTime, durationSeconds },
+      "Work completed successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+const getLookupMap = async (tableName, ids) => {
+  const map = new Map();
+  const cleanIds = [...new Set(ids.map(Number).filter((n) => n > 0))];
+  if (!cleanIds.length) return map;
+
+  const [cols] = await db.sequelize.query(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = :t`,
+    { replacements: { t: tableName } },
+  );
+  const names = cols.map((c) => c.column_name);
+
+  const idCol =
+    names.find((n) => n.toLowerCase() === `${tableName}id`) ||
+    names.find((n) => n.toLowerCase() === "id");
+  const nameCol =
+    names.find((n) => n.toLowerCase() === `${tableName}name`) ||
+    names.find((n) => n.toLowerCase() === "categoryname") ||
+    names.find((n) => n.toLowerCase() === "locationname") ||
+    names.find((n) => /name$/i.test(n)) ||
+    names.find((n) => /^name/i.test(n));
+
+  if (!idCol || !nameCol) {
+    console.error(`Lookup ${tableName}: id/name column not found`, names);
+    return map;
+  }
+
+  const [rows] = await db.sequelize.query(
+    `SELECT "${idCol}" AS id, "${nameCol}" AS name FROM "${tableName}" WHERE "${idCol}" IN (:ids)`,
+    { replacements: { ids: cleanIds } },
+  );
+  rows.forEach((r) => map.set(Number(r.id), r.name));
+  return map;
+};
+
+const getWorkOrderModelItems = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { id } = req.params;
+
+    // Step 1: work order
+    const rows = await selectWithJoins(
+      "workorder",
+      [],
+      { workOrderId: id, companyId, delete: 0 },
+      ["workOrderId", "salesOrderId", "model", "qty"],
+    );
+
+    if (!rows.length) {
+      return requiredmessage(res, "Work Order not found.");
+    }
+
+    const workOrder = rows[0];
+
+    // Step 2: model (live lead se, warna stored copy)
+    const leadBySalesOrder = await getLeadMapBySalesOrder(
+      [workOrder.salesOrderId],
+      companyId,
+    );
+    const live = liveDetails(
+      workOrder,
+      leadBySalesOrder.get(String(workOrder.salesOrderId)),
+    );
+
+    const modelItemId = normalizeId(live.model);
+
+    if (!modelItemId) {
+      return successResponse(res, [], "No model selected on this Work Order");
+    }
+
+    // Step 3: us model ka BOM
+    let bom = await db.bom.findOne({
+      where: { companyId, finishedGoodsItemId: modelItemId, delete: 0 },
+      order: [["bomId", "DESC"]],
+      raw: true,
+    });
+
+    if (!bom) {
+      const modelRows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: modelItemId, companyId, delete: 0 },
+        ["itemId", "itemName", "itemCode"],
+      );
+
+      const modelName = (modelRows[0]?.itemName || "").trim();
+      const modelCode = (modelRows[0]?.itemCode || "").trim();
+
+      if (modelName || modelCode) {
+        const allItems = await selectWithJoins(
+          "itemmaster",
+          [],
+          { companyId, delete: 0 },
+          ["itemId", "itemName", "itemCode"],
+        );
+        const sameIds = allItems
+          .filter(
+            (i) =>
+              (modelCode && String(i.itemCode).trim() === modelCode) ||
+              (modelName &&
+                String(i.itemName).trim().toLowerCase() ===
+                  modelName.toLowerCase()),
+          )
+          .map((i) => Number(i.itemId));
+
+        if (sameIds.length) {
+          bom = await db.bom.findOne({
+            where: { companyId, finishedGoodsItemId: sameIds, delete: 0 },
+            order: [["bomId", "DESC"]],
+            raw: true,
+          });
+        }
+
+        if (!bom && modelName) {
+          bom = await db.bom.findOne({
+            where: { companyId, bomName: modelName, delete: 0 },
+            order: [["bomId", "DESC"]],
+            raw: true,
+          });
+        }
+      }
+    }
+
+    if (!bom) {
+      return successResponse(res, [], "No BOM found for this model");
+    }
+
+    // Step 4: BOM ke saare items
+    const bomRows = await db.bomItem.findAll({
+      where: { bomId: bom.bomId, delete: 0 },
+      order: [["sortOrder", "ASC"]],
+      raw: true,
+    });
+
+    if (!bomRows.length) {
+      return successResponse(res, [], "BOM has no items");
+    }
+
+    // Step 5: item master details
+    const masterRows = await selectWithJoins(
+      "itemmaster",
+      [],
+      {
+        itemId: [...new Set(bomRows.map((r) => r.itemId))],
+        companyId,
+        delete: 0,
+      },
+      [
+        "itemId",
+        "itemCode",
+        "itemName",
+        "hsnCode",
+        "itemLocation",
+        "itemCategoryId",
+      ],
+    );
+    const masterMap = new Map(masterRows.map((m) => [Number(m.itemId), m]));
+
+    // Step 6: category aur location ke naam
+    let categoryMap = new Map();
+    let locationMap = new Map();
+    try {
+      categoryMap = await getLookupMap(
+        "itemcategory",
+        masterRows.map((m) => m.itemCategoryId),
+      );
+    } catch (e) {
+      console.error("Item category lookup failed:", e.message);
+    }
+    try {
+      locationMap = await getLookupMap(
+        "location",
+        masterRows.map((m) => m.itemLocation),
+      );
+    } catch (e) {
+      console.error("Item location lookup failed:", e.message);
+    }
+
+    const woQty = Number(workOrder.qty) || 1;
+
+    const data = bomRows.map((r) => {
+      const m = masterMap.get(Number(r.itemId)) || {};
+      return {
+        id: r.bomItemId,
+        itemCode: m.itemCode || "-",
+        itemName: m.itemName || "(item not found)",
+        hsnCode: m.hsnCode || "",
+        itemLocation:
+          locationMap.get(Number(m.itemLocation)) || m.itemLocation || "",
+        itemCategory: categoryMap.get(Number(m.itemCategoryId)) || "",
+        qty: round2((Number(r.quantity) || 0) * woQty),
+      };
+    });
+
+    return successResponse(res, data, "Model items fetched successfully");
+  } catch (error) {
+    console.error("getWorkOrderModelItems error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextWorkOrderNo,
   createWorkOrder,
@@ -1339,4 +1795,8 @@ module.exports = {
   getMyWorkOrderTasks,
   updateWorkOrderStages,
   startWorkOrderStage,
+  getMyStageItems,
+  saveStageItemVerification,
+  endWorkOrderStage,
+  getWorkOrderModelItems,
 };
