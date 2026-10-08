@@ -24,10 +24,10 @@ const validate = (schema) => (req, res, next) => {
 module.exports = (app) => {
   routes.use(superAdminAuth);
 
-routes.post(
-  "/assign",
-  workOrder.assignWorkOrder
-);
+  routes.post(
+    "/assign",
+    workOrder.assignWorkOrder
+  );
   // Get next Work Order number
   routes.get(
     "/next-number",
@@ -39,6 +39,8 @@ routes.post(
     "/list",
     workOrder.getWorkOrderList
   );
+
+  routes.get("/stage-employees", workOrder.getStageEmployees);
 
   // Get Work Order by ID
   routes.get(
@@ -52,6 +54,9 @@ routes.post(
     validate(workOrderValidation.validateWorkOrder),
     workOrder.createWorkOrder
   );
+
+
+  routes.put("/:id/stages", workOrder.updateWorkOrderStages);
 
   // Update Work Order
   routes.put(

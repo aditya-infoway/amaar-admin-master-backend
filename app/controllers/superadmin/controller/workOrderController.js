@@ -15,6 +15,7 @@ const {
   getLeadMapBySalesOrder,
 } = require("../../../helper/leadDetails.js");
 const db = require("../../../modelses");
+const { WORK_ORDER_STAGES } = require("../../../helper/workOrderStages.js");
 
 // ============================================================
 // HELPERS
@@ -46,6 +47,97 @@ const liveDetails = (workOrder, lead) =>
       city: workOrder.city || "",
       model: workOrder.model || "",
     };
+
+
+
+
+
+
+// Validates { CUTTING: 12, WELDING: 15, ... } -> { rows } or { error }
+const validateStageAssignments = async (stages, companyId) => {
+  const input = stages && typeof stages === "object" ? stages : {};
+  const rows = [];
+
+  for (const s of WORK_ORDER_STAGES) {
+    const employeeId = normalizeId(input[s.key]);
+    if (!employeeId) {
+      return { error: `Please select an employee for ${s.label}.` };
+    }
+    rows.push({
+      stage: s.key,
+      stageOrder: s.order,
+      employeeId,
+      roleId: s.roleId,
+      label: s.label,
+    });
+  }
+
+  const employees = await selectWithJoins(
+    "employee",
+    [],
+    { employeeId: rows.map((r) => r.employeeId), companyId, delete: 0 },
+    ["employeeId", "roleId"],
+  );
+  const roleById = new Map(
+    employees.map((e) => [String(e.employeeId), Number(e.roleId)]),
+  );
+
+  for (const r of rows) {
+    if (roleById.get(String(r.employeeId)) !== r.roleId) {
+      return { error: `Selected employee is not valid for ${r.label}.` };
+    }
+  }
+
+  return { rows };
+};
+
+// Map<workOrderId, stage[]> with employee names, ordered by stageOrder
+const getStageMap = async (workOrderIds) => {
+  const map = new Map();
+  const ids = [...new Set((workOrderIds || []).filter(Boolean))];
+  if (!ids.length) return map;
+
+  const rows = await selectWithJoins(
+    "workorderstage",
+    [],
+    { workOrderId: ids, delete: 0 },
+    ["workOrderId", "stage", "stageOrder", "employeeId", "status", "completedAt"],
+    [["stageOrder", "ASC"]],
+  );
+  if (!rows.length) return map;
+
+  const employees = await selectWithJoins(
+    "employee",
+    [],
+    { employeeId: [...new Set(rows.map((r) => r.employeeId))] },
+    ["employeeId", "employeeName"],
+  );
+  const nameById = new Map(
+    employees.map((e) => [String(e.employeeId), e.employeeName || ""]),
+  );
+  const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
+
+  rows.forEach((r) => {
+    const key = String(r.workOrderId);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push({
+      stage: r.stage,
+      label: labelByKey.get(r.stage) || r.stage,
+      order: r.stageOrder,
+      employeeId: String(r.employeeId),
+      employeeName: nameById.get(String(r.employeeId)) || "",
+      status: r.status,
+      completedAt: r.completedAt,
+    });
+  });
+
+  return map;
+};
+
+
+
+
+
 
 // ============================================================
 // GET NEXT WORK ORDER NO
@@ -142,6 +234,7 @@ const createWorkOrder = async (req, res) => {
       gst,
       grandTotal,
 
+      stages,
       createdBy,
       createdType,
     } = req.body;
@@ -277,6 +370,13 @@ const createWorkOrder = async (req, res) => {
       }
     }
 
+
+
+    const stageCheck = await validateStageAssignments(stages, companyId);
+    if (stageCheck.error) {
+      return errorResponse(res, stageCheck.error);
+    }
+
     // ========================================================
     // SAVE
     // ========================================================
@@ -306,6 +406,30 @@ const createWorkOrder = async (req, res) => {
 
       delete: 0,
     });
+
+
+
+    try {
+      await db.workorderstage.bulkCreate(
+        stageCheck.rows.map((r) => ({
+          companyId,
+          workOrderId: workOrder.workOrderId,
+          stage: r.stage,
+          stageOrder: r.stageOrder,
+          employeeId: r.employeeId,
+          status: "Pending",
+          delete: 0,
+        })),
+      );
+    } catch (stageError) {
+      await updateModelHelper(
+        "workorder",
+        { delete: 1, updated: new Date() },
+        { workOrderId: workOrder.workOrderId, companyId },
+      );
+      throw stageError;
+    }
+
 
     return successResponse(
       res,
@@ -459,6 +583,9 @@ const getWorkOrderList = async (req, res) => {
       }
     }
 
+
+    const stageMap = await getStageMap(workOrders.map((w) => w.workOrderId));
+
     const data = workOrders.map((workOrder) => {
       const live = liveDetails(
         workOrder,
@@ -492,7 +619,7 @@ const getWorkOrderList = async (req, res) => {
         assignedEmployeeId: workOrder.assignedEmployeeId
           ? String(workOrder.assignedEmployeeId)
           : null,
-
+        stages: stageMap.get(String(workOrder.workOrderId)) || [],
         createdAt: workOrder.created,
         updatedAt: workOrder.updated,
       };
@@ -559,6 +686,8 @@ const getWorkOrderById = async (req, res) => {
 
     const workOrder = rows[0];
 
+    const stageMap = await getStageMap([workOrder.workOrderId]);
+
     const leadBySalesOrder = await getLeadMapBySalesOrder(
       [workOrder.salesOrderId],
       companyId,
@@ -592,6 +721,7 @@ const getWorkOrderById = async (req, res) => {
 
         createdBy: workOrder.createdBy || "",
         createdType: workOrder.createdtype || "",
+        stages: stageMap.get(String(workOrder.workOrderId)) || [],
 
         createdAt: workOrder.created,
         updatedAt: workOrder.updated,
@@ -890,17 +1020,17 @@ const assignWorkOrder = async (req, res) => {
       );
     }
 
-  await db.workorder.update(
-  {
-    assignedEmployeeId: contractorManagerId,
-  },
-  {
-    where: {
-      workOrderId: workOrderId,
-      delete: 0,
-    },
-  }
-);
+    await db.workorder.update(
+      {
+        assignedEmployeeId: contractorManagerId,
+      },
+      {
+        where: {
+          workOrderId: workOrderId,
+          delete: 0,
+        },
+      }
+    );
 
     return successResponse(
       res,
@@ -922,6 +1052,281 @@ const assignWorkOrder = async (req, res) => {
 };
 
 
+
+
+const getStageEmployees = async (req, res) => {
+  try {
+    if (!req.companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const employees = await selectWithJoins(
+      "employee",
+      [],
+      {
+        companyId: req.companyId,
+        roleId: WORK_ORDER_STAGES.map((s) => s.roleId),
+        delete: 0,
+      },
+      ["employeeId", "employeeName", "roleId"],
+      [["employeeName", "ASC"]],
+    );
+
+    const data = WORK_ORDER_STAGES.map((s) => ({
+      key: s.key,
+      label: s.label,
+      order: s.order,
+      employees: employees
+        .filter((e) => Number(e.roleId) === s.roleId)
+        .map((e) => ({ id: Number(e.employeeId), name: e.employeeName || "" })),
+    }));
+
+    return successResponse(res, data, "Stage employees fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
+const getMyWorkOrderTasks = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+    const { status } = req.query;
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const mine = await selectWithJoins(
+      "workorderstage",
+      [],
+      { companyId, employeeId, delete: 0, ...(status ? { status } : {}) },
+      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status", "completedAt", "startTime", "endTime"],
+      [["workOrderStageId", "DESC"]],
+    );
+    if (!mine.length) return successResponse(res, [], "No tasks assigned");
+
+    const workOrderIds = [...new Set(mine.map((m) => m.workOrderId))];
+
+    const [allStages, workOrders] = await Promise.all([
+      selectWithJoins(
+        "workorderstage",
+        [],
+        { workOrderId: workOrderIds, delete: 0 },
+        ["workOrderId", "stageOrder", "status"],
+      ),
+      selectWithJoins(
+        "workorder",
+        [],
+        { workOrderId: workOrderIds, companyId, delete: 0 },
+        ["workOrderId", "workOrderNo", "customerName", "model", "qty", "created"],
+      ),
+    ]);
+
+    const woById = new Map(workOrders.map((w) => [String(w.workOrderId), w]));
+    const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
+
+    const data = mine
+      .filter((m) => woById.has(String(m.workOrderId)))
+      .map((m) => {
+        const wo = woById.get(String(m.workOrderId));
+        const isUnlocked = !allStages.some(
+          (s) =>
+            String(s.workOrderId) === String(m.workOrderId) &&
+            s.stageOrder < m.stageOrder &&
+            s.status !== "Completed",
+        );
+        return {
+          workOrderStageId: m.workOrderStageId,
+          workOrderId: m.workOrderId,
+          workOrderNo: wo.workOrderNo,
+          workOrderDate: wo.created,
+          customerName: wo.customerName,
+          model: wo.model,
+          qty: wo.qty,
+          stage: m.stage,
+          stageLabel: labelByKey.get(m.stage) || m.stage,
+          stageOrder: m.stageOrder,
+          status: m.status,
+          isUnlocked,
+          completedAt: m.completedAt,
+          startTime: m.startTime,
+          endTime: m.endTime,
+        };
+      });
+
+    return successResponse(res, data, "Tasks fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
+
+const updateWorkOrderStages = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { id } = req.params;
+    const { stages } = req.body;
+
+    const existing = await selectWithJoins(
+      "workorder",
+      [],
+      { workOrderId: id, companyId, delete: 0 },
+      ["workOrderId"],
+    );
+    if (!existing.length) {
+      return requiredmessage(res, "Work Order not found.");
+    }
+
+    const stageCheck = await validateStageAssignments(stages, companyId);
+    if (stageCheck.error) {
+      return errorResponse(res, stageCheck.error);
+    }
+
+    const currentRows = await selectWithJoins(
+      "workorderstage",
+      [],
+      { workOrderId: id, companyId, delete: 0 },
+      ["workOrderStageId", "stage", "employeeId", "status"],
+    );
+    const currentByStage = new Map(currentRows.map((r) => [r.stage, r]));
+
+    // Only Pending stages can be reassigned
+    for (const r of stageCheck.rows) {
+      const current = currentByStage.get(r.stage);
+      if (
+        current &&
+        String(current.employeeId) !== String(r.employeeId) &&
+        current.status !== "Pending"
+      ) {
+        return errorResponse(
+          res,
+          `${r.label} is already ${String(current.status).toLowerCase()} and cannot be reassigned.`,
+        );
+      }
+    }
+
+    for (const r of stageCheck.rows) {
+      const current = currentByStage.get(r.stage);
+
+      if (!current) {
+        // work order created before stages existed
+        await db.workorderstage.create({
+          companyId,
+          workOrderId: Number(id),
+          stage: r.stage,
+          stageOrder: r.stageOrder,
+          employeeId: r.employeeId,
+          status: "Pending",
+          delete: 0,
+        });
+      } else if (String(current.employeeId) !== String(r.employeeId)) {
+        await db.workorderstage.update(
+          { employeeId: r.employeeId, updated: new Date() },
+          { where: { workOrderStageId: current.workOrderStageId } },
+        );
+      }
+    }
+
+    return successResponse(
+      res,
+      { workOrderId: Number(id) },
+      "Stage employees updated successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
+
+const startWorkOrderStage = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const workOrderStageId = normalizeId(req.body.workOrderStageId);
+    if (!workOrderStageId) {
+      return errorResponse(res, "Please select a Work Order.");
+    }
+
+    // the task must belong to this employee
+    const rows = await selectWithJoins(
+      "workorderstage",
+      [],
+      { workOrderStageId, companyId, employeeId, delete: 0 },
+      ["workOrderStageId", "workOrderId", "stageOrder", "status"],
+    );
+    if (!rows.length) {
+      return errorResponse(res, "Work order task not found.");
+    }
+    const task = rows[0];
+
+    const workOrderRows = await selectWithJoins(
+      "workorder",
+      [],
+      { workOrderId: task.workOrderId, companyId, delete: 0 },
+      ["workOrderId"],
+    );
+    if (!workOrderRows.length) {
+      return errorResponse(res, "Work Order not found.");
+    }
+
+    if (task.status !== "Pending") {
+      return errorResponse(res, "This work order has already been started.");
+    }
+
+    // stages run in order: earlier stages must be Completed
+    const siblings = await selectWithJoins(
+      "workorderstage",
+      [],
+      { workOrderId: task.workOrderId, delete: 0 },
+      ["stageOrder", "status"],
+    );
+    const blocked = siblings.some(
+      (s) => s.stageOrder < task.stageOrder && s.status !== "Completed",
+    );
+    if (blocked) {
+      return errorResponse(res, "The previous stage is not completed yet.");
+    }
+
+    const startTime = new Date();
+
+    // only one request can flip Pending -> In Progress
+    const [updated] = await db.workorderstage.update(
+      { status: "In Progress", startTime, updated: startTime },
+      {
+        where: {
+          workOrderStageId,
+          companyId,
+          employeeId,
+          status: "Pending",
+          delete: 0,
+        },
+      },
+    );
+    if (!updated) {
+      return errorResponse(res, "This work order has already been started.");
+    }
+
+    return successResponse(
+      res,
+      { workOrderStageId, startTime },
+      "Work started successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   getNextWorkOrderNo,
   createWorkOrder,
@@ -930,4 +1335,8 @@ module.exports = {
   updateWorkOrder,
   deleteWorkOrder,
   assignWorkOrder,
+  getStageEmployees,
+  getMyWorkOrderTasks,
+  updateWorkOrderStages,
+  startWorkOrderStage,
 };
