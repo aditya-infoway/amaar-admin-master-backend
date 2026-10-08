@@ -12,6 +12,8 @@ module.exports = (sequelize, DataTypes) => {
             completedAt: { type: DataTypes.DATE },
             startTime: { type: DataTypes.DATE },
             endTime: { type: DataTypes.DATE },
+            itemsVerified: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+            itemsVerifiedAt: { type: DataTypes.DATE },
             delete: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
             created: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
             updated: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
