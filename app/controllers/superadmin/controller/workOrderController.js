@@ -15,6 +15,8 @@ const {
   getLeadMapBySalesOrder,
 } = require("../../../helper/leadDetails.js");
 const db = require("../../../modelses");
+const Bom = db.bom;
+const BomItem = db.bomItem;
 const { WORK_ORDER_STAGES } = require("../../../helper/workOrderStages.js");
 const {
   MATERIAL_STATUS,
