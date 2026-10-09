@@ -9,7 +9,7 @@ const {
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const { updateAccountBalance } = require("../../../helper/accountBalance.js");
-const { postPurchaseGst } = require("../../../helper/gstLedger.js");
+const { postPurchaseGst, postPurchaseAccount } = require("../../../helper/gstLedger.js");
 
 // ---------------- Normalize state string for comparison ----------------
 const normalizeState = (s) =>
@@ -368,7 +368,16 @@ const createPurchase = async (req, res) => {
       purchaseBillNo,
       createdBy, createdType,
     });
-
+    await postPurchaseAccount({
+      companyId,
+      financialYearId: fy.financialYearId,
+      purchaseId: purchase.purchaseId,
+      date: purchaseDate,
+      amount: roundedGrandTotal - (finalCgst + finalSgst + finalIgst),
+      supplierName: party.accountName,
+      purchaseBillNo,
+      createdBy, createdType,
+    });
 
 
     return successResponse(
