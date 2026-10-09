@@ -101,6 +101,7 @@ const PARTICULARS_LABELS = {
   DN: "Debit Note",
   PCGST: "Purchase CGST", PSGST: "Purchase SGST", PIGST: "Purchase IGST",
   DCGST: "Debit Note CGST", DSGST: "Debit Note SGST", DIGST: "Debit Note IGST",
+  SCGST: "Sales CGST", SSGST: "Sales SGST", SIGST: "Sales IGST",
 };
 
 const getParticularsLabel = (moduleCode, oppName) => {
@@ -402,6 +403,7 @@ const getLedgerDetails = async (req, res) => {
       "amount",
       "narration",
       "purchaseId",
+      "salesId",
     ];
 
     let rows;
@@ -477,7 +479,22 @@ const getLedgerDetails = async (req, res) => {
         purchaseBillMap[p.purchaseId] = p.billNo;
       });
     }
-
+    // ---- Sales Invoice No (batch fetch, jin rows me salesId set hai) ----
+    const salesIds = [
+      ...new Set(rows.map((r) => r.salesId).filter(Boolean)),
+    ];
+    let salesBillMap = {};
+    if (salesIds.length) {
+      const salesRows = await selectWithJoins(
+        "sales",
+        [],
+        { salesId: salesIds, companyId, delete: 0 },
+        ["salesId", "salesInvoiceNo"],
+      );
+      salesRows.forEach((s) => {
+        salesBillMap[s.salesId] = s.salesInvoiceNo;
+      });
+    }
     // ---- Split: FY start → fromDate (opening calc) vs fromDate → toDate (display) ----
     const beforeRows = rows.filter(
       (r) =>
@@ -535,16 +552,22 @@ const getLedgerDetails = async (req, res) => {
       runningBalance += debit - credit;
 
       const oppId = getOppIdForRow(r);
-      const oppName = ALL_GST_CODES.includes(r.paymentCollectedByModules)
-        ? (r.narration || "")              // "bill / DN no — supplier"
-        : (oppMap[oppId] || "");
+      const oppName =
+        ALL_GST_CODES.includes(r.paymentCollectedByModules) ||
+          (r.paymentCollectedByModules === "SALE" && r.salesId)
+          ? (r.narration || "")
+          : (oppMap[oppId] || "");
       const moduleCode = r.paymentCollectedByModules || r.voucherType || "";
 
       list.push({
         sr: list.length + 1,
         date: r.date,
         voucherNo: r.voucherNo || "-",
-        billNo: r.purchaseId ? purchaseBillMap[r.purchaseId] || "-" : "-",
+        billNo: r.purchaseId
+          ? purchaseBillMap[r.purchaseId] || "-"
+          : r.salesId
+            ? salesBillMap[r.salesId] || "-"
+            : "-",
         type: moduleCode,
         particulars: getParticularsLabel(moduleCode, oppName),
         debit: debit ? debit.toFixed(2) : "",

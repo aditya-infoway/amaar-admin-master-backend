@@ -694,6 +694,293 @@ const createSalesOrder = async (req, res) => {
 // GET SALES ORDER LIST
 // ============================================================
 
+// const getSalesOrderList = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+
+//     if (!companyId) {
+//       return requiredmessage(res, "Unauthorized. Please login again.");
+//     }
+
+//     const { financialYearId, role } = req.query;
+
+//     const branchId = req.branchId;
+//     const employeeId = req.employeeId;
+
+//     const salesOrderWhere = {
+//       companyId,
+//       delete: 0,
+//     };
+
+//     // ========================================================
+//     // EMPLOYEE
+//     // ========================================================
+
+//     if (employeeId) {
+//       salesOrderWhere.createdBy = String(employeeId);
+//       salesOrderWhere.createdtype = "Sale Executive";
+//     }
+
+//     // ========================================================
+//     // BRANCH
+//     // ========================================================
+//     else if (role === "Branch") {
+//       if (!branchId) {
+//         return requiredmessage(res, "Branch not found.");
+//       }
+
+//       salesOrderWhere.branchId = branchId;
+//     }
+
+//     // ========================================================
+//     // FINANCIAL YEAR
+//     // ========================================================
+
+//     if (financialYearId) {
+//       salesOrderWhere.financialYearId = financialYearId;
+//     }
+
+//     // ========================================================
+//     // FETCH SALES ORDERS
+//     // ========================================================
+
+//     const salesOrders = await selectWithJoins(
+//       "salesorder",
+//       [],
+//       salesOrderWhere,
+//       [
+//         "salesOrderId",
+//         "companyId",
+//         "financialYearId",
+
+//         "soNo",
+
+//         "quotationId",
+//         "leadId",
+//         "accountId",
+
+//         "qty",
+//         "unitPrice",
+//         "totalAmount",
+
+//         "createdBy",
+//         "createdtype",
+
+//         "created",
+//         "updated",
+//       ],
+//       [["salesOrderId", "DESC"]],
+//     );
+
+//     if (!salesOrders.length) {
+//       return successResponse(res, [], "Sales Order list fetched successfully");
+//     }
+
+//     // ========================================================
+//     // GET EMPLOYEE IDS
+//     // ========================================================
+
+//     const employeeIds = salesOrders
+//       .map((item) => item.createdBy)
+//       .filter((id) => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
+
+//     let employeeMap = {};
+
+//     if (employeeIds.length > 0) {
+//       try {
+//         const employees = await selectWithJoins(
+//           "employee",
+//           [],
+//           {
+//             employeeId: employeeIds,
+//           },
+//           ["employeeId", "employeeName"],
+//         );
+
+//         employeeMap = employees.reduce((map, emp) => {
+//           map[String(emp.employeeId)] =
+//             emp.employeeName || String(emp.employeeId);
+
+//           return map;
+//         }, {});
+//       } catch (err) {
+//         console.error("Error fetching employees:", err.message);
+//       }
+//     }
+
+//     // ========================================================
+//     // GET QUOTATION NUMBERS
+//     // ========================================================
+
+//     const quotationIds = salesOrders
+//       .map((item) => item.quotationId)
+//       .filter((id) => id);
+
+//     let quotationMap = {};
+
+//     if (quotationIds.length > 0) {
+//       try {
+//         const quotations = await selectWithJoins(
+//           "quotation",
+//           [],
+//           {
+//             quotationId: quotationIds,
+//             companyId,
+//             delete: 0,
+//           },
+//           ["quotationId", "qNo"],
+//         );
+
+//         quotationMap = quotations.reduce((map, quotation) => {
+//           map[String(quotation.quotationId)] = quotation.qNo || "";
+
+//           return map;
+//         }, {});
+//       } catch (err) {
+//         console.error("Error fetching quotations:", err.message);
+//       }
+//     }
+
+//     // ========================================================
+//     // GET ACCOUNT (PARTY) KYC DETAILS
+//     // ========================================================
+
+//     const accountIds = [
+//       ...new Set(
+//         salesOrders.map((item) => item.accountId).filter((id) => id),
+//       ),
+//     ];
+
+//     let accountMap = {};
+
+//     if (accountIds.length > 0) {
+//       try {
+//         const accounts = await selectWithJoins(
+//           "account",
+//           [],
+//           { id: accountIds, companyId, delete: 0 },
+//           [
+//             "id",
+//             "accountName",
+//             "mobileNo",
+//             "email",
+//             "aadharCardNo",
+//             "aadharImage",
+//             "panCard",
+//             "panImage",
+//             "gstNo",
+//             "gstImage",
+//           ],
+//         );
+
+//         accountMap = accounts.reduce((map, acc) => {
+//           map[String(acc.id)] = acc;
+//           return map;
+//         }, {});
+//       } catch (err) {
+//         console.error("Error fetching accounts:", err.message);
+//       }
+//     }
+
+//     // ========================================================
+//     // GET MODEL NAMES
+//     // ========================================================
+
+//     const leadMap = await getLeadMap(
+//       salesOrders.map((item) => item.leadId),
+//       companyId,
+//     );
+
+//     const modelIds = [
+//       ...new Set([...leadMap.values()].map((l) => l.model).filter(Boolean)),
+//     ];
+
+//     let modelMap = {};
+
+//     if (modelIds.length > 0) {
+//       try {
+//         const models = await selectWithJoins(
+//           "itemmaster",
+//           [],
+//           { itemId: modelIds },
+//           ["itemId", "itemName"],
+//         );
+
+//         modelMap = models.reduce((map, m) => {
+//           map[String(m.itemId)] = m.itemName || "";
+//           return map;
+//         }, {});
+//       } catch (err) {
+//         console.error("Error fetching models:", err.message);
+//       }
+//     }
+//     // ========================================================
+//     // FORMAT RESPONSE
+//     // ========================================================
+
+//     const data = salesOrders.map((salesOrder) => {
+//       const lead = leadMap.get(String(salesOrder.leadId));
+//       const account = accountMap[String(salesOrder.accountId)];
+//       let createdByName = salesOrder.createdBy || "";
+
+//       if (createdByName === "Admin") {
+//         createdByName = "Admin";
+//       } else if (
+//         !isNaN(Number(createdByName)) &&
+//         employeeMap[String(createdByName)]
+//       ) {
+//         createdByName = employeeMap[String(createdByName)];
+//       }
+
+//       return {
+//         id: String(salesOrder.salesOrderId),
+
+//         financialYearId: salesOrder.financialYearId,
+
+//         soNo: salesOrder.soNo || "",
+
+//         quotationId: String(salesOrder.quotationId || ""),
+
+//         qNo: quotationMap[String(salesOrder.quotationId)] || "",
+
+//         leadId: salesOrder.leadId,
+//         accountId: salesOrder.accountId || null,
+
+//         ...leadDetails(lead),
+//         modelName: modelMap[String(lead?.model)] || "",
+
+//         qty: Number(salesOrder.qty) || 0,
+
+//         unitPrice: Number(salesOrder.unitPrice) || 0,
+
+//         totalAmount: Number(salesOrder.totalAmount) || 0,
+
+//         // Selected party ka KYC — account table se
+//         partyName: account?.accountName || "",
+//         partyMobile: account?.mobileNo || "",
+//         partyEmail: account?.email || "",
+//         aadharNumber: account?.aadharCardNo || "",
+//         aadharImage: account?.aadharImage || "",
+//         panNumber: account?.panCard || "",
+//         panImage: account?.panImage || "",
+//         gstNumber: account?.gstNo || "",
+//         gstImage: account?.gstImage || "",
+
+//         createdBy: createdByName,
+
+//         createdType: salesOrder.createdtype || "",
+
+//         createdAt: salesOrder.created,
+
+//         updatedAt: salesOrder.updated,
+//       };
+//     });
+
+//     return successResponse(res, data, "Sales Order list fetched successfully");
+//   } catch (error) {
+//     return errorResponse(res, error.message || "Something Went Wrong", error);
+//   }
+// };
 const getSalesOrderList = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -702,7 +989,8 @@ const getSalesOrderList = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { financialYearId, role } = req.query;
+    // CHANGED: pendingOnly, includeSalesOrderId add
+    const { financialYearId, role, pendingOnly, excludeBilled, includeSalesOrderId } = req.query;
 
     const branchId = req.branchId;
     const employeeId = req.employeeId;
@@ -744,7 +1032,8 @@ const getSalesOrderList = async (req, res) => {
     // FETCH SALES ORDERS
     // ========================================================
 
-    const salesOrders = await selectWithJoins(
+    // CHANGED: variable naam salesOrders -> allSalesOrders
+    const allSalesOrders = await selectWithJoins(
       "salesorder",
       [],
       salesOrderWhere,
@@ -771,6 +1060,28 @@ const getSalesOrderList = async (req, res) => {
       ],
       [["salesOrderId", "DESC"]],
     );
+
+    // NEW: Sales Register dropdown ke liye billed orders hata do
+    let salesOrders = allSalesOrders;
+    const wantPendingOnly =
+      String(pendingOnly) === "true" || String(excludeBilled) === "true";
+    if (String(wantPendingOnly) === "true") {
+      const billed = await selectWithJoins(
+        "sales",
+        [],
+        { companyId, delete: 0 },
+        ["salesOrderId"],
+      );
+      const billedIds = new Set(
+        billed.map((b) => b.salesOrderId).filter(Boolean).map(String),
+      );
+
+      salesOrders = allSalesOrders.filter(
+        (so) =>
+          !billedIds.has(String(so.salesOrderId)) ||
+          String(so.salesOrderId) === String(includeSalesOrderId || ""),
+      );
+    }
 
     if (!salesOrders.length) {
       return successResponse(res, [], "Sales Order list fetched successfully");
@@ -981,7 +1292,6 @@ const getSalesOrderList = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 // ============================================================
 // GET SALES ORDER BY ID
 // ============================================================

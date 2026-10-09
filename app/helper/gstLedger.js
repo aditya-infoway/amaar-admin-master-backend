@@ -9,12 +9,22 @@ const GST_ACCOUNTS = {
     SGST: { accountName: "Purchase SGST", mobileNo: "GST-SGST" },
     IGST: { accountName: "Purchase IGST", mobileNo: "GST-IGST" },
 };
+// NEW: sales GST accounts (mobileNo alag, kyunki company-wise unique hai)
+const SALES_GST_ACCOUNTS = {
+    CGST: { accountName: "Sales CGST", mobileNo: "GST-SCGST" },
+    SGST: { accountName: "Sales SGST", mobileNo: "GST-SSGST" },
+    IGST: { accountName: "Sales IGST", mobileNo: "GST-SIGST" },
+};
+
 const PURCHASE_CODES = { CGST: "PCGST", SGST: "PSGST", IGST: "PIGST" };
 const DEBIT_NOTE_CODES = { CGST: "DCGST", SGST: "DSGST", IGST: "DIGST" };
+const SALES_CODES = { CGST: "SCGST", SGST: "SSGST", IGST: "SIGST" }; // NEW
 const PURCHASE_CODE_LIST = Object.values(PURCHASE_CODES);
 const DEBIT_NOTE_CODE_LIST = Object.values(DEBIT_NOTE_CODES);
-const ALL_GST_CODES = [...PURCHASE_CODE_LIST, ...DEBIT_NOTE_CODE_LIST];
-const GST_NAMES = Object.values(GST_ACCOUNTS).map((a) => a.accountName.toLowerCase());
+const SALES_CODE_LIST = Object.values(SALES_CODES); // NEW
+const ALL_GST_CODES = [...PURCHASE_CODE_LIST, ...DEBIT_NOTE_CODE_LIST, ...SALES_CODE_LIST];
+const GST_NAMES = [...Object.values(GST_ACCOUNTS), ...Object.values(SALES_GST_ACCOUNTS)]
+    .map((a) => a.accountName.toLowerCase());
 
 // used to lock edit/delete in the Account master
 const isProtectedGstAccount = (acc) =>
@@ -28,7 +38,8 @@ const syncDefaultGstAccounts = async (companyId) => {
         ["id", "accountName", "groupId", "delete"]
     );
 
-    for (const acc of Object.values(GST_ACCOUNTS)) {
+    // CHANGED: purchase + sales dono ke accounts
+    for (const acc of [...Object.values(GST_ACCOUNTS), ...Object.values(SALES_GST_ACCOUNTS)]) {
         const existing = existingRows.find(
             (r) => String(r.accountName || "").trim().toLowerCase() === acc.accountName.toLowerCase()
         );
@@ -60,7 +71,8 @@ const syncDefaultGstAccounts = async (companyId) => {
     return true;
 };
 
-const getGstAccountMap = async (companyId) => {
+// CHANGED: accounts param (default = purchase accounts)
+const getGstAccountMap = async (companyId, accounts = GST_ACCOUNTS) => {
     const build = async () => {
         const rows = await selectWithJoins(
             "account", [],
@@ -68,14 +80,14 @@ const getGstAccountMap = async (companyId) => {
             ["id", "accountName"]
         );
         const map = {};
-        for (const [key, { accountName }] of Object.entries(GST_ACCOUNTS)) {
+        for (const [key, { accountName }] of Object.entries(accounts)) {
             const hit = rows.find((r) => String(r.accountName).trim().toLowerCase() === accountName.toLowerCase());
             if (hit) map[key] = hit;
         }
         return map;
     };
     let map = await build();
-    if (Object.keys(map).length < 3) {          // self-heal so a purchase never fails
+    if (Object.keys(map).length < 3) {          // self-heal so a purchase/sale never fails
         await syncDefaultGstAccounts(companyId);
         map = await build();
     }
@@ -86,8 +98,9 @@ const getGstAccountMap = async (companyId) => {
 const postGstEntries = async ({
     companyId, financialYearId, date, cgst, sgst, igst, drOrCr, codes,
     voucherType, voucherNoBase, purchaseId, narration, createdBy, createdType,
+    accounts = GST_ACCOUNTS,                                  // NEW
 }) => {
-    const accMap = await getGstAccountMap(companyId);
+    const accMap = await getGstAccountMap(companyId, accounts); // CHANGED
     const lines = [["CGST", cgst], ["SGST", sgst], ["IGST", igst]].filter(([, a]) => Number(a) > 0);
 
     for (const [key, a] of lines) {
@@ -139,6 +152,18 @@ const postDebitNoteGst = ({ debitNoteNo, supplierName, ...rest }) =>
         narration: `${debitNoteNo || ""} — ${supplierName || ""}`.trim(),
     });
 
+// NEW: Sales -> CR on Sales GST accounts (output tax liability)
+const postSalesGst = ({ salesInvoiceNo, partyName, ...rest }) =>
+    postGstEntries({
+        ...rest,
+        accounts: SALES_GST_ACCOUNTS,
+        drOrCr: "CR",
+        codes: SALES_CODES,
+        voucherType: "SALES GST",
+        voucherNoBase: salesInvoiceNo,
+        narration: `${salesInvoiceNo || ""} — ${partyName || ""}`.trim(),
+    });
+
 // reverse a purchase's GST (call before re-posting on edit, and on delete)
 const reversePurchaseGst = async (companyId, purchaseId) => {
     const rows = await selectWithJoins(
@@ -152,7 +177,26 @@ const reversePurchaseGst = async (companyId, purchaseId) => {
     }
 };
 
+// NEW: reverse a sales invoice's GST (edit se pehle, aur delete pe)
+const reverseSalesGst = async (companyId, salesInvoiceNo) => {
+    const rows = await selectWithJoins(
+        "payment", [],
+        {
+            companyId,
+            paymentCollectedByModules: SALES_CODE_LIST,
+            voucherNo: ["CGST", "SGST", "IGST"].map((k) => `${salesInvoiceNo}/${k}`),
+            delete: 0,
+        },
+        ["paymentId", "selfAccountId", "selfDrOrCr", "amount"]
+    );
+    for (const r of rows) {
+        await updateAccountBalance(r.selfAccountId, Number(r.amount), r.selfDrOrCr === "DR" ? "CR" : "DR", companyId);
+        await updateModel("payment", { delete: 1, updated: new Date() }, { paymentId: r.paymentId, companyId });
+    }
+};
+
 // ---------------- back-fill (idempotent, safe to re-run) ----------------
+// (unchanged)
 const backfillGst = async (companyId) => {
     await syncDefaultGstAccounts(companyId);
     const result = { purchases: 0, debitNotes: 0 };
@@ -232,4 +276,5 @@ const backfillGst = async (companyId) => {
 module.exports = {
     ALL_GST_CODES, isProtectedGstAccount, syncDefaultGstAccounts,
     postPurchaseGst, postDebitNoteGst, reversePurchaseGst, backfillGst,
+    postSalesGst, reverseSalesGst, // NEW
 };
