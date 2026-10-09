@@ -102,6 +102,7 @@ const PARTICULARS_LABELS = {
   PCGST: "Purchase CGST", PSGST: "Purchase SGST", PIGST: "Purchase IGST",
   DCGST: "Debit Note CGST", DSGST: "Debit Note SGST", DIGST: "Debit Note IGST",
   SCGST: "Sales CGST", SSGST: "Sales SGST", SIGST: "Sales IGST",
+  PURAC: "Purchase Account", SALAC: "Sales Account",
 };
 
 const getParticularsLabel = (moduleCode, oppName) => {

@@ -9,7 +9,7 @@ const {
 
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
-const { postSalesGst, reverseSalesGst } = require("../../../helper/gstLedger.js");
+const { postSalesGst, reverseSalesGst,postSalesAccount } = require("../../../helper/gstLedger.js");
 const { updateAccountBalance } = require("../../../helper/accountBalance.js");
 // ============================================================
 // HELPERS
@@ -345,8 +345,7 @@ const postInvoiceGst = async ({ req, companyId, fy, body, totals, salesId }) => 
     ["accountName"],
   );
   const partyName = partyRows[0]?.accountName || "";
-  const createdBy = req.employeeId ? Number(req.employeeId) : Number(body.createdBy) || 0;
-  const createdType = req.employeeId ? "Sale Executive" : body.createdType || null;
+const { createdBy, createdType } = body;
   const salesInvoiceNo = String(body.salesInvoiceNo).trim();
 
   const accountId = normalizeId(body.accountId);
@@ -427,12 +426,37 @@ const postInvoiceGst = async ({ req, companyId, fy, body, totals, salesId }) => 
     await updateAccountBalance(bankAccountId, amount, "DR", companyId);
   }
 
-  // ---- Sales GST (CR) ----
-  await postSalesGst({
-    companyId, financialYearId: fy.financialYearId, date,
-    cgst: totals.cgstAmount, sgst: totals.sgstAmount, igst: totals.igstAmount,
-    salesInvoiceNo, partyName, createdBy, createdType,
-  });
+// ---- Sales GST (CR) ----
+await postSalesGst({
+    companyId,
+    financialYearId: fy.financialYearId,
+    date,
+    cgst: totals.cgstAmount,
+    sgst: totals.sgstAmount,
+    igst: totals.igstAmount,
+    salesInvoiceNo,
+    partyName,
+    createdBy,
+    createdType,
+});
+
+// ---- Sales Account (CR) ----
+await postSalesAccount({
+    companyId,
+    financialYearId: fy.financialYearId,
+    date,
+    amount: round2(
+        totals.grandTotal -
+        totals.cgstAmount -
+        totals.sgstAmount -
+        totals.igstAmount
+    ),
+    salesId,
+    salesInvoiceNo,
+    partyName,
+    createdBy,
+    createdType,
+});
 };
 // ============================================================
 // CREATE SALES
@@ -489,8 +513,8 @@ const createSales = async (req, res) => {
 
       status: "pending",
 
-      createdBy: req.employeeId ? String(req.employeeId) : body.createdBy || null,
-      createdtype: req.employeeId ? "Sale Executive" : body.createdType || null,
+createdBy: body.createdBy,
+createdtype: body.createdType,
 
       delete: 0,
     });
@@ -621,9 +645,26 @@ const getSalesList = async (req, res) => {
     const salesIds = salesRows.map((r) => r.salesId);
 
     // ---- Employees (createdBy name) ----
-    const employeeIds = salesRows
-      .map((r) => r.createdBy)
-      .filter((id) => id && id !== "Admin" && !isNaN(Number(id)));
+       // ---- Created By name: createdtype ke hisaab se employee ya company ----
+    const isNumericId = (id) => id && !isNaN(Number(id));
+
+    const employeeIds = [
+      ...new Set(
+        salesRows
+          .filter((r) => r.createdtype === "Sale Executive")
+          .map((r) => r.createdBy)
+          .filter(isNumericId),
+      ),
+    ];
+
+    const companyIds = [
+      ...new Set(
+        salesRows
+          .filter((r) => r.createdtype === "Super Admin")
+          .map((r) => r.createdBy)
+          .filter(isNumericId),
+      ),
+    ];
 
     let employeeMap = {};
     if (employeeIds.length > 0) {
@@ -643,6 +684,23 @@ const getSalesList = async (req, res) => {
       }
     }
 
+    let companyMap = {};
+    if (companyIds.length > 0) {
+      try {
+        const companies = await selectWithJoins(
+          "company",
+          [],
+          { companyId: companyIds, delete: 0 },
+          ["companyId", "companyName"],
+        );
+        companyMap = companies.reduce((map, c) => {
+          map[String(c.companyId)] = c.companyName || String(c.companyId);
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching companies:", err.message);
+      }
+    }
     // ---- Party ----
     const accountIds = [
       ...new Set(salesRows.map((r) => r.accountId).filter(Boolean)),
@@ -695,9 +753,11 @@ const getSalesList = async (req, res) => {
     }
 
     const data = salesRows.map((s) => {
-      let createdByName = s.createdBy || "";
-      if (createdByName !== "Admin" && !isNaN(Number(createdByName))) {
-        createdByName = employeeMap[String(createdByName)] || createdByName;
+        let createdByName = s.createdBy || "";
+      if (s.createdtype === "Sale Executive") {
+        createdByName = employeeMap[String(s.createdBy)] || createdByName;
+      } else if (s.createdtype === "Super Admin") {
+        createdByName = companyMap[String(s.createdBy)] || createdByName;
       }
 
       return {

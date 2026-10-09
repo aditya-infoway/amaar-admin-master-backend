@@ -22,36 +22,82 @@ const SALES_CODES = { CGST: "SCGST", SGST: "SSGST", IGST: "SIGST" }; // NEW
 const PURCHASE_CODE_LIST = Object.values(PURCHASE_CODES);
 const DEBIT_NOTE_CODE_LIST = Object.values(DEBIT_NOTE_CODES);
 const SALES_CODE_LIST = Object.values(SALES_CODES); // NEW
-const ALL_GST_CODES = [...PURCHASE_CODE_LIST, ...DEBIT_NOTE_CODE_LIST, ...SALES_CODE_LIST];
+
+// ⚠️ SQL se mile ids yahan daalo
+const PURCHASE_ACCOUNT_GROUP_ID = 24;
+const SALES_ACCOUNT_GROUP_ID = 27;
+
+const TRADING_ACCOUNTS = {
+    PURCHASE: { accountName: "Purchase Account", mobileNo: "TRD-PUR", groupId: PURCHASE_ACCOUNT_GROUP_ID },
+    SALES: { accountName: "Sales Account", mobileNo: "TRD-SAL", groupId: SALES_ACCOUNT_GROUP_ID },
+};
+const TRADING_CODES = { PURCHASE: "PURAC", SALES: "SALAC" };
+const ALL_GST_CODES = [...PURCHASE_CODE_LIST, ...DEBIT_NOTE_CODE_LIST, ...SALES_CODE_LIST, ...Object.values(TRADING_CODES)];
 const GST_NAMES = [...Object.values(GST_ACCOUNTS), ...Object.values(SALES_GST_ACCOUNTS)]
     .map((a) => a.accountName.toLowerCase());
 
 // used to lock edit/delete in the Account master
-const isProtectedGstAccount = (acc) =>
-    Number(acc?.groupId) === DUTIES_TAXES_GROUP_ID &&
-    GST_NAMES.includes(String(acc?.accountName || "").trim().toLowerCase());
+const isProtectedGstAccount = (acc) => {
+    const name = String(acc?.accountName || "").trim().toLowerCase();
+    const gid = Number(acc?.groupId);
+    if (gid === DUTIES_TAXES_GROUP_ID && GST_NAMES.includes(name)) return true;
+    return Object.values(TRADING_ACCOUNTS).some(
+        (t) => t.groupId && gid === t.groupId && name === t.accountName.toLowerCase()
+    );
+};
 
 // ---------------- default accounts (same idempotent pattern as item categories) ----------------
+// ---------------- default accounts ----------------
 const syncDefaultGstAccounts = async (companyId) => {
+    const defaults = [
+        ...Object.values(GST_ACCOUNTS),
+        ...Object.values(SALES_GST_ACCOUNTS),
+    ].map((a) => ({
+        ...a,
+        groupId: DUTIES_TAXES_GROUP_ID,
+    }));
+
+    for (const t of Object.values(TRADING_ACCOUNTS)) {
+        if (t.groupId) {
+            defaults.push(t);
+        }
+    }
+
+    // FIX: Fetch existing accounts before using existingRows.find()
     const existingRows = await selectWithJoins(
-        "account", [], { companyId },
+        "account",
+        [],
+        { companyId },
         ["id", "accountName", "groupId", "delete"]
     );
 
-    // CHANGED: purchase + sales dono ke accounts
-    for (const acc of [...Object.values(GST_ACCOUNTS), ...Object.values(SALES_GST_ACCOUNTS)]) {
+    for (const acc of defaults) {
         const existing = existingRows.find(
-            (r) => String(r.accountName || "").trim().toLowerCase() === acc.accountName.toLowerCase()
+            (r) =>
+                String(r.accountName || "").trim().toLowerCase() ===
+                acc.accountName.toLowerCase()
         );
 
         if (existing) {
-            if (Number(existing.delete) !== 0 || Number(existing.groupId) !== DUTIES_TAXES_GROUP_ID) {
+            if (
+                Number(existing.delete) !== 0 ||
+                Number(existing.groupId) !== Number(acc.groupId)
+            ) {
                 await updateModel(
                     "account",
-                    { groupId: DUTIES_TAXES_GROUP_ID, delete: 0, status: "active", updated: new Date() },
-                    { id: existing.id, companyId }
+                    {
+                        groupId: acc.groupId,
+                        delete: 0,
+                        status: "active",
+                        updated: new Date(),
+                    },
+                    {
+                        id: existing.id,
+                        companyId,
+                    }
                 );
             }
+
             continue;
         }
 
@@ -59,18 +105,23 @@ const syncDefaultGstAccounts = async (companyId) => {
             companyId,
             accountName: acc.accountName,
             printName: acc.accountName,
-            groupId: DUTIES_TAXES_GROUP_ID,
-            openingBalance: 0, drOrCr: "DR",
-            currentBalance: 0, currentDrOrCr: "DR",
-            countryName: "India", stateName: "-", addressLine1: "-", pincode: "-",
+            groupId: acc.groupId,
+            openingBalance: 0,
+            drOrCr: "DR",
+            currentBalance: 0,
+            currentDrOrCr: "DR",
+            countryName: "India",
+            stateName: "-",
+            addressLine1: "-",
+            pincode: "-",
             mobileNo: acc.mobileNo,
             status: "active",
             delete: 0,
         });
     }
+
     return true;
 };
-
 // CHANGED: accounts param (default = purchase accounts)
 const getGstAccountMap = async (companyId, accounts = GST_ACCOUNTS) => {
     const build = async () => {
@@ -194,7 +245,59 @@ const reverseSalesGst = async (companyId, salesInvoiceNo) => {
         await updateModel("payment", { delete: 1, updated: new Date() }, { paymentId: r.paymentId, companyId });
     }
 };
+const getTradingAccount = async (companyId, key) => {
+    const t = TRADING_ACCOUNTS[key];
+    if (!t.groupId) throw new Error(`${t.accountName} group id set nahi hai (gstLedger.js).`);
+    const find = async () => (await selectWithJoins(
+        "account", [], { companyId, groupId: t.groupId, delete: 0 }, ["id", "accountName"]
+    )).find((r) => String(r.accountName).trim().toLowerCase() === t.accountName.toLowerCase());
 
+    let acc = await find();
+    if (!acc) { await syncDefaultGstAccounts(companyId); acc = await find(); }
+    if (!acc) throw new Error(`Default ${t.accountName} not found.`);
+    return acc;
+};
+
+const postTradingEntry = async ({
+    key, drOrCr, voucherType, narration,
+    companyId, financialYearId, date, amount, purchaseId, salesId, createdBy, createdType,
+}) => {
+    const value = round2(amount);
+    if (!(value > 0)) return;
+    const acc = await getTradingAccount(companyId, key);
+
+    await saveModel("payment", {
+        companyId, financialYearId,
+        voucherType,
+        paymentCollectedByModules: TRADING_CODES[key],
+        voucherNo: null,
+        date,
+        selfAccountId: acc.id, selfDrOrCr: drOrCr,
+        accountId: acc.id, accountDrOrCr: drOrCr,
+        amount: value,
+        narration,
+        paymentMode: "CREDIT",
+        purchaseId: purchaseId || null,
+        salesId: salesId || null,
+        createdBy, createdType,
+        status: "active", delete: 0,
+    });
+    await updateAccountBalance(acc.id, value, drOrCr, companyId);
+};
+
+// Purchase -> DR on Purchase Account (amount = grandTotal - GST)
+const postPurchaseAccount = ({ supplierName, purchaseBillNo, ...rest }) =>
+    postTradingEntry({
+        ...rest, key: "PURCHASE", drOrCr: "DR", voucherType: "PURCHASE ACCOUNT",
+        narration: `${purchaseBillNo || ""} — ${supplierName || ""}`.trim(),
+    });
+
+// Sales -> CR on Sales Account (amount = grandTotal - GST)
+const postSalesAccount = ({ salesInvoiceNo, partyName, ...rest }) =>
+    postTradingEntry({
+        ...rest, key: "SALES", drOrCr: "CR", voucherType: "SALES ACCOUNT",
+        narration: `${salesInvoiceNo || ""} — ${partyName || ""}`.trim(),
+    });``
 // ---------------- back-fill (idempotent, safe to re-run) ----------------
 // (unchanged)
 const backfillGst = async (companyId) => {
@@ -276,5 +379,5 @@ const backfillGst = async (companyId) => {
 module.exports = {
     ALL_GST_CODES, isProtectedGstAccount, syncDefaultGstAccounts,
     postPurchaseGst, postDebitNoteGst, reversePurchaseGst, backfillGst,
-    postSalesGst, reverseSalesGst, // NEW
+    postSalesGst, reverseSalesGst, postPurchaseAccount, postSalesAccount// NEW
 };
