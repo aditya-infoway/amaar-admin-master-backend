@@ -17,7 +17,7 @@ const getCompanyForMail = async (companyId) => {
     [],
     { companyId, delete: 0 },
     ["companyName", "addressLine1", "addressLine2", "city", "pinCode", "state",
-     "gstNo", "mobile", "phone", "email", "website", "logo"],
+      "gstNo", "mobile", "phone", "email", "website", "logo"],
   );
   return rows[0] || {};
 };
@@ -48,7 +48,7 @@ const buildPurchaseOrderMail = ({ company, supplier, poNumber, poDate, requiredD
 
 
 
-      const itemCount = items.length;
+  const itemCount = items.length;
   const intro = `
   <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:700px;margin:0 auto 16px auto;line-height:1.6;">
     <p style="margin:0 0 10px 0;">Dear <strong>${esc(supplier.accountName)}</strong>,</p>
