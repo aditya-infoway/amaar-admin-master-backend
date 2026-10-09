@@ -836,8 +836,9 @@ const updateWorkOrder = async (req, res) => {
     if (conflictsWithAnother) {
       return errorResponse(
         res,
-        `Work Order already exists for this Sales Order (${duplicate.find((row) => String(row.workOrderId) !== String(id))
-          ?.workOrderNo
+        `Work Order already exists for this Sales Order (${
+          duplicate.find((row) => String(row.workOrderId) !== String(id))
+            ?.workOrderNo
         }).`,
       );
     }
