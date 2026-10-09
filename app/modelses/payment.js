@@ -40,7 +40,11 @@ module.exports = sequelize => {
       allowNull: true,
       field: "purchaseId"
     },
-
+ salesId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "salesId"
+    },
     createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,

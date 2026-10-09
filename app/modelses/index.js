@@ -81,6 +81,8 @@ db.debitnoteitem = require("./debitnoteitem.js")(sequelize);
 db.accountgroup = require("./accountgroup.js")(sequelize);
 db.employeecontractortype = require("./employeecontractortype.js")(sequelize);
 db.itemcategorystage = require("./itemcategorystage.js")(sequelize);
+db.sales  = require("./salesregister.js")(sequelize);
+db.salesdetails  = require("./salesregisterdetails.js")(sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 

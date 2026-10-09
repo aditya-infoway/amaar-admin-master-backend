@@ -22,6 +22,7 @@ const {
 } = require("../../../helper/workOrderMaterialStatus.js");
 const { getStageItems } = require("../../../helper/workOrderStageItems.js");
 
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -45,13 +46,13 @@ const liveDetails = (workOrder, lead) =>
   lead
     ? leadDetails(lead)
     : {
-        customerName: workOrder.customerName || "",
-        mobile: workOrder.mobile || "",
-        email: workOrder.email || "",
-        address: workOrder.address || "",
-        city: workOrder.city || "",
-        model: workOrder.model || "",
-      };
+      customerName: workOrder.customerName || "",
+      mobile: workOrder.mobile || "",
+      email: workOrder.email || "",
+      address: workOrder.address || "",
+      city: workOrder.city || "",
+      model: workOrder.model || "",
+    };
 
 // Validates { CUTTING: 12, WELDING: 15, ... } -> { rows } or { error }
 const validateStageAssignments = async (stages, companyId) => {
@@ -137,7 +138,7 @@ const getStageMap = async (workOrderIds) => {
       order: r.stageOrder,
       employeeId: String(r.employeeId),
       employeeName: emp.employeeName || "",
-      mobileNumber: emp.mobileNumber || "",
+      employeeMobile: emp.mobileNumber || "",
       status: r.status,
       assignedAt: r.created,
       startTime: r.startTime,
@@ -1128,6 +1129,27 @@ const getMyWorkOrderTasks = async (req, res) => {
     );
     const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
 
+    const modelIds = [
+      ...new Set(
+        workOrders
+          .map((w) => Number(w.model))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    ];
+
+    let modelNameById = new Map();
+    if (modelIds.length) {
+      const models = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: modelIds, delete: 0 },
+        ["itemId", "itemName"],
+      );
+      modelNameById = new Map(
+        models.map((m) => [String(m.itemId), m.itemName || ""]),
+      );
+    }
+
     const stagesByWo = new Map();
     allStages.forEach((s) => {
       const key = String(s.workOrderId);
@@ -1169,6 +1191,7 @@ const getMyWorkOrderTasks = async (req, res) => {
           stageProgressStatus,
           customerName: wo.customerName,
           model: wo.model,
+          modelName: modelNameById.get(String(wo.model)) || "",
           qty: wo.qty,
           stage: m.stage,
           stageLabel: labelByKey.get(m.stage) || m.stage,
@@ -1534,7 +1557,6 @@ const endWorkOrderStage = async (req, res) => {
     if (task.status !== "In Progress") {
       return errorResponse(res, "Work has not been started.");
     }
-
     const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
     const needsItems = stageDef?.requiresItemVerification === true;
 
@@ -1683,7 +1705,7 @@ const getWorkOrderModelItems = async (req, res) => {
               (modelCode && String(i.itemCode).trim() === modelCode) ||
               (modelName &&
                 String(i.itemName).trim().toLowerCase() ===
-                  modelName.toLowerCase()),
+                modelName.toLowerCase()),
           )
           .map((i) => Number(i.itemId));
 
@@ -1720,12 +1742,26 @@ const getWorkOrderModelItems = async (req, res) => {
       return successResponse(res, [], "BOM has no items");
     }
 
+
+    // Only child (leaf) items: drop rows that have children under them
+    const parentIds = new Set(
+      bomRows
+        .map((r) => r.parentId)            // <-- your parent column name
+        .filter((p) => p !== null && p !== undefined && p !== 0)
+        .map(Number),
+    );
+    const leafRows = bomRows.filter((r) => !parentIds.has(Number(r.bomItemId)));
+
+    if (!leafRows.length) {
+      return successResponse(res, [], "BOM has no child items");
+    }
+
     // Step 5: item master details
     const masterRows = await selectWithJoins(
       "itemmaster",
       [],
       {
-        itemId: [...new Set(bomRows.map((r) => r.itemId))],
+        itemId: [...new Set(leafRows.map((r) => r.itemId))],
         companyId,
         delete: 0,
       },
@@ -1762,7 +1798,7 @@ const getWorkOrderModelItems = async (req, res) => {
 
     const woQty = Number(workOrder.qty) || 1;
 
-    const data = bomRows.map((r) => {
+    const data = leafRows.map((r) => {
       const m = masterMap.get(Number(r.itemId)) || {};
       return {
         id: r.bomItemId,

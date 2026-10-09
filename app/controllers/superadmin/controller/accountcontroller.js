@@ -9,7 +9,7 @@ const {
 } = require("../../../helper/index.js");
 
 const { accountopeningbalance: AccountOpeningBalance } = require("../../../modelses");
-const { isProtectedGstAccount } = require("../../../helper/gstLedger.js");
+const { isProtectedGstAccount, syncDefaultGstAccounts } = require("../../../helper/gstLedger.js");
 
 // ---------------- Date helpers ----------------
 // Sequelize's DATEONLY type casts the value with moment.js before binding it to the
@@ -118,7 +118,11 @@ const getAccountList = async (req, res) => {
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
-
+  try {
+      await syncDefaultGstAccounts(companyId);
+    } catch (syncError) {
+      console.error("syncDefaultGstAccounts failed:", syncError.message);
+    }
     const list = await selectWithJoinsV2(
       "account",
       [
