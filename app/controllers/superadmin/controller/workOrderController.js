@@ -94,7 +94,7 @@ const validateStageAssignments = async (stages, companyId) => {
   return { rows };
 };
 
-// Map<workOrderId, stage[]> with employee names, ordered by stageOrder
+// Map<workOrderId, stage[]> with employee names + mobile, ordered by stageOrder
 const getStageMap = async (workOrderIds) => {
   const map = new Map();
   const ids = [...new Set((workOrderIds || []).filter(Boolean))];
@@ -105,8 +105,15 @@ const getStageMap = async (workOrderIds) => {
     [],
     { workOrderId: ids, delete: 0 },
     [
-      "workOrderId", "stage", "stageOrder", "employeeId", "status",
-      "completedAt", "startTime", "endTime", "created",
+      "workOrderId",
+      "stage",
+      "stageOrder",
+      "employeeId",
+      "status",
+      "completedAt",
+      "startTime",
+      "endTime",
+      "created",
     ],
     [["stageOrder", "ASC"]],
   );
@@ -114,20 +121,12 @@ const getStageMap = async (workOrderIds) => {
 
   const employeeIds = [...new Set(rows.map((r) => r.employeeId))];
 
-  // NOTE: employee me mobile ka column "mobileNo" maana hai, alag ho to badal dena
-   let employees = [];
-  try {
-    employees = await selectWithJoins(
-      "employee", [], { employeeId: employeeIds },
-      ["employeeId", "employeeName", "mobileNumber"],
-    );
-  } catch (e) {
-    console.error("Employee mobile column failed:", e.message);
-    employees = await selectWithJoins(
-      "employee", [], { employeeId: employeeIds },
-      ["employeeId", "employeeName"],
-    );
-  }
+  const employees = await selectWithJoins(
+    "employee",
+    [],
+    { employeeId: employeeIds },
+    ["employeeId", "employeeName", "mobileNumber"],
+  );
   const empById = new Map(employees.map((e) => [String(e.employeeId), e]));
   const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
 
@@ -141,7 +140,7 @@ const getStageMap = async (workOrderIds) => {
       order: r.stageOrder,
       employeeId: String(r.employeeId),
       employeeName: emp.employeeName || "",
-          employeeMobile: emp.mobileNumber || "",
+      employeeMobile: emp.mobileNumber || "",
       status: r.status,
       assignedAt: r.created,
       startTime: r.startTime,
@@ -839,8 +838,9 @@ const updateWorkOrder = async (req, res) => {
     if (conflictsWithAnother) {
       return errorResponse(
         res,
-        `Work Order already exists for this Sales Order (${duplicate.find((row) => String(row.workOrderId) !== String(id))
-          ?.workOrderNo
+        `Work Order already exists for this Sales Order (${
+          duplicate.find((row) => String(row.workOrderId) !== String(id))
+            ?.workOrderNo
         }).`,
       );
     }
@@ -1094,7 +1094,7 @@ const getMyWorkOrderTasks = async (req, res) => {
         "completedAt",
         "startTime",
         "endTime",
-        "itemsVerified"
+        "itemsVerified",
       ],
       [["workOrderStageId", "DESC"]],
     );
@@ -1107,7 +1107,7 @@ const getMyWorkOrderTasks = async (req, res) => {
         "workorderstage",
         [],
         { workOrderId: workOrderIds, delete: 0 },
-        ["workOrderId", "stageOrder", "status"],
+        ["workOrderId", "stage", "stageOrder", "status"],
       ),
       selectWithJoins(
         "workorder",
@@ -1131,16 +1131,57 @@ const getMyWorkOrderTasks = async (req, res) => {
     );
     const labelByKey = new Map(WORK_ORDER_STAGES.map((s) => [s.key, s.label]));
 
+    const modelIds = [
+      ...new Set(
+        workOrders
+          .map((w) => Number(w.model))
+          .filter((id) => Number.isInteger(id) && id > 0),
+      ),
+    ];
+
+    let modelNameById = new Map();
+    if (modelIds.length) {
+      const models = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: modelIds, delete: 0 },
+        ["itemId", "itemName"],
+      );
+      modelNameById = new Map(
+        models.map((m) => [String(m.itemId), m.itemName || ""]),
+      );
+    }
+
+    const stagesByWo = new Map();
+    allStages.forEach((s) => {
+      const key = String(s.workOrderId);
+      if (!stagesByWo.has(key)) stagesByWo.set(key, []);
+      stagesByWo.get(key).push(s);
+    });
+
     const data = mine
       .filter((m) => woById.has(String(m.workOrderId)))
       .map((m) => {
         const wo = woById.get(String(m.workOrderId));
-        const isUnlocked = !allStages.some(
-          (s) =>
-            String(s.workOrderId) === String(m.workOrderId) &&
-            s.stageOrder < m.stageOrder &&
-            s.status !== "Completed",
+        const siblings = stagesByWo.get(String(m.workOrderId)) || [];
+
+        const isUnlocked = !siblings.some(
+          (s) => s.stageOrder < m.stageOrder && s.status !== "Completed",
         );
+
+        const previous = siblings
+          .filter((s) => s.stageOrder < m.stageOrder)
+          .sort((a, b) => b.stageOrder - a.stageOrder)[0];
+
+        let stageProgressStatus = null;
+        if (previous) {
+          const prevLabel = labelByKey.get(previous.stage) || previous.stage;
+          stageProgressStatus =
+            previous.status === "Completed"
+              ? `${prevLabel} Complete`.trim()
+              : `Pending ${prevLabel}`.trim();
+        }
+
         return {
           workOrderStageId: m.workOrderStageId,
           workOrderId: m.workOrderId,
@@ -1149,8 +1190,10 @@ const getMyWorkOrderTasks = async (req, res) => {
           materialStatus:
             materialStatusMap.get(String(m.workOrderId)) ||
             MATERIAL_STATUS.PENDING_MATERIAL,
+          stageProgressStatus,
           customerName: wo.customerName,
           model: wo.model,
+          modelName: modelNameById.get(String(wo.model)) || "",
           qty: wo.qty,
           stage: m.stage,
           stageLabel: labelByKey.get(m.stage) || m.stage,
@@ -1269,7 +1312,7 @@ const startWorkOrderStage = async (req, res) => {
       "workorderstage",
       [],
       { workOrderStageId, companyId, employeeId, delete: 0 },
-      ["workOrderStageId", "workOrderId", "stageOrder", "status"],
+      ["workOrderStageId", "workOrderId", "stage", "stageOrder", "status"],
     );
     if (!rows.length) {
       return errorResponse(res, "Work order task not found.");
@@ -1290,18 +1333,24 @@ const startWorkOrderStage = async (req, res) => {
       return errorResponse(res, "This work order has already been started.");
     }
 
+    const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
 
-    const materialStatusMap = await getMaterialStatusMap(
-      [task.workOrderId],
-      companyId,
-    );
-    if (
-      materialStatusMap.get(String(task.workOrderId)) !==
-      MATERIAL_STATUS.PURCHASE
-    ) {
-      return errorResponse(res, "Material for this work order is not complete yet.");
+    // material check only for Cutting (first stage)
+    if (stageDef?.order === 1) {
+      const materialStatusMap = await getMaterialStatusMap(
+        [task.workOrderId],
+        companyId,
+      );
+      if (
+        materialStatusMap.get(String(task.workOrderId)) !==
+        MATERIAL_STATUS.PURCHASE
+      ) {
+        return errorResponse(
+          res,
+          "Material for this work order is not complete yet.",
+        );
+      }
     }
-
 
     // stages run in order: earlier stages must be Completed
     const siblings = await selectWithJoins(
@@ -1317,11 +1366,20 @@ const startWorkOrderStage = async (req, res) => {
       return errorResponse(res, "The previous stage is not completed yet.");
     }
 
+    const needsItems = stageDef?.requiresItemVerification === true;
+
     const startTime = new Date();
 
     // only one request can flip Pending -> In Progress
     const [updated] = await db.workorderstage.update(
-      { status: "In Progress", startTime, updated: startTime },
+      {
+        status: "In Progress",
+        startTime,
+        // stages that don't need item verification are auto-verified
+        itemsVerified: needsItems ? false : true,
+        itemsVerifiedAt: needsItems ? null : startTime,
+        updated: startTime,
+      },
       {
         where: {
           workOrderStageId,
@@ -1346,7 +1404,6 @@ const startWorkOrderStage = async (req, res) => {
   }
 };
 
-
 // the logged-in employee's own stage row, or null
 const loadMyStage = async (req, workOrderStageId) => {
   const rows = await selectWithJoins(
@@ -1358,7 +1415,14 @@ const loadMyStage = async (req, workOrderStageId) => {
       employeeId: req.employeeId,
       delete: 0,
     },
-    ["workOrderStageId", "workOrderId", "stage", "status", "itemsVerified", "startTime"],
+    [
+      "workOrderStageId",
+      "workOrderId",
+      "stage",
+      "status",
+      "itemsVerified",
+      "startTime",
+    ],
   );
   return rows[0] || null;
 };
@@ -1415,7 +1479,9 @@ const saveStageItemVerification = async (req, res) => {
       return errorResponse(res, "Work order task is required.");
     }
     const submitted = new Set(
-      (Array.isArray(req.body.bomItemIds) ? req.body.bomItemIds : []).map(String),
+      (Array.isArray(req.body.bomItemIds) ? req.body.bomItemIds : []).map(
+        String,
+      ),
     );
 
     const task = await loadMyStage(req, workOrderStageId);
@@ -1455,7 +1521,10 @@ const saveStageItemVerification = async (req, res) => {
       },
     );
     if (!updated) {
-      return errorResponse(res, "Unable to save. Please refresh and try again.");
+      return errorResponse(
+        res,
+        "Unable to save. Please refresh and try again.",
+      );
     }
 
     return successResponse(
@@ -1490,25 +1559,30 @@ const endWorkOrderStage = async (req, res) => {
     if (task.status !== "In Progress") {
       return errorResponse(res, "Work has not been started.");
     }
-    if (!task.itemsVerified) {
+    const stageDef = WORK_ORDER_STAGES.find((s) => s.key === task.stage);
+    const needsItems = stageDef?.requiresItemVerification === true;
+
+    if (needsItems && !task.itemsVerified) {
       return errorResponse(res, "Please verify and save the items first.");
     }
 
     const endTime = new Date();
 
     // only one request can flip In Progress -> Completed
+    const where = {
+      workOrderStageId,
+      companyId,
+      employeeId,
+      status: "In Progress",
+      delete: 0,
+    };
+    if (needsItems) {
+      where.itemsVerified = true;
+    }
+
     const [updated] = await db.workorderstage.update(
       { status: "Completed", endTime, updated: endTime },
-      {
-        where: {
-          workOrderStageId,
-          companyId,
-          employeeId,
-          status: "In Progress",
-          itemsVerified: true,
-          delete: 0,
-        },
-      },
+      { where },
     );
     if (!updated) {
       return errorResponse(res, "This work is already completed.");
@@ -1633,7 +1707,7 @@ const getWorkOrderModelItems = async (req, res) => {
               (modelCode && String(i.itemCode).trim() === modelCode) ||
               (modelName &&
                 String(i.itemName).trim().toLowerCase() ===
-                  modelName.toLowerCase()),
+                modelName.toLowerCase()),
           )
           .map((i) => Number(i.itemId));
 
@@ -1670,12 +1744,26 @@ const getWorkOrderModelItems = async (req, res) => {
       return successResponse(res, [], "BOM has no items");
     }
 
+
+    // Only child (leaf) items: drop rows that have children under them
+    const parentIds = new Set(
+      bomRows
+        .map((r) => r.parentId)            // <-- your parent column name
+        .filter((p) => p !== null && p !== undefined && p !== 0)
+        .map(Number),
+    );
+    const leafRows = bomRows.filter((r) => !parentIds.has(Number(r.bomItemId)));
+
+    if (!leafRows.length) {
+      return successResponse(res, [], "BOM has no child items");
+    }
+
     // Step 5: item master details
     const masterRows = await selectWithJoins(
       "itemmaster",
       [],
       {
-        itemId: [...new Set(bomRows.map((r) => r.itemId))],
+        itemId: [...new Set(leafRows.map((r) => r.itemId))],
         companyId,
         delete: 0,
       },
@@ -1712,7 +1800,7 @@ const getWorkOrderModelItems = async (req, res) => {
 
     const woQty = Number(workOrder.qty) || 1;
 
-    const data = bomRows.map((r) => {
+    const data = leafRows.map((r) => {
       const m = masterMap.get(Number(r.itemId)) || {};
       return {
         id: r.bomItemId,
@@ -1732,6 +1820,7 @@ const getWorkOrderModelItems = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
 module.exports = {
   getNextWorkOrderNo,
   createWorkOrder,
@@ -1747,5 +1836,5 @@ module.exports = {
   getMyStageItems,
   saveStageItemVerification,
   endWorkOrderStage,
-   getWorkOrderModelItems,
+  getWorkOrderModelItems,
 };
