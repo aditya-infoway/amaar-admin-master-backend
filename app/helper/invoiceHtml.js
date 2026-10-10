@@ -1,5 +1,3 @@
-
-
 const fmt = (n) =>
   Number(n || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
@@ -110,7 +108,7 @@ function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isS
     ? `<img src="${company.logo}" alt="logo"/>`
     : "";
 
-return `<!doctype html><html><head><meta charset="utf-8"/><title>Invoice ${esc(sale.salesInvoiceNo)}</title>
+  return `<!doctype html><html><head><meta charset="utf-8"/><title>Invoice ${esc(sale.salesInvoiceNo)}</title>
 <style>
   @page { size: A4; margin: 8mm; }
   * { box-sizing: border-box; }
@@ -124,31 +122,37 @@ return `<!doctype html><html><head><meta charset="utf-8"/><title>Invoice ${esc(s
   tr.item td { border-top: 0; border-bottom: 0; height: 26px; }
   .spacer td { height: 230px; border-top: 0; }
   .sign { height: 70px; text-align: right; vertical-align: bottom; }
-  .logo-cell { width: 35%; text-align: center; vertical-align: middle; height: 80px; }
-  .logo-cell img { max-width: 100%; max-height: 70px; object-fit: contain; }
-  .co-cell { width: 65%; vertical-align: middle; line-height: 1.5; }
+  .logo-cell { width: 22%; text-align: center; vertical-align: middle; height: 115px; }
+  .logo-cell img { max-width: 100%; max-height: 90px; object-fit: contain; }
+  .info-cell { width: 40%; vertical-align: middle; line-height: 1.5; }
+  .co-cell { width: 38%; vertical-align: middle; line-height: 1.5; }
   .co-name { font-size: 13px; font-weight: bold; }
-    .top { position: relative; text-align: center; font-size: 14px; margin-bottom: 4px; }
+  .top { position: relative; text-align: center; font-size: 14px; margin-bottom: 4px; }
   .top .orig { position: absolute; right: 0; top: 3px; font-size: 9px; font-style: italic; }
 </style></head><body>
 <div class="top">
   TAX INVOICE
   <span class="orig">ORIGINAL FOR RECIPIENT</span>
 </div>
+
 <table>
- 
   <tr>
     <td class="logo-cell">${logoHtml}</td>
-    <td class="co-cell">
+    <td class="info-cell">
       <div class="co-name">${esc(company.companyName)}</div>
       ${company.address ? esc(company.address) + "<br/>" : ""}
-          ${company.state ? "<b>State:</b> " + esc(company.state) + (company.stateCode ? " (Code: " + esc(company.stateCode) + ")" : "") + "<br/>" : ""}
       ${line("Mobile:", company.mobileNo)}
       ${line("Email:", company.email)}
+    </td>
+    <td class="co-cell">
+      ${company.state ? "<b>State:</b> " + esc(company.state) + (company.stateCode ? " (Code: " + esc(company.stateCode) + ")" : "") + "<br/>" : ""}
       ${line("GSTIN:", company.gstNo)}
       ${line("PAN:", company.panNo)}
     </td>
   </tr>
+</table>
+
+<table>
   <tr>
     ${partyBlock("Billed to:", "Place of Supply")}
     ${partyBlock("Shipped to:", "Place of Delivery")}
