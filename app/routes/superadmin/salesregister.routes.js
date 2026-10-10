@@ -27,6 +27,10 @@ module.exports = (app) => {
   // NOTE: static paths hamesha "/:id" se pehle
   routes.get("/next-invoice-no", sales.getNextSalesInvoiceNo);
   routes.get("/list", sales.getSalesList);
+  routes.get("/pending-credit-list", sales.getPendingCreditInvoices);
+  
+    routes.get("/print/:id", sales.printSalesInvoice);  
+    
   routes.get("/:id", sales.getSalesById);
 
   routes.post(
