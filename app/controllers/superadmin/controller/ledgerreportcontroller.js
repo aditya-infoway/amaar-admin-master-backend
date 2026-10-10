@@ -78,6 +78,8 @@ const PARTICULARS_LABELS = {
   BP: "Bank Payment",
   CR: "Cash Receipt",
   BR: "Bank Receipt",
+  SICR: "Sales Invoice Cash Receipt",
+SIBR: "Sales Invoice Bank Receipt",
   LCR: "Lead Cash Receipt",
   LBR: "Lead Bank Receipt",
   DCR: "Down Payment Cash Receipt",

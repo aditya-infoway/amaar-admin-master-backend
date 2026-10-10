@@ -534,6 +534,7 @@ const getWorkOrderList = async (req, res) => {
       .filter((id) => id);
 
     let salesOrderMap = {};
+    let quotationIdBySO = {};
 
     if (salesOrderIds.length > 0) {
       try {
@@ -541,13 +542,20 @@ const getWorkOrderList = async (req, res) => {
           "salesorder",
           [],
           { salesOrderId: salesOrderIds, companyId, delete: 0 },
-          ["salesOrderId", "soNo"],
+          ["salesOrderId", "soNo", "quotationId"],
         );
 
         salesOrderMap = salesOrders.reduce((map, so) => {
           map[String(so.salesOrderId)] = so.soNo || "";
           return map;
         }, {});
+
+        // NEW: salesOrderId -> quotationId
+        quotationIdBySO = salesOrders.reduce((map, so) => {
+          map[String(so.salesOrderId)] = so.quotationId;
+          return map;
+        }, {});
+
       } catch (err) {
         console.error("Error fetching sales orders:", err.message);
       }
@@ -591,6 +599,78 @@ const getWorkOrderList = async (req, res) => {
       }
     }
 
+    // ========================================================
+    // GET VEHICLE TYPE (Tipper / Trailer) FROM QUOTATION
+    // ========================================================
+    const quotationIds = [
+      ...new Set(Object.values(quotationIdBySO).filter(Boolean)),
+    ];
+
+    let vehicleTypeMap = {};
+    if (quotationIds.length > 0) {
+      try {
+        const quotations = await selectWithJoins(
+          "quotation",
+          [],
+          { quotationId: quotationIds, companyId, delete: 0 },
+          ["quotationId", "vehicleType"],
+        );
+        vehicleTypeMap = quotations.reduce((map, q) => {
+          map[String(q.quotationId)] = q.vehicleType || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching quotations:", err.message);
+      }
+    }
+
+
+
+
+    // ========================================================
+    // GET BODY REGISTER (Pending vs Generate)
+    // ========================================================
+    const workOrderIds = workOrders.map((w) => w.workOrderId);
+    let bodyRegisterMap = {};
+
+    if (workOrderIds.length > 0) {
+      try {
+        const bodyRegisters = await selectWithJoins(
+          "bodyregister",
+          [],
+          { workOrderId: workOrderIds, companyId, delete: 0 },
+          [
+            "bodyRegisterId",
+            "workOrderId",
+            "vehicleType",
+            "classOfVehicle",
+            "makerName",
+            "bodyNumber",
+            "serialNo",
+            "bodyYear",
+            "engineNo",
+            "noOfCylinder",
+            "fuelUsed",
+            "mfgMonthYear",
+            "bodyColour",
+            "grossVehicleWeight",
+            "typeOfBody",
+          ],
+        );
+
+        bodyRegisterMap = bodyRegisters.reduce((map, br) => {
+          map[String(br.workOrderId)] = br;
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching body registers:", err.message);
+      }
+    }
+
+
+
+
+
     const stageMap = await getStageMap(workOrders.map((w) => w.workOrderId));
 
     const data = workOrders.map((workOrder) => {
@@ -598,6 +678,8 @@ const getWorkOrderList = async (req, res) => {
         workOrder,
         leadBySalesOrder.get(String(workOrder.salesOrderId)),
       );
+
+      const br = bodyRegisterMap[String(workOrder.workOrderId)] || null;
 
       return {
         id: String(workOrder.workOrderId),
@@ -616,6 +698,11 @@ const getWorkOrderList = async (req, res) => {
         model: live.model,
         modelName: modelMap[String(live.model)] || "",
 
+        vehicleType:
+          vehicleTypeMap[
+          String(quotationIdBySO[String(workOrder.salesOrderId)])
+          ] || "",
+
         qty: Number(workOrder.qty) || 0,
         totalPrice: Number(workOrder.totalPrice) || 0,
         gst: Number(workOrder.gst) || 0,
@@ -629,6 +716,27 @@ const getWorkOrderList = async (req, res) => {
         stages: stageMap.get(String(workOrder.workOrderId)) || [],
         createdAt: workOrder.created,
         updatedAt: workOrder.updated,
+
+        bodyRegisterGenerated: !!br,
+        bodyRegisterId: br ? br.bodyRegisterId : null,
+        bodyRegister: br
+          ? {
+            bodyRegisterId: br.bodyRegisterId,
+            vehicleType: br.vehicleType,
+            classOfVehicle: br.classOfVehicle,
+            makerName: br.makerName,
+            bodyNumber: br.bodyNumber,
+            serialNo: br.serialNo,
+            bodyYear: br.bodyYear,
+            engineNo: br.engineNo,
+            noOfCylinder: br.noOfCylinder,
+            fuelUsed: br.fuelUsed,
+            mfgMonthYear: br.mfgMonthYear,
+            bodyColour: br.bodyColour,
+            grossVehicleWeight: br.grossVehicleWeight,
+            typeOfBody: br.typeOfBody,
+          }
+          : null,
       };
     });
 
@@ -838,9 +946,8 @@ const updateWorkOrder = async (req, res) => {
     if (conflictsWithAnother) {
       return errorResponse(
         res,
-        `Work Order already exists for this Sales Order (${
-          duplicate.find((row) => String(row.workOrderId) !== String(id))
-            ?.workOrderNo
+        `Work Order already exists for this Sales Order (${duplicate.find((row) => String(row.workOrderId) !== String(id))
+          ?.workOrderNo
         }).`,
       );
     }

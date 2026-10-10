@@ -45,6 +45,11 @@ module.exports = sequelize => {
       allowNull: true,
       field: "salesId"
     },
+       salesOrderId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "salesOrderId"
+    },
     createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,

@@ -110,6 +110,7 @@ const createCompanyDetails = async (req, res) => {
 
     const {
       companyName,
+      companyCode,
       natureOfBusiness,
       taxSystem,
       addressLine1,
@@ -143,6 +144,7 @@ const createCompanyDetails = async (req, res) => {
     const companyDetailsPayload = {
       companyId,
       companyName,
+      companyCode: String(companyCode || "").trim().toUpperCase(),
       natureOfBusiness,
       taxSystem,
       addressLine1,
@@ -321,6 +323,7 @@ const getCompanyDetails = async (req, res) => {
         "companyDetailsId",
         "companyId",
         "companyName",
+        "companyCode",
         "natureOfBusiness",
         "taxSystem",
         "addressLine1",
@@ -350,6 +353,7 @@ const getCompanyDetails = async (req, res) => {
         "branchName",
         "ifscCode",
         "logo", // 👈 add karo
+        "icon",
       ],
     );
 
@@ -359,6 +363,7 @@ const getCompanyDetails = async (req, res) => {
 
     const data = rows[0];
     data.logo = getBlobTempPublicUrl(data.logo); // 👈 full URL bana do
+    data.icon = getBlobTempPublicUrl(data.icon);
 
     return successResponse(res, data, "Company details fetched successfully.");
   } catch (error) {
@@ -378,6 +383,7 @@ const updateCompanyDetails = async (req, res) => {
     const {
       companyDetailsId,
       companyName,
+      companyCode,
       natureOfBusiness,
       taxSystem,
       addressLine1,
@@ -412,7 +418,7 @@ const updateCompanyDetails = async (req, res) => {
       "companydetails",
       [],
       { companyDetailsId, companyId, delete: 0 },
-      ["companyDetailsId", "logo"],
+      ["companyDetailsId", "logo", "icon"],
     );
 
     if (existing.length === 0) {
@@ -421,6 +427,7 @@ const updateCompanyDetails = async (req, res) => {
 
     const updatePayload = {
       companyName,
+      companyCode: String(companyCode || "").trim().toUpperCase(),
       natureOfBusiness,
       taxSystem,
       addressLine1,
@@ -452,17 +459,24 @@ const updateCompanyDetails = async (req, res) => {
       updated: new Date(),
     };
 
-    if (req.file) {
-      // 👇 subfolder ke saath relative path DB me save karo
-      updatePayload.logo = "company_logo/" + req.file.filename;
+    const removeOldFile = (oldFile) => {
+      if (!oldFile) return;
+      fs.unlink(path.join("./Uploadimages", oldFile), (err) => {
+        if (err) console.log("Old file delete failed:", err.message);
+      });
+    };
 
-      const oldLogo = existing[0].logo;
-      if (oldLogo) {
-        const oldPath = path.join("./Uploadimages", oldLogo);
-        fs.unlink(oldPath, (err) => {
-          if (err) console.log("Old logo delete failed:", err.message);
-        });
-      }
+    const logoFile = req.files?.logo?.[0];
+    const iconFile = req.files?.icon?.[0];
+
+    if (logoFile) {
+      updatePayload.logo = "company_logo/" + logoFile.filename;
+      removeOldFile(existing[0].logo);
+    }
+
+    if (iconFile) {
+      updatePayload.icon = "company_logo/" + iconFile.filename;
+      removeOldFile(existing[0].icon);
     }
 
     await updateModel("companydetails", updatePayload, {

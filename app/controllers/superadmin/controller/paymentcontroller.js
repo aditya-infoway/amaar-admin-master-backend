@@ -207,7 +207,7 @@ const getCashPaymentList = async (req, res) => {
       "payment", [], where,
       [
         "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
-        "amount", "narration", "createdBy", "createdType",
+        "amount","paymentCollectedByModules", "narration", "createdBy", "createdType",
       ]
     );
 
@@ -225,6 +225,7 @@ const getCashPaymentList = async (req, res) => {
     const data = rows.map(r => ({
       id: String(r.paymentId),
       voucherNo: r.voucherNo,
+       type: r.paymentCollectedByModules || "",
       date: r.date,
       cashAccount: accMap[r.selfAccountId] || "",
       oppAccount: accMap[r.accountId] || "",
@@ -254,7 +255,7 @@ const getBankPaymentList = async (req, res) => {
       "payment", [], where,
       [
         "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
-        "amount", "paymentMode", "narration", "createdBy", "createdType",
+        "amount", "paymentMode","paymentCollectedByModules",  "narration", "createdBy", "createdType",
       ]
     );
 
@@ -270,6 +271,7 @@ const getBankPaymentList = async (req, res) => {
     const data = rows.map(r => ({
       id: String(r.paymentId),
       voucherNo: r.voucherNo,
+         type: r.paymentCollectedByModules || "",
       date: r.date,
       bankAccount: accMap[r.selfAccountId] || "",
       oppAccount: accMap[r.accountId] || "",
@@ -946,7 +948,7 @@ const createCashReceipt = async (req, res) => {
     const companyId = req.companyId;
     const {
       cashAccountId, voucherNo, date, oppAccountId, amount, narration, financialYearId,
-      createdBy, createdType,
+      createdBy, createdType,  salesId, salesOrderId,
     } = req.body;
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
@@ -989,6 +991,8 @@ const createCashReceipt = async (req, res) => {
       paymentMode: "CASH",
       createdBy: createdBy != null ? Number(createdBy) : companyId,
       createdType: createdType || "Super Admin",
+           salesId: salesId ? Number(salesId) : null,           
+      salesOrderId: salesOrderId ? Number(salesOrderId) : null,
       status: "active",
       delete: 0,
     });
@@ -1014,6 +1018,7 @@ const createBankReceipt = async (req, res) => {
       bankAccountId, voucherNo, date, oppAccountId, amount, transactionMode,
       chequeNo, chequeDate, chequeClearDate, narration, financialYearId,
       createdBy, createdType,
+      salesId, salesOrderId, // ✅ NEW
     } = req.body;
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
@@ -1045,6 +1050,58 @@ const createBankReceipt = async (req, res) => {
       return errorResponse(res, "Cheque number and cheque date are required for cheque mode.");
     }
 
+    // ✅ NEW — Invoice / SO ke pending se zyada receipt na ho
+    const sumAmount = (rows) => rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+    if (salesId) {
+      const inv = await selectWithJoins(
+        "sales", [],
+        { salesId: Number(salesId), companyId, delete: 0 },
+        ["salesId", "grandTotal", "salesOrderId"]
+      );
+      if (!inv.length) return errorResponse(res, "Selected sales invoice is invalid.");
+
+      const rec = await selectWithJoins(
+        "payment", [],
+        { companyId, salesId: Number(salesId), voucherType: ["CASH RECEIPT", "BANK RECEIPT"], delete: 0 },
+        ["amount"]
+      );
+      let received = sumAmount(rec);
+
+      if (inv[0].salesOrderId) {
+        const adv = await selectWithJoins(
+          "payment", [],
+          { companyId, salesOrderId: Number(inv[0].salesOrderId), voucherType: ["CASH RECEIPT", "BANK RECEIPT"], delete: 0 },
+          ["amount"]
+        );
+        received += sumAmount(adv);
+      }
+
+      const pending = Number(inv[0].grandTotal) - received;
+      if (Number(amount) > pending + 0.001) {
+        return errorResponse(res, `Amount cannot exceed pending amount (${pending.toFixed(2)}).`);
+      }
+    }
+
+    if (salesOrderId) {
+      const so = await selectWithJoins(
+        "salesorder", [],
+        { salesOrderId: Number(salesOrderId), companyId, delete: 0 },
+        ["salesOrderId", "totalAmount"]
+      );
+      if (!so.length) return errorResponse(res, "Selected sales order is invalid.");
+
+      const adv = await selectWithJoins(
+        "payment", [],
+        { companyId, salesOrderId: Number(salesOrderId), voucherType: ["CASH RECEIPT", "BANK RECEIPT"], delete: 0 },
+        ["amount"]
+      );
+      const pending = Number(so[0].totalAmount) - sumAmount(adv);
+      if (Number(amount) > pending + 0.001) {
+        return errorResponse(res, `Amount cannot exceed pending amount (${pending.toFixed(2)}).`);
+      }
+    }
+
     // ---- Bank Receipt logic: Bank Account DR (paisa andar aaya), Opp Account CR ----
     const payment = await saveModel("payment", {
       companyId,
@@ -1063,6 +1120,8 @@ const createBankReceipt = async (req, res) => {
       chequeNo: modeUpper === "CHEQUE" ? chequeNo : null,
       chequeDate: modeUpper === "CHEQUE" ? chequeDate : null,
       chequeClearDate: modeUpper === "CHEQUE" ? (chequeClearDate || null) : null,
+      salesId: salesId ? Number(salesId) : null,          
+      salesOrderId: salesOrderId ? Number(salesOrderId) : null,
       createdBy: createdBy != null ? Number(createdBy) : companyId,
       createdType: createdType || "Super Admin",
       status: "active",
@@ -1081,7 +1140,6 @@ const createBankReceipt = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 // ---------------- LIST (Cash Receipt only) ----------------
 const getCashReceiptList = async (req, res) => {
   try {
@@ -1096,7 +1154,7 @@ const getCashReceiptList = async (req, res) => {
       "payment", [], where,
       [
         "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
-        "amount", "narration", "paymentMode", "createdBy", "createdType",
+        "amount", "paymentCollectedByModules", "narration", "paymentMode", "createdBy", "createdType",
       ]
     );
 
@@ -1112,6 +1170,7 @@ const getCashReceiptList = async (req, res) => {
     const data = rows.map(r => ({
       id: String(r.paymentId),
       voucherNo: r.voucherNo,
+            type: r.paymentCollectedByModules || "",
       date: r.date,
       cashAccount: accMap[r.selfAccountId] || "",
       oppAccount: accMap[r.accountId] || "",
@@ -1142,7 +1201,7 @@ const getBankReceiptList = async (req, res) => {
       "payment", [], where,
       [
         "paymentId", "voucherNo", "date", "selfAccountId", "accountId",
-        "amount", "paymentMode", "narration", "createdBy", "createdType",
+        "amount", "paymentMode","paymentCollectedByModules", "narration", "createdBy", "createdType",
       ]
     );
 
@@ -1158,6 +1217,7 @@ const getBankReceiptList = async (req, res) => {
     const data = rows.map(r => ({
       id: String(r.paymentId),
       voucherNo: r.voucherNo,
+            type: r.paymentCollectedByModules || "BR",
       date: r.date,
       bankAccount: accMap[r.selfAccountId] || "",
       oppAccount: accMap[r.accountId] || "",

@@ -30,6 +30,7 @@ module.exports = (app) => {
 
   routes.get("/next-number", salesOrder.getNextSalesOrderNo);
   routes.get("/list", salesOrder.getSalesOrderList);
+  routes.get("/pending-advance-list", salesOrder.getPendingAdvanceSalesOrders);
   routes.get("/:id", salesOrder.getSalesOrderById);
 
   routes.post(

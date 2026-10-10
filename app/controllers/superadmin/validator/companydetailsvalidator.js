@@ -15,6 +15,15 @@ const companyDetailsSchema = Joi.object({
     "string.empty": "Company name is required",
     "any.required": "Company name is required",
   }),
+  companyCode: Joi.string()
+    .trim()
+    .pattern(/^[A-Za-z0-9]{2,10}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "Use 2-10 letters or numbers",
+      "string.empty": "Company code is required",
+      "any.required": "Company code is required",
+    }),
   natureOfBusiness: Joi.string().trim().required().messages({
     "string.empty": "Nature of business is required",
     "any.required": "Nature of business is required",
@@ -136,6 +145,15 @@ const companyDetailsUpdateSchema = Joi.object({
   companyName: Joi.string().trim().required().messages({
     "string.empty": "Company name is required",
   }),
+  companyCode: Joi.string()
+    .trim()
+    .pattern(/^[A-Za-z0-9]{2,10}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "Use 2-10 letters or numbers",
+      "string.empty": "Company code is required",
+      "any.required": "Company code is required",
+    }),
   natureOfBusiness: Joi.string().trim().required(),
   taxSystem: Joi.string().trim().required(),
 
