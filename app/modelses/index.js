@@ -61,7 +61,7 @@ db.salesorder = require("./salesorder.js")(sequelize, Sequelize);
 db.location = require("./location.js")(sequelize, Sequelize);
 
 db.workorder = require("./workorder.js")(sequelize, Sequelize);
-db.workorderstage = require("./workorderstage.js")(sequelize, Sequelize);  
+db.workorderstage = require("./workorderstage.js")(sequelize, Sequelize);
 db.indent = require("./indent.js")(sequelize, Sequelize);
 db.indentitem = require("./indentitem.js")(sequelize, Sequelize);
 db.attendance = require("./attendance.js")(sequelize, Sequelize);
@@ -81,8 +81,9 @@ db.debitnoteitem = require("./debitnoteitem.js")(sequelize);
 db.accountgroup = require("./accountgroup.js")(sequelize);
 db.employeecontractortype = require("./employeecontractortype.js")(sequelize);
 db.itemcategorystage = require("./itemcategorystage.js")(sequelize);
-db.sales  = require("./salesregister.js")(sequelize);
-db.salesdetails  = require("./salesregisterdetails.js")(sequelize);
+db.sales = require("./salesregister.js")(sequelize);
+db.salesdetails = require("./salesregisterdetails.js")(sequelize);
+db.bodyregister = require("./bodyregister.js")(sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
