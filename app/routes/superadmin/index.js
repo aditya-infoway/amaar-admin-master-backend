@@ -44,5 +44,6 @@ module.exports = (app) => {
     require("./accountgroup.routes")(app);
     require("./contractortype.routes")(app);
     require("./itemcategorystage.routes")(app);
-     require("./salesregister.routes")(app);
+    require("./salesregister.routes")(app);
+    require("./bodyregister.routes")(app);
 };

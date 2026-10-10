@@ -116,7 +116,7 @@ const getItemSupplierInfo = async (req, res) => {
         itemSupplierId = Number(itemRows[0].supplierId) || null;
       }
     } catch (e) {
-      console.error("Item supplier column lookup failed:", e.message);
+      // console.error("Item supplier column lookup failed:", e.message);
       const itemRows = await selectWithJoins(
         "itemmaster",
         [],
@@ -377,7 +377,7 @@ const createPurchaseOrder = async (req, res) => {
           });
           job.order.mailStatus = info?.accepted?.length ? "sent" : "failed";
         } catch (e) {
-          console.error("PO mail failed:", job.supplier.email, e.message);
+          // console.error("PO mail failed:", job.supplier.email, e.message);
           job.order.mailStatus = "failed";
         }
 

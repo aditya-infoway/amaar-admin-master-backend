@@ -24,12 +24,12 @@ const createUploader = (subfolder) => {
   });
 
   const fileFilter = (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|webp/;
+    const allowed = /jpeg|jpg|png|webp|jfif/;
     const isValid = allowed.test(path.extname(file.originalname).toLowerCase());
     if (isValid) {
       cb(null, true);
     } else {
-      cb(new Error("Only image files (jpeg, jpg, png, webp) are allowed"));
+      cb(new Error("Only image files (jpeg, jpg, png, webp, jfif) are allowed"));
     }
   };
 

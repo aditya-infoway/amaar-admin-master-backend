@@ -44,7 +44,8 @@ module.exports = sequelize => {
     dlNo1: { type: DataTypes.STRING(50), allowNull: true, field: "dlNo1" },
     dlNo2: { type: DataTypes.STRING(50), allowNull: true, field: "dlNo2" },
     dealsIn: { type: DataTypes.STRING(255), allowNull: true, field: "dealsIn" },
-  latitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "latitude" },
+    companyCode: { type: DataTypes.STRING(100), allowNull: true, field: "companyCode" },
+    latitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "latitude" },
     longitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true, field: "longitude" },
     // Bank Details
     bankHolderName: { type: DataTypes.STRING(255), allowNull: true, field: "bankHolderName" },
@@ -52,6 +53,7 @@ module.exports = sequelize => {
     branchName: { type: DataTypes.STRING(100), allowNull: true, field: "branchName" },
     ifscCode: { type: DataTypes.STRING(15), allowNull: true, field: "ifscCode" },
     logo: { type: DataTypes.STRING(255), allowNull: true, field: "logo" },
+    icon: { type: DataTypes.STRING(255), allowNull: true, field: "icon" },
 
     created: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },

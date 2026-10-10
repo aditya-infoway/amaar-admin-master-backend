@@ -94,6 +94,8 @@ const createCashReceipt = Joi.object().keys({
   }),
   createdBy: Joi.number().allow(null),
   createdType: Joi.string().trim().allow("", null),
+    salesId: Joi.number().allow(null).optional(),
+  salesOrderId: Joi.number().allow(null).optional()
 });
 
 const createBankReceipt = Joi.object().keys({
@@ -134,6 +136,8 @@ const createBankReceipt = Joi.object().keys({
   }),
   createdBy: Joi.number().allow(null),
   createdType: Joi.string().trim().allow("", null),
+  salesId: Joi.number().allow(null).optional(),
+salesOrderId: Joi.number().allow(null).optional(),
 });
 const createContra = Joi.object().keys({
   type: Joi.string().valid("deposit", "withdrawal", "transfer").required().messages({

@@ -2006,7 +2006,75 @@ const deleteSalesOrder = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+const getPendingAdvanceSalesOrders = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
+    const { financialYearId } = req.query;
+
+    const where = { companyId, delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const orders = await selectWithJoins(
+      "salesorder",
+      [],
+      where,
+      ["salesOrderId", "soNo", "accountId", "totalAmount"], // ✅ grandTotal -> totalAmount
+      [["salesOrderId", "DESC"]],
+    );
+    if (!orders.length) return successResponse(res, [], "No pending sales orders");
+
+    const soIds = orders.map((o) => o.salesOrderId);
+
+    // jin SO ka invoice ban chuka, unhe hatao
+    const invoiced = await selectWithJoins(
+      "sales",
+      [],
+      { companyId, salesOrderId: soIds, delete: 0 },
+      ["salesOrderId"],
+    );
+    const invoicedSet = new Set(invoiced.map((i) => String(i.salesOrderId)));
+
+    // ab tak mile advances
+    const advances = await selectWithJoins(
+      "payment",
+      [],
+      {
+        companyId,
+        salesOrderId: soIds,
+        voucherType: ["CASH RECEIPT", "BANK RECEIPT"],
+        delete: 0,
+      },
+      ["salesOrderId", "amount"],
+    );
+    const advMap = advances.reduce((m, a) => {
+      m[String(a.salesOrderId)] = (m[String(a.salesOrderId)] || 0) + Number(a.amount || 0);
+      return m;
+    }, {});
+
+    const data = orders
+      .filter((o) => !invoicedSet.has(String(o.salesOrderId)))
+      .map((o) => {
+        const total = round2(o.totalAmount);
+        const received = round2(advMap[String(o.salesOrderId)] || 0);
+        return {
+          id: String(o.salesOrderId),
+          soNo: o.soNo,
+          accountId: o.accountId,
+          totalAmount: total,
+          receivedAmount: received,
+          pendingAmount: round2(total - received),
+        };
+      })
+      .filter((o) => o.pendingAmount > 0);
+
+    return successResponse(res, data, "Pending sales orders fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
 // ============================================================
 // EXPORT
 // ============================================================
@@ -2019,4 +2087,5 @@ module.exports = {
   getSalesOrderById,
   updateSalesOrder,
   deleteSalesOrder,
+  getPendingAdvanceSalesOrders
 };

@@ -6,7 +6,8 @@ const {
   updateModel: updateModelHelper,
   selectWithJoins,
 } = require("../../../helper/index.js");
-
+const fs = require("fs");
+const path = require("path");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const { postSalesGst, reverseSalesGst,postSalesAccount } = require("../../../helper/gstLedger.js");
@@ -14,7 +15,8 @@ const { updateAccountBalance } = require("../../../helper/accountBalance.js");
 // ============================================================
 // HELPERS
 // ============================================================
-
+const { htmlToPdf } = require("../../../helper/pdfBrowser.js");
+const { buildInvoiceHtml } = require("../../../helper/invoiceHtml.js");
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
 const normalizeId = (value) => {
@@ -378,13 +380,14 @@ const { createdBy, createdType } = body;
     const cashAccountId = normalizeId(body.cashAccountId);
     const { voucherNo } = await generateVoucherNo({
       companyId, financialYearId: fy.financialYearId,
-      tableName: "payment", idColumn: "paymentId",
-      fixedPrefix: "CR", extraWhere: { voucherType: "CASH RECEIPT" },
+    tableName: "payment", idColumn: "paymentId",
+    prefixFor: "CASH RECEIPT",                       
+    extraWhere: { voucherType: "CASH RECEIPT" },
     });
     await saveModel("payment", {
       companyId, financialYearId: fy.financialYearId,
       voucherType: "CASH RECEIPT",
-      paymentCollectedByModules: "CR",
+       paymentCollectedByModules: "SICR",   
       voucherNo, date,
       selfAccountId: cashAccountId, selfDrOrCr: "DR",
       accountId, accountDrOrCr: "CR",
@@ -403,13 +406,14 @@ const { createdBy, createdType } = body;
     const { voucherNo } = await generateVoucherNo({
       companyId, financialYearId: fy.financialYearId,
       tableName: "payment", idColumn: "paymentId",
-      fixedPrefix: "BR", extraWhere: { voucherType: "BANK RECEIPT" },
+       prefixFor: "BANK RECEIPT",                  
+    extraWhere: { voucherType: "BANK RECEIPT" },
     });
     const modeUpper = String(body.paymentMode || "").toUpperCase();
     await saveModel("payment", {
       companyId, financialYearId: fy.financialYearId,
       voucherType: "BANK RECEIPT",
-      paymentCollectedByModules: "BR",
+         paymentCollectedByModules: "SIBR",   
       voucherNo, date,
       selfAccountId: bankAccountId, selfDrOrCr: "DR",
       accountId, accountDrOrCr: "CR",
@@ -1115,7 +1119,223 @@ const deleteSales = async (req, res) => {
 // ============================================================
 // EXPORT
 // ============================================================
+// ============================================================
+// PENDING CREDIT INVOICES (for Cash Receipt dropdown)
+// ============================================================
+const getPendingCreditInvoices = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId)
+      return requiredmessage(res, "Unauthorized. Please login again.");
 
+    const { financialYearId } = req.query;
+
+    const where = { companyId, terms: "Credit", delete: 0 };
+    if (financialYearId) where.financialYearId = financialYearId;
+
+    const invoices = await selectWithJoins(
+      "sales",
+      [],
+      where,
+      ["salesId", "salesInvoiceNo", "accountId", "grandTotal", "salesOrderId"],
+      [["salesId", "DESC"]],
+    );
+
+    if (!invoices.length) return successResponse(res, [], "No pending invoices");
+
+    const salesIds = invoices.map((i) => i.salesId);
+
+    // in invoices pe ab tak jitne receipts bane (cash + bank)
+    const receipts = await selectWithJoins(
+      "payment",
+      [],
+      {
+        companyId,
+        salesId: salesIds,
+        voucherType: ["CASH RECEIPT", "BANK RECEIPT"],
+        delete: 0,
+      },
+      ["salesId", "amount"],
+    );
+
+    const receivedMap = receipts.reduce((map, r) => {
+      map[String(r.salesId)] = round2((map[String(r.salesId)] || 0) + Number(r.amount || 0));
+      return map;
+    }, {});
+
+    // SO se bane invoices ka advance bhi minus karo
+    const soIds = [...new Set(invoices.map((i) => i.salesOrderId).filter(Boolean))];
+    let advMap = {};
+    let soNoMap = {};
+
+    if (soIds.length) {
+      const adv = await selectWithJoins(
+        "payment",
+        [],
+        {
+          companyId,
+          salesOrderId: soIds,
+          voucherType: ["CASH RECEIPT", "BANK RECEIPT"],
+          delete: 0,
+        },
+        ["salesOrderId", "amount"],
+      );
+      advMap = adv.reduce((m, a) => {
+        m[String(a.salesOrderId)] = round2((m[String(a.salesOrderId)] || 0) + Number(a.amount || 0));
+        return m;
+      }, {});
+
+      // ✅ NEW — SO numbers (dropdown me invoice ke saath dikhane ke liye)
+      const sos = await selectWithJoins(
+        "salesorder",
+        [],
+        { salesOrderId: soIds, companyId, delete: 0 },
+        ["salesOrderId", "soNo"],
+      );
+      soNoMap = sos.reduce((m, so) => {
+        m[String(so.salesOrderId)] = so.soNo || "";
+        return m;
+      }, {});
+    }
+
+    const data = invoices
+      .map((i) => {
+        const grandTotal = round2(i.grandTotal);
+        // receipts (salesId) + SO advance (salesOrderId)
+        const receivedAmount = round2(
+          (receivedMap[String(i.salesId)] || 0) +
+            (advMap[String(i.salesOrderId)] || 0),
+        );
+        return {
+          id: String(i.salesId),
+          salesInvoiceNo: i.salesInvoiceNo,
+          salesOrderNo: soNoMap[String(i.salesOrderId)] || "", // ✅ NEW
+          accountId: i.accountId,
+          grandTotal,
+          receivedAmount,
+          pendingAmount: round2(grandTotal - receivedAmount),
+        };
+      })
+      .filter((i) => i.pendingAmount > 0);
+
+    return successResponse(res, data, "Pending invoices fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+const fileToDataUri = (relPath) => {
+  try {
+    if (!relPath) return "";
+    const clean = String(relPath).replace(/^Uploadimages[\\/]/, "");
+    const full = path.join(process.cwd(), "Uploadimages", clean);
+    if (!fs.existsSync(full)) return "";
+    let ext = path.extname(full).slice(1).toLowerCase();
+    if (ext === "jpg") ext = "jpeg";
+    if (ext === "svg") ext = "svg+xml";
+    return `data:image/${ext};base64,${fs.readFileSync(full).toString("base64")}`;
+  } catch {
+    return "";
+  }
+};
+const printSalesInvoice = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const salesId = Number(req.params.id);
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const [sale] = await selectWithJoins(
+      "sales", [],
+      { salesId, companyId, delete: 0 },
+      [
+        "salesId", "salesInvoiceNo", "salesDate", "terms", "accountId", "salesOrderId",
+        "narration", "subTotal", "taxableAmount", "discountAmount",
+        "cgstAmount", "sgstAmount", "igstAmount", "grandTotal",
+      ],
+    );
+    if (!sale) return errorResponse(res, "Sales invoice not found.");
+
+    const items = await selectWithJoins(
+      "salesdetails", [],
+      { salesId, companyId, delete: 0 },
+      [
+        "itemCode", "hsnCode", "itemDescription", "uom", "qty", "basicPrice",
+        "amount", "discount", "taxableAmount", "taxPct", "taxAmount", "netAmount",
+      ],
+      [["salesDetailsId", "ASC"]],
+    );
+
+    // Sales Order No
+    if (sale.salesOrderId) {
+      const soRows = await selectWithJoins(
+        "salesorder", [],
+        { salesOrderId: sale.salesOrderId, companyId, delete: 0 },
+        ["salesOrderId", "soNo"],
+      );
+      sale.salesOrderNo = soRows[0]?.soNo || "";
+    }
+
+    const [acc = {}] = await selectWithJoins(
+      "account", [],
+      { id: sale.accountId, companyId, delete: 0 },
+      [
+        "accountName", "addressLine1", "addressLine2", "area",
+        "cityName", "stateName", "pincode", "gstNo", "panCard",
+      ],
+    );
+
+    const party = {
+      accountName: acc.accountName || "",
+      address: [acc.addressLine1, acc.area, acc.cityName, acc.stateName, acc.pincode]
+        .filter(Boolean)
+        .join(", "),
+      stateName: acc.stateName || "",
+      gstNo: acc.gstNo || "",
+      panNo: acc.panCard || "",
+    };
+
+    let company = {};
+    try {
+      const rows = await selectWithJoins(
+        "companydetails", [],
+        { companyId, delete: 0 },
+        [
+          "companyName", "addressLine1", "addressLine2", "city", "pinCode",
+          "state", "stateCode", "mobile", "email", "gstNo", "panNo", "logo",
+        ],
+      );
+      const c = rows[0] || {};
+      company = {
+        companyName: c.companyName || "",
+        address: [c.addressLine1, c.addressLine2, c.city, c.pinCode]
+          .filter(Boolean)
+          .join(", "),
+        state: c.state || "",
+        stateCode: c.stateCode || "",
+        mobileNo: c.mobile || "",
+        email: c.email || "",
+        gstNo: c.gstNo || "",
+        panNo: c.panNo || "",
+        logo: fileToDataUri(c.logo),
+      };
+    } catch (e) {
+      console.error("print: company fetch failed:", e.message);
+    }
+
+    const isSameState = Number(sale.igstAmount) === 0;
+    const html = buildInvoiceHtml({ company, party, sale, items, isSameState });
+
+    const pdf = await htmlToPdf(html);
+
+    const safeName = String(sale.salesInvoiceNo || salesId).replace(/[^\w.-]+/g, "-");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", pdf.length);
+    res.setHeader("Content-Disposition", `inline; filename="invoice-${safeName}.pdf"`);
+    return res.end(pdf);
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
 module.exports = {
   getNextSalesInvoiceNo,
   createSales,
@@ -1123,4 +1343,6 @@ module.exports = {
   getSalesById,
   updateSales,
   deleteSales,
+  getPendingCreditInvoices,
+  printSalesInvoice
 };
