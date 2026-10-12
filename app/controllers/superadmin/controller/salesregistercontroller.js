@@ -18,7 +18,8 @@ const { updateAccountBalance } = require("../../../helper/accountBalance.js");
 const { htmlToPdf } = require("../../../helper/pdfBrowser.js");
 const { buildInvoiceHtml } = require("../../../helper/invoiceHtml.js");
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
-
+const crypto = require("crypto");
+const QRCode = require("qrcode");
 const normalizeId = (value) => {
   if (value === undefined || value === null || value === "") return null;
   const id = Number(value);
@@ -1053,7 +1054,7 @@ const updateSales = async (req, res) => {
       await saveModel("salesdetails", detailRow(Number(id), companyId, line));
     }
     // ---- Sales GST (naya) ----
-    await postInvoiceGst({ req, companyId, fy, body, totals });
+await postInvoiceGst({ req, companyId, fy, body, totals, salesId: Number(id) });
     return successResponse(
       res,
       {
@@ -1224,6 +1225,9 @@ const getPendingCreditInvoices = async (req, res) => {
   }
 };
 
+// ============================================================
+// PRINT / QR
+// ============================================================
 const fileToDataUri = (relPath) => {
   try {
     if (!relPath) return "";
@@ -1238,104 +1242,175 @@ const fileToDataUri = (relPath) => {
     return "";
   }
 };
+
+// Chhota signature: companyId + salesId pe, secret ke saath (JWT se bahut chhota)
+const signInvoiceLink = (companyId, salesId) =>
+  crypto
+    .createHmac("sha256", process.env.PRINT_LINK_SECRET)
+    .update(`invoice-pdf:${companyId}:${salesId}`)
+    .digest("hex")
+    .slice(0, 24);
+
+// QR ke andar jaane wala public link (bina login ke khulta hai)
+const buildInvoiceQr = async (companyId, salesId) => {
+  if (!process.env.PRINT_LINK_SECRET) {
+    console.error("PRINT_LINK_SECRET .env me set nahi hai, QR skip ho raha hai.");
+    return "";
+  }
+  const baseUrl = String(process.env.BASE_URL || "http://localhost:8001").replace(/\/+$/, "");
+  const sig = signInvoiceLink(companyId, salesId);
+  const url = `${baseUrl}/sales/invoice-pdf/${salesId}?c=${companyId}&s=${sig}`;
+
+  return QRCode.toDataURL(url, { margin: 1, width: 300, errorCorrectionLevel: "L" });
+};
+
+// Print + public link dono isi se PDF banate hain
+const buildInvoicePdf = async (companyId, salesId) => {
+  const [sale] = await selectWithJoins(
+    "sales", [],
+    { salesId, companyId, delete: 0 },
+    [
+      "salesId", "salesInvoiceNo", "salesDate", "terms", "accountId", "salesOrderId",
+      "narration", "subTotal", "taxableAmount", "discountAmount",
+      "cgstAmount", "sgstAmount", "igstAmount", "grandTotal",
+    ],
+  );
+  if (!sale) return { error: "Sales invoice not found." };
+
+  const items = await selectWithJoins(
+    "salesdetails", [],
+    { salesId, companyId, delete: 0 },
+    [
+      "itemCode", "hsnCode", "itemDescription", "uom", "qty", "basicPrice",
+      "amount", "discount", "taxableAmount", "taxPct", "taxAmount", "netAmount",
+    ],
+    [["salesDetailsId", "ASC"]],
+  );
+
+  if (sale.salesOrderId) {
+    const soRows = await selectWithJoins(
+      "salesorder", [],
+      { salesOrderId: sale.salesOrderId, companyId, delete: 0 },
+      ["salesOrderId", "soNo"],
+    );
+    sale.salesOrderNo = soRows[0]?.soNo || "";
+  }
+
+  const [acc = {}] = await selectWithJoins(
+    "account", [],
+    { id: sale.accountId, companyId, delete: 0 },
+    [
+      "accountName", "addressLine1", "addressLine2", "area",
+      "cityName", "stateName", "pincode", "gstNo", "panCard",
+    ],
+  );
+
+  const party = {
+    accountName: acc.accountName || "",
+    address: [acc.addressLine1, acc.area, acc.cityName, acc.stateName, acc.pincode]
+      .filter(Boolean)
+      .join(", "),
+    stateName: acc.stateName || "",
+    gstNo: acc.gstNo || "",
+    panNo: acc.panCard || "",
+  };
+
+  let company = {};
+  try {
+    const rows = await selectWithJoins(
+      "companydetails", [],
+      { companyId, delete: 0 },
+      [
+        "companyName", "addressLine1", "addressLine2", "city", "pinCode",
+        "state", "stateCode", "mobile", "email", "gstNo", "panNo", "logo",
+      ],
+    );
+    const c = rows[0] || {};
+    company = {
+      companyName: c.companyName || "",
+      address: [c.addressLine1, c.addressLine2, c.city, c.pinCode]
+        .filter(Boolean)
+        .join(", "),
+      state: c.state || "",
+      stateCode: c.stateCode || "",
+      mobileNo: c.mobile || "",
+      email: c.email || "",
+      gstNo: c.gstNo || "",
+      panNo: c.panNo || "",
+      logo: fileToDataUri(c.logo),
+    };
+  } catch (e) {
+    console.error("print: company fetch failed:", e.message);
+  }
+
+  let qr = "";
+  try {
+    qr = await buildInvoiceQr(companyId, salesId);
+  } catch (e) {
+    console.error("print: QR generate failed:", e.message);
+  }
+
+  const isSameState = Number(sale.igstAmount) === 0;
+  const html = buildInvoiceHtml({ company, party, sale, items, isSameState, qr });
+  const pdf = await htmlToPdf(html);
+
+  const safeName = String(sale.salesInvoiceNo || salesId).replace(/[^\w.-]+/g, "-");
+  return { pdf, safeName };
+};
+
+const sendPdf = (res, { pdf, safeName }) => {
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Length", pdf.length);
+  res.setHeader("Content-Disposition", `inline; filename="invoice-${safeName}.pdf"`);
+  return res.end(pdf);
+};
+
+// Login wala print (Sales Register ka Print button)
 const printSalesInvoice = async (req, res) => {
   try {
     const companyId = req.companyId;
     const salesId = Number(req.params.id);
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const [sale] = await selectWithJoins(
-      "sales", [],
-      { salesId, companyId, delete: 0 },
-      [
-        "salesId", "salesInvoiceNo", "salesDate", "terms", "accountId", "salesOrderId",
-        "narration", "subTotal", "taxableAmount", "discountAmount",
-        "cgstAmount", "sgstAmount", "igstAmount", "grandTotal",
-      ],
-    );
-    if (!sale) return errorResponse(res, "Sales invoice not found.");
-
-    const items = await selectWithJoins(
-      "salesdetails", [],
-      { salesId, companyId, delete: 0 },
-      [
-        "itemCode", "hsnCode", "itemDescription", "uom", "qty", "basicPrice",
-        "amount", "discount", "taxableAmount", "taxPct", "taxAmount", "netAmount",
-      ],
-      [["salesDetailsId", "ASC"]],
-    );
-
-    // Sales Order No
-    if (sale.salesOrderId) {
-      const soRows = await selectWithJoins(
-        "salesorder", [],
-        { salesOrderId: sale.salesOrderId, companyId, delete: 0 },
-        ["salesOrderId", "soNo"],
-      );
-      sale.salesOrderNo = soRows[0]?.soNo || "";
-    }
-
-    const [acc = {}] = await selectWithJoins(
-      "account", [],
-      { id: sale.accountId, companyId, delete: 0 },
-      [
-        "accountName", "addressLine1", "addressLine2", "area",
-        "cityName", "stateName", "pincode", "gstNo", "panCard",
-      ],
-    );
-
-    const party = {
-      accountName: acc.accountName || "",
-      address: [acc.addressLine1, acc.area, acc.cityName, acc.stateName, acc.pincode]
-        .filter(Boolean)
-        .join(", "),
-      stateName: acc.stateName || "",
-      gstNo: acc.gstNo || "",
-      panNo: acc.panCard || "",
-    };
-
-    let company = {};
-    try {
-      const rows = await selectWithJoins(
-        "companydetails", [],
-        { companyId, delete: 0 },
-        [
-          "companyName", "addressLine1", "addressLine2", "city", "pinCode",
-          "state", "stateCode", "mobile", "email", "gstNo", "panNo", "logo",
-        ],
-      );
-      const c = rows[0] || {};
-      company = {
-        companyName: c.companyName || "",
-        address: [c.addressLine1, c.addressLine2, c.city, c.pinCode]
-          .filter(Boolean)
-          .join(", "),
-        state: c.state || "",
-        stateCode: c.stateCode || "",
-        mobileNo: c.mobile || "",
-        email: c.email || "",
-        gstNo: c.gstNo || "",
-        panNo: c.panNo || "",
-        logo: fileToDataUri(c.logo),
-      };
-    } catch (e) {
-      console.error("print: company fetch failed:", e.message);
-    }
-
-    const isSameState = Number(sale.igstAmount) === 0;
-    const html = buildInvoiceHtml({ company, party, sale, items, isSameState });
-
-    const pdf = await htmlToPdf(html);
-
-    const safeName = String(sale.salesInvoiceNo || salesId).replace(/[^\w.-]+/g, "-");
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Length", pdf.length);
-    res.setHeader("Content-Disposition", `inline; filename="invoice-${safeName}.pdf"`);
-    return res.end(pdf);
+    const result = await buildInvoicePdf(companyId, salesId);
+    if (result.error) return errorResponse(res, result.error);
+    return sendPdf(res, result);
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
+// QR scan wala public link (login nahi chahiye, token se verify hota hai)
+// QR scan wala public link (login nahi chahiye, signature se verify hota hai)
+const publicInvoicePdf = async (req, res) => {
+  try {
+    const salesId = Number(req.params.id);
+    const companyId = Number(req.query.c);
+    const sig = String(req.query.s || "");
+
+    if (!process.env.PRINT_LINK_SECRET) {
+      return res.status(500).send("Server configuration error.");
+    }
+    if (!salesId || !companyId || !sig) {
+      return res.status(400).send("Invalid invoice link.");
+    }
+
+    const expected = signInvoiceLink(companyId, salesId);
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(403).send("Invalid invoice link.");
+    }
+
+    const result = await buildInvoicePdf(companyId, salesId);
+    if (result.error) return res.status(404).send(result.error);
+    return sendPdf(res, result);
+  } catch (error) {
+    console.error("publicInvoicePdf error:", error);
+    return res.status(500).send("Could not generate invoice.");
+  }
+};
+
 module.exports = {
   getNextSalesInvoiceNo,
   createSales,
@@ -1344,5 +1419,6 @@ module.exports = {
   updateSales,
   deleteSales,
   getPendingCreditInvoices,
-  printSalesInvoice
+  printSalesInvoice,
+  publicInvoicePdf,
 };
