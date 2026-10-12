@@ -6,5 +6,6 @@ var routes = require("express").Router();
 module.exports = (app) => {
   routes.use(superAdminAuth);
   routes.get("/list", group.getGroupList);
+  routes.get("/supplier/list", group.getSupplierGroupList);
   app.use("/master/group", routes);
 };

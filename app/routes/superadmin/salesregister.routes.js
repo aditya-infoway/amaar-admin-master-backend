@@ -22,15 +22,19 @@ const validate = (schema) => (req, res, next) => {
 };
 
 module.exports = (app) => {
+  // PUBLIC: QR scan wala route, auth se PEHLE (token URL me hai, controller verify karta hai)
+  routes.get("/invoice-pdf/:id", sales.publicInvoicePdf);
+
+  // Yahan se neeche sab routes pe login (superAdminAuth) lagega
   routes.use(superAdminAuth);
 
   // NOTE: static paths hamesha "/:id" se pehle
   routes.get("/next-invoice-no", sales.getNextSalesInvoiceNo);
   routes.get("/list", sales.getSalesList);
   routes.get("/pending-credit-list", sales.getPendingCreditInvoices);
-  
-    routes.get("/print/:id", sales.printSalesInvoice);  
-    
+
+  routes.get("/print/:id", sales.printSalesInvoice);
+
   routes.get("/:id", sales.getSalesById);
 
   routes.post(

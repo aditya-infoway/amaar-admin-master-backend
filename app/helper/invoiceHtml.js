@@ -47,7 +47,7 @@ const fmtDate = (d) => {
   return `${String(x.getDate()).padStart(2, "0")}/${String(x.getMonth() + 1).padStart(2, "0")}/${x.getFullYear()}`;
 };
 
-function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isSameState }) {
+function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isSameState, qr = "" }) {
   const itemRows = items
     .map(
       (i) => `
@@ -82,6 +82,9 @@ function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isS
     )
     .join("");
 
+  // QR cell GST table ke saare rows me phailega: header(1) + tax rows + 2 total rows
+
+
   const totalTax =
     Number(sale.cgstAmount || 0) +
     Number(sale.sgstAmount || 0) +
@@ -108,6 +111,11 @@ function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isS
     ? `<img src="${company.logo}" alt="logo"/>`
     : "";
 
+  // qr = data URI (controller se), scan karne pe invoice PDF khulti hai
+  const qrCell = qr
+    ? `<td class="qr-cell"><img src="${qr}" alt="QR"/><div class="qr-text">Scan to view invoice</div></td>`
+    : "";
+
   return `<!doctype html><html><head><meta charset="utf-8"/><title>Invoice ${esc(sale.salesInvoiceNo)}</title>
 <style>
   @page { size: A4; margin: 8mm; }
@@ -122,11 +130,14 @@ function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isS
   tr.item td { border-top: 0; border-bottom: 0; height: 26px; }
   .spacer td { height: 230px; border-top: 0; }
   .sign { height: 70px; text-align: right; vertical-align: bottom; }
-  .logo-cell { width: 22%; text-align: center; vertical-align: middle; height: 115px; }
+   .logo-cell { width: 20%; text-align: center; vertical-align: middle; height: 115px; }
   .logo-cell img { max-width: 100%; max-height: 90px; object-fit: contain; }
-  .info-cell { width: 40%; vertical-align: middle; line-height: 1.5; }
-  .co-cell { width: 38%; vertical-align: middle; line-height: 1.5; }
+  .info-cell { width: 33%; vertical-align: middle; line-height: 1.5; }
+  .co-cell { width: 31%; vertical-align: middle; line-height: 1.5; }
   .co-name { font-size: 13px; font-weight: bold; }
+  .qr-cell { width: 16%; text-align: center; vertical-align: middle; }
+   .qr-cell img { width: 105px; height: 105px; }
+  .qr-text { font-size: 8px; margin-top: 3px; }
   .top { position: relative; text-align: center; font-size: 14px; margin-bottom: 4px; }
   .top .orig { position: absolute; right: 0; top: 3px; font-size: 9px; font-style: italic; }
 </style></head><body>
@@ -144,11 +155,12 @@ function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isS
       ${line("Mobile:", company.mobileNo)}
       ${line("Email:", company.email)}
     </td>
-    <td class="co-cell">
+        <td class="co-cell">
       ${company.state ? "<b>State:</b> " + esc(company.state) + (company.stateCode ? " (Code: " + esc(company.stateCode) + ")" : "") + "<br/>" : ""}
       ${line("GSTIN:", company.gstNo)}
       ${line("PAN:", company.panNo)}
     </td>
+    ${qrCell}
   </tr>
 </table>
 
@@ -211,6 +223,7 @@ function buildInvoiceHtml({ company = {}, party = {}, sale = {}, items = [], isS
   <tr>
     <th>Taxes</th><th>Rate of Tax in %</th><th>Taxable value</th>
     <th>Taxable value for Reverse Charge</th><th>Tax amount</th>
+  
   </tr>
   ${taxRows}
   <tr><td colspan="4"><b>Total value of GST Rs.</b></td><td class="r">${fmt(totalTax)}</td></tr>
