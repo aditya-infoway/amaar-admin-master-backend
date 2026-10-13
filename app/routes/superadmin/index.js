@@ -46,4 +46,6 @@ module.exports = (app) => {
     require("./itemcategorystage.routes")(app);
     require("./salesregister.routes")(app);
     require("./bodyregister.routes")(app);
+    require("./mainprocess.routes")(app);  
+    require("./subprocess.routes")(app);
 };
