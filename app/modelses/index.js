@@ -84,6 +84,9 @@ db.itemcategorystage = require("./itemcategorystage.js")(sequelize);
 db.sales = require("./salesregister.js")(sequelize);
 db.salesdetails = require("./salesregisterdetails.js")(sequelize);
 db.bodyregister = require("./bodyregister.js")(sequelize);
+db.main_process = require("./mainprocess.js")(sequelize);
+db.main_process_detail = require("./mainprocessdetail.js")(sequelize);
+db.sub_process = require("./subprocess.js")(sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
