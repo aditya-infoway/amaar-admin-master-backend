@@ -29,7 +29,11 @@ module.exports = (app) => {
   routes.get(
     "/contractor-managers",
     employee.getContractorManagers
-  );      // employee panel, same middleware as the employee APIs
+  );   
+  routes.get(
+    "/assignable-contractors",
+    employee.getAssignableContractors
+  );   // employee panel, same middleware as the employee APIs
   routes.get("/:id", employee.getEmployeeById);
   routes.put(
     "/update",

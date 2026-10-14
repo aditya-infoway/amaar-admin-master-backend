@@ -2,7 +2,8 @@ const Joi = require("joi");
 
 const processRow = Joi.object({
   id: Joi.alternatives().try(Joi.number(), Joi.string()).optional(),
-  processCode: Joi.string().trim().max(50).required(),
+
+  processCode: Joi.string().trim().max(50).optional().allow("", null),
   processName: Joi.string().trim().max(150).required(),
   serialNo: Joi.number().integer().min(1).max(20).required(),
 }).unknown(true);

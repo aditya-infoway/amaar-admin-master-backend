@@ -13,6 +13,14 @@ const {
 } = require("../../../helper/index.js");
 
 // ---------------- CREATE ----------------
+// "" / undefined / null -> null, warna Number
+const toIdOrNull = (v) =>
+  v === undefined || v === null || v === "" ? null : Number(v);
+
+const isProductionDept = (department) =>
+  String(department || "").toLowerCase() === "production";
+
+// ---------------- CREATE ----------------
 const createEmployee = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -25,6 +33,8 @@ const createEmployee = async (req, res) => {
       department,
       branch,
       roleId,
+      processId,
+      subProcessId,
       accountId,
       employeeName,
       mobileNumber,
@@ -35,22 +45,44 @@ const createEmployee = async (req, res) => {
       createdType,
     } = req.body;
 
-    // role exists aur usi department ka hona chahiye
-    const roleExists = await selectWithJoins(
-      "role",
-      [],
-      { roleId, department, delete: 0 },
-      ["roleId", "roleName"]   // 👈 label bhi nikal lo check ke liye
-    );
+    const isProduction = isProductionDept(department);
+    let isContractorManager = false;
 
-    if (roleExists.length === 0) {
-      return errorResponse(res, "Selected role not found for this department");
-    }
+    if (isProduction) {
+      // Production: role nahi, process + party chahiye
+      if (!processId) {
+        return errorResponse(res, "Please select a process");
+      }
+      if (!accountId) {
+        return errorResponse(res, "Please select a party (Sundry Creditor account)");
+      }
 
-    // Contractor Manager role ho to accountGroupId mandatory
-    const isContractorManager = roleExists[0].roleName === "Contractor Manager";
-    if (isContractorManager && !accountId) {
-      return errorResponse(res, "Please select a party (Sundry Creditor account)");
+      const processExists = await selectWithJoins(
+        "main_process_detail",
+        [],
+        { processId: Number(processId), companyId, delete: 0 },
+        ["processId"]
+      );
+      if (processExists.length === 0) {
+        return errorResponse(res, "Selected process not found");
+      }
+    } else {
+      // role exists aur usi department ka hona chahiye
+      const roleExists = await selectWithJoins(
+        "role",
+        [],
+        { roleId, department, delete: 0 },
+        ["roleId", "roleName"]
+      );
+
+      if (roleExists.length === 0) {
+        return errorResponse(res, "Selected role not found for this department");
+      }
+
+      isContractorManager = roleExists[0].roleName === "Contractor Manager";
+      if (isContractorManager && !accountId) {
+        return errorResponse(res, "Please select a party (Sundry Creditor account)");
+      }
     }
 
     // mobile number companyId-wise unique
@@ -77,7 +109,6 @@ const createEmployee = async (req, res) => {
       return errorResponse(res, "Email already exists. Please enter a different email.");
     }
 
-    // company jaisa hi — password hash aur token generate
     const hashedPassword = await bcrypt.hash(password, 10);
     const token = crypto.randomBytes(30).toString("hex");
 
@@ -85,7 +116,10 @@ const createEmployee = async (req, res) => {
       companyId,
       department,
       branch,
-      roleId,
+      // Production me role nahi hota, isliye 0
+      roleId: isProduction ? 0 : roleId,
+      processId: isProduction ? toIdOrNull(processId) : null,
+      subProcessId: isProduction ? toIdOrNull(subProcessId) : null,
       employeeName,
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
@@ -93,7 +127,7 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-      accountId: isContractorManager ? accountId : null,
+      accountId: isProduction || isContractorManager ? toIdOrNull(accountId) : null,
       createdBy,
       createdType,
       delete: 0,
@@ -137,6 +171,9 @@ const getEmployeeList = async (req, res) => {
         "department",
         "branch",
         "roleId",
+        "processId",
+        "subProcessId",
+        "accountId",
         "employeeName",
         "mobileNumber",
         "alternateNumber",
@@ -149,7 +186,6 @@ const getEmployeeList = async (req, res) => {
       [["employeeId", "DESC"]]
     );
 
-    // createdBy me companyId store hai — company table se companyName nikal ke map karna
     const createdByIds = [
       ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
     ];
@@ -168,7 +204,6 @@ const getEmployeeList = async (req, res) => {
       }, {});
     }
 
-    // ✅ NAYA: same createdByIds employee table me bhi check karo — employeeName nikal ke map karna
     let employeeMap = {};
     if (createdByIds.length > 0) {
       const employees = await selectWithJoins(
@@ -184,7 +219,7 @@ const getEmployeeList = async (req, res) => {
     }
 
     const data = (list || []).map((row) => ({
-      ...row.toJSON ? row.toJSON() : row,
+      ...(row.toJSON ? row.toJSON() : row),
       createdBy:
         companyMap[String(row.createdBy)] ||
         employeeMap[String(row.createdBy)] ||
@@ -218,6 +253,9 @@ const getEmployeeById = async (req, res) => {
         "department",
         "branch",
         "roleId",
+        "processId",
+        "subProcessId",
+        "accountId",
         "employeeName",
         "mobileNumber",
         "alternateNumber",
@@ -235,7 +273,6 @@ const getEmployeeById = async (req, res) => {
 
     const employeeRow = rows[0].toJSON ? rows[0].toJSON() : rows[0];
 
-    // createdBy me companyId store hai — company table se companyName nikalna
     if (employeeRow.createdBy) {
       const companyRows = await selectWithJoins(
         "company",
@@ -268,6 +305,8 @@ const updateEmployee = async (req, res) => {
       department,
       branch,
       roleId,
+      processId,
+      subProcessId,
       employeeName,
       mobileNumber,
       alternateNumber,
@@ -286,20 +325,43 @@ const updateEmployee = async (req, res) => {
     if (existing.length === 0) {
       return requiredmessage(res, "Employee not found");
     }
-    const roleExists = await selectWithJoins(
-      "role",
-      [],
-      { roleId, department, delete: 0 },
-      ["roleId", "roleName"]   // 👈 roleName bhi select karo, select karna zaruri hai
-    );
 
-    if (roleExists.length === 0) {
-      return errorResponse(res, "Selected role not found for this department");
-    }
+    const isProduction = isProductionDept(department);
+    let isContractorManager = false;
 
-    const isContractorManager = roleExists[0].roleName === "Contractor Manager";
-    if (isContractorManager && !accountId) {
-      return errorResponse(res, "Please select a party (Sundry Creditor account)");
+    if (isProduction) {
+      if (!processId) {
+        return errorResponse(res, "Please select a process");
+      }
+      if (!accountId) {
+        return errorResponse(res, "Please select a party (Sundry Creditor account)");
+      }
+
+      const processExists = await selectWithJoins(
+        "main_process_detail",
+        [],
+        { processId: Number(processId), companyId, delete: 0 },
+        ["processId"]
+      );
+      if (processExists.length === 0) {
+        return errorResponse(res, "Selected process not found");
+      }
+    } else {
+      const roleExists = await selectWithJoins(
+        "role",
+        [],
+        { roleId, department, delete: 0 },
+        ["roleId", "roleName"]
+      );
+
+      if (roleExists.length === 0) {
+        return errorResponse(res, "Selected role not found for this department");
+      }
+
+      isContractorManager = roleExists[0].roleName === "Contractor Manager";
+      if (isContractorManager && !accountId) {
+        return errorResponse(res, "Please select a party (Sundry Creditor account)");
+      }
     }
 
     // mobile number uniqueness (khud ko exclude karke)
@@ -337,16 +399,17 @@ const updateEmployee = async (req, res) => {
     const updatePayload = {
       department,
       branch,
-      roleId,
+      roleId: isProduction ? 0 : roleId,
+      processId: isProduction ? toIdOrNull(processId) : null,
+      subProcessId: isProduction ? toIdOrNull(subProcessId) : null,
       employeeName,
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
       email: email.trim().toLowerCase(),
-      accountId: isContractorManager ? accountId : null,
+      accountId: isProduction || isContractorManager ? toIdOrNull(accountId) : null,
       updated: new Date(),
     };
 
-    // password sirf tabhi update hoga jab naya bheja gaya ho — hash karke
     if (password && password.trim()) {
       updatePayload.password = await bcrypt.hash(password.trim(), 10);
     }
@@ -1533,7 +1596,73 @@ const getContractorManagers = async (req, res) => {
     );
   }
 };
+const getAssignableContractors = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
 
+    const all = await selectWithJoins(
+      "employee",
+      [],
+      { companyId, delete: 0 },
+      ["employeeId", "employeeName", "department", "processId", "subProcessId"],
+      [["employeeName", "ASC"]],
+    );
+
+    // Sirf Production wale jinka process set hai
+    const employees = all.filter(
+      (e) => isProductionDept(e.department) && Number(e.processId) > 0,
+    );
+
+    const processIds = [...new Set(employees.map((e) => Number(e.processId)))];
+    const subIds = [
+      ...new Set(
+        employees.map((e) => Number(e.subProcessId)).filter((n) => n > 0),
+      ),
+    ];
+
+    const processRows = processIds.length
+      ? await selectWithJoins(
+          "main_process_detail",
+          [],
+          { processId: processIds, companyId, delete: 0 },
+          ["processId", "processName"],
+        )
+      : [];
+
+ const subRows = subIds.length
+  ? await selectWithJoins(
+      "sub_process",
+      [],
+      { subProcessId: subIds, delete: 0 },
+      ["subProcessId", "subProcessName"],
+    )
+  : [];
+
+    const processName = new Map(
+      processRows.map((p) => [Number(p.processId), p.processName]),
+    );
+    const subName = new Map(
+      subRows.map((s) => [Number(s.subProcessId), s.subProcessName]),
+    );
+
+    const data = employees.map((e) => ({
+      employeeId: e.employeeId,
+      employeeName: e.employeeName,
+      processId: Number(e.processId),
+      processName: processName.get(Number(e.processId)) || "",
+      subProcessId: Number(e.subProcessId) || null,
+      subProcessName: subName.get(Number(e.subProcessId)) || "",
+    }));
+
+    return successResponse(res, data, "Contractors fetched successfully");
+  } catch (error) {
+    console.error("getAssignableContractors error:", error);
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
 
 
 module.exports = {
@@ -1554,4 +1683,5 @@ module.exports = {
   getUnregisteredEmployeeList,
   registerEmployee,
   getContractorManagers,
+  getAssignableContractors
 };

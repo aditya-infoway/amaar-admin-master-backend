@@ -87,6 +87,7 @@ db.bodyregister = require("./bodyregister.js")(sequelize);
 db.main_process = require("./mainprocess.js")(sequelize);
 db.main_process_detail = require("./mainprocessdetail.js")(sequelize);
 db.sub_process = require("./subprocess.js")(sequelize);
+db.workorderassignment = require("./workorderassignment.js")(sequelize, Sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 
