@@ -30,6 +30,40 @@ const normalizeId = (value) => {
   return Number.isInteger(id) && id > 0 ? id : null;
 };
 
+// NEW: "YYYY-MM-DD" string -> same string
+//   empty / null      -> null       (field not provided)
+//   invalid format    -> undefined  (caller should return an error)
+const normalizeDate = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const str = String(value).slice(0, 10);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return undefined;
+  }
+
+  const d = new Date(`${str}T00:00:00`);
+
+  return isNaN(d.getTime()) ? undefined : str;
+};
+
+// NEW: DB value (string or Date) -> "YYYY-MM-DD" for API response
+const formatDateOnly = (value) => {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return "";
+    const yyyy = value.getFullYear();
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return String(value).slice(0, 10);
+};
+
 // ============================================================
 // GET NEXT SALES ORDER NO
 // ============================================================
@@ -194,275 +228,6 @@ const getQuotationForSalesOrder = async (req, res) => {
 // CREATE SALES ORDER
 // ============================================================
 
-// const createSalesOrder = async (req, res) => {
-//   try {
-//     const companyId = req.companyId;
-
-//     if (!companyId) {
-//       return requiredmessage(res, "Unauthorized. Please login again.");
-//     }
-
-//     const {
-//       financialYearId,
-//       quotationId,
-//       leadId,
-
-//       mode,
-
-//       qty,
-//       unitPrice,
-//       totalAmount,
-
-//       aadharNumber,
-//       panNumber,
-//       gstNumber,
-
-//       createdBy,
-//       createdType,
-//     } = req.body;
-
-//     // ========================================================
-//     // IMAGE UPLOADS (multer via req.files)
-//     // ========================================================
-
-//     const aadharImage = req.files?.aadharImage?.[0]
-//       ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
-//       : null;
-
-//     const panImage = req.files?.panImage?.[0]
-//       ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
-//       : null;
-
-//     const gstImage = req.files?.gstImage?.[0]
-//       ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
-//       : null;
-
-//     // ========================================================
-//     // BASIC VALIDATION
-//     // ========================================================
-
-//     if (!financialYearId) {
-//       return errorResponse(
-//         res,
-//         "Financial Year not found. Please select a company year.",
-//       );
-//     }
-
-//     if (!normalizeId(quotationId)) {
-//       return errorResponse(res, "Please select a quotation.");
-//     }
-
-//     if (!normalizeId(leadId)) {
-//       return errorResponse(res, "Please select a lead.");
-//     }
-
-//     if (!["asIs", "manual"].includes(mode)) {
-//       return errorResponse(res, "Mode must be either As Its or Manual.");
-//     }
-
-//     const fy = await getFinancialYearById(financialYearId, companyId);
-
-//     if (!fy) {
-//       return errorResponse(res, "Invalid Financial Year.");
-//     }
-
-//     // ========================================================
-//     // CHECK QUOTATION
-//     // ========================================================
-
-//     const quotationRows = await selectWithJoins(
-//       "quotation",
-//       [],
-//       {
-//         quotationId,
-//         companyId,
-//         financialYearId: fy.financialYearId,
-//         delete: 0,
-//       },
-//       ["quotationId", "qNo", "leadId", "finalPrice"],
-//     );
-
-//     if (!quotationRows.length) {
-//       return errorResponse(res, "Selected quotation was not found.");
-//     }
-
-//     const quotation = quotationRows[0];
-
-//     // ========================================================
-//     // CHECK LEAD MATCH
-//     // ========================================================
-
-//     if (normalizeId(leadId) !== normalizeId(quotation.leadId)) {
-//       return errorResponse(
-//         res,
-//         "Selected lead does not belong to this quotation.",
-//       );
-//     }
-
-//     const leadRows = await selectWithJoins(
-//       "lead",
-//       [],
-//       { leadId: normalizeId(leadId), companyId, delete: 0 },
-//       [
-//         "leadId",
-//         "leadCode",
-//         "name",
-//         "number",
-//         "email",
-//         "address",
-//         "city",
-//         "model",
-//         "remark",
-//       ],
-//     );
-//     if (!leadRows.length) {
-//       return errorResponse(res, "Selected lead was not found.");
-//     }
-//     const lead = leadRows[0];
-
-//     // ========================================================
-//     // CHECK DUPLICATE SALES ORDER FOR QUOTATION
-//     // ========================================================
-
-//     const duplicate = await selectWithJoins(
-//       "salesorder",
-//       [],
-//       {
-//         companyId,
-//         quotationId,
-//         delete: 0,
-//       },
-//       ["salesOrderId", "soNo"],
-//     );
-
-//     if (duplicate.length > 0) {
-//       return errorResponse(
-//         res,
-//         `Sales Order already exists for this quotation (${duplicate[0].soNo}).`,
-//       );
-//     }
-
-//     // ========================================================
-//     // QUANTITY / AMOUNT
-//     // ========================================================
-
-//     const finalQty = Number(qty) || 0;
-//     const finalUnitPrice = Number(unitPrice) || 0;
-
-//     if (finalQty <= 0) {
-//       return errorResponse(res, "Quantity must be greater than 0.");
-//     }
-
-//     if (finalUnitPrice < 0) {
-//       return errorResponse(res, "Amount cannot be negative.");
-//     }
-
-//     const calculatedTotalAmount = round2(finalQty * finalUnitPrice);
-
-//     // Do not trust frontend totalAmount.
-//     const finalTotalAmount = calculatedTotalAmount;
-
-//     // ========================================================
-//     // GENERATE SALES ORDER NUMBER
-//     // ========================================================
-
-//     const { billNo } = await generateVoucherNo({
-//       companyId,
-//       financialYearId: fy.financialYearId,
-//       tableName: "salesorder",
-//       idColumn: "salesOrderId",
-//       prefixFor: "SALES ORDER",
-//     });
-
-//     const soNo = billNo;
-
-//     // ========================================================
-//     // DUPLICATE SO NUMBER
-//     // ========================================================
-
-//     const duplicateSoNo = await selectWithJoins(
-//       "salesorder",
-//       [],
-//       {
-//         companyId,
-//         financialYearId: fy.financialYearId,
-//         soNo,
-//         delete: 0,
-//       },
-//       ["salesOrderId"],
-//     );
-
-//     if (duplicateSoNo.length > 0) {
-//       return errorResponse(res, "This Sales Order No already exists.");
-//     }
-
-//     // ========================================================
-//     // SAVE
-//     // ========================================================
-
-//     const salesOrder = await saveModel("salesorder", {
-//       companyId,
-//       financialYearId: fy.financialYearId,
-
-//       // salesOrderNo: soNo,
-//       soNo,
-
-//       quotationId: quotation.quotationId,
-//       leadId,
-
-//       mode,
-
-//       ...leadDetails(lead),
-
-//       qty: finalQty,
-//       unitPrice: finalUnitPrice,
-//       totalAmount: finalTotalAmount,
-
-//       aadharNumber: aadharNumber || null,
-//       aadharImage,
-//       panNumber: panNumber || null,
-//       panImage,
-//       gstNumber: gstNumber || null,
-//       gstImage,
-
-//       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-
-//       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
-
-//       delete: 0,
-//     });
-
-//     // ========================================================
-//     // RESPONSE
-//     // ========================================================
-
-//     return successResponse(
-//       res,
-//       {
-//         salesOrderId: salesOrder.salesOrderId,
-//         soNo,
-
-//         quotationId: quotation.quotationId,
-//         qNo: quotation.qNo,
-
-//         leadId,
-
-//         mode,
-
-//         qty: finalQty,
-//         unitPrice: finalUnitPrice,
-//         totalAmount: finalTotalAmount,
-//       },
-//       "Sales Order saved successfully",
-//     );
-//   } catch (error) {
-//     if (error?.name === "SequelizeUniqueConstraintError") {
-//       return errorResponse(res, "This Sales Order already exists.");
-//     }
-
-//     return errorResponse(res, error.message || "Something Went Wrong", error);
-//   }
-// };
 const createSalesOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -476,6 +241,7 @@ const createSalesOrder = async (req, res) => {
       quotationId,
       leadId,
       accountId,
+      expectedDate, // NEW
 
       qty,
       unitPrice,
@@ -502,6 +268,13 @@ const createSalesOrder = async (req, res) => {
 
     if (!normalizeId(leadId)) {
       return errorResponse(res, "Please select a lead.");
+    }
+
+    // NEW: expected date (optional, but must be a valid date if sent)
+    const finalExpectedDate = normalizeDate(expectedDate);
+
+    if (finalExpectedDate === undefined) {
+      return errorResponse(res, "Invalid expected date.");
     }
 
     const fy = await getFinancialYearById(financialYearId, companyId);
@@ -652,6 +425,7 @@ const createSalesOrder = async (req, res) => {
       quotationId: quotation.quotationId,
       leadId,
       accountId: normalizedAccountId,
+      expectedDate: finalExpectedDate, // NEW
 
       ...leadDetails(lead),
 
@@ -676,6 +450,7 @@ const createSalesOrder = async (req, res) => {
 
         leadId,
         accountId: normalizedAccountId,
+        expectedDate: finalExpectedDate || "", // NEW
 
         qty: finalQty,
         unitPrice: finalUnitPrice,
@@ -690,297 +465,11 @@ const createSalesOrder = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
 // ============================================================
 // GET SALES ORDER LIST
 // ============================================================
 
-// const getSalesOrderList = async (req, res) => {
-//   try {
-//     const companyId = req.companyId;
-
-//     if (!companyId) {
-//       return requiredmessage(res, "Unauthorized. Please login again.");
-//     }
-
-//     const { financialYearId, role } = req.query;
-
-//     const branchId = req.branchId;
-//     const employeeId = req.employeeId;
-
-//     const salesOrderWhere = {
-//       companyId,
-//       delete: 0,
-//     };
-
-//     // ========================================================
-//     // EMPLOYEE
-//     // ========================================================
-
-//     if (employeeId) {
-//       salesOrderWhere.createdBy = String(employeeId);
-//       salesOrderWhere.createdtype = "Sale Executive";
-//     }
-
-//     // ========================================================
-//     // BRANCH
-//     // ========================================================
-//     else if (role === "Branch") {
-//       if (!branchId) {
-//         return requiredmessage(res, "Branch not found.");
-//       }
-
-//       salesOrderWhere.branchId = branchId;
-//     }
-
-//     // ========================================================
-//     // FINANCIAL YEAR
-//     // ========================================================
-
-//     if (financialYearId) {
-//       salesOrderWhere.financialYearId = financialYearId;
-//     }
-
-//     // ========================================================
-//     // FETCH SALES ORDERS
-//     // ========================================================
-
-//     const salesOrders = await selectWithJoins(
-//       "salesorder",
-//       [],
-//       salesOrderWhere,
-//       [
-//         "salesOrderId",
-//         "companyId",
-//         "financialYearId",
-
-//         "soNo",
-
-//         "quotationId",
-//         "leadId",
-//         "accountId",
-
-//         "qty",
-//         "unitPrice",
-//         "totalAmount",
-
-//         "createdBy",
-//         "createdtype",
-
-//         "created",
-//         "updated",
-//       ],
-//       [["salesOrderId", "DESC"]],
-//     );
-
-//     if (!salesOrders.length) {
-//       return successResponse(res, [], "Sales Order list fetched successfully");
-//     }
-
-//     // ========================================================
-//     // GET EMPLOYEE IDS
-//     // ========================================================
-
-//     const employeeIds = salesOrders
-//       .map((item) => item.createdBy)
-//       .filter((id) => id && id !== "" && id !== "Admin" && !isNaN(Number(id)));
-
-//     let employeeMap = {};
-
-//     if (employeeIds.length > 0) {
-//       try {
-//         const employees = await selectWithJoins(
-//           "employee",
-//           [],
-//           {
-//             employeeId: employeeIds,
-//           },
-//           ["employeeId", "employeeName"],
-//         );
-
-//         employeeMap = employees.reduce((map, emp) => {
-//           map[String(emp.employeeId)] =
-//             emp.employeeName || String(emp.employeeId);
-
-//           return map;
-//         }, {});
-//       } catch (err) {
-//         console.error("Error fetching employees:", err.message);
-//       }
-//     }
-
-//     // ========================================================
-//     // GET QUOTATION NUMBERS
-//     // ========================================================
-
-//     const quotationIds = salesOrders
-//       .map((item) => item.quotationId)
-//       .filter((id) => id);
-
-//     let quotationMap = {};
-
-//     if (quotationIds.length > 0) {
-//       try {
-//         const quotations = await selectWithJoins(
-//           "quotation",
-//           [],
-//           {
-//             quotationId: quotationIds,
-//             companyId,
-//             delete: 0,
-//           },
-//           ["quotationId", "qNo"],
-//         );
-
-//         quotationMap = quotations.reduce((map, quotation) => {
-//           map[String(quotation.quotationId)] = quotation.qNo || "";
-
-//           return map;
-//         }, {});
-//       } catch (err) {
-//         console.error("Error fetching quotations:", err.message);
-//       }
-//     }
-
-//     // ========================================================
-//     // GET ACCOUNT (PARTY) KYC DETAILS
-//     // ========================================================
-
-//     const accountIds = [
-//       ...new Set(
-//         salesOrders.map((item) => item.accountId).filter((id) => id),
-//       ),
-//     ];
-
-//     let accountMap = {};
-
-//     if (accountIds.length > 0) {
-//       try {
-//         const accounts = await selectWithJoins(
-//           "account",
-//           [],
-//           { id: accountIds, companyId, delete: 0 },
-//           [
-//             "id",
-//             "accountName",
-//             "mobileNo",
-//             "email",
-//             "aadharCardNo",
-//             "aadharImage",
-//             "panCard",
-//             "panImage",
-//             "gstNo",
-//             "gstImage",
-//           ],
-//         );
-
-//         accountMap = accounts.reduce((map, acc) => {
-//           map[String(acc.id)] = acc;
-//           return map;
-//         }, {});
-//       } catch (err) {
-//         console.error("Error fetching accounts:", err.message);
-//       }
-//     }
-
-//     // ========================================================
-//     // GET MODEL NAMES
-//     // ========================================================
-
-//     const leadMap = await getLeadMap(
-//       salesOrders.map((item) => item.leadId),
-//       companyId,
-//     );
-
-//     const modelIds = [
-//       ...new Set([...leadMap.values()].map((l) => l.model).filter(Boolean)),
-//     ];
-
-//     let modelMap = {};
-
-//     if (modelIds.length > 0) {
-//       try {
-//         const models = await selectWithJoins(
-//           "itemmaster",
-//           [],
-//           { itemId: modelIds },
-//           ["itemId", "itemName"],
-//         );
-
-//         modelMap = models.reduce((map, m) => {
-//           map[String(m.itemId)] = m.itemName || "";
-//           return map;
-//         }, {});
-//       } catch (err) {
-//         console.error("Error fetching models:", err.message);
-//       }
-//     }
-//     // ========================================================
-//     // FORMAT RESPONSE
-//     // ========================================================
-
-//     const data = salesOrders.map((salesOrder) => {
-//       const lead = leadMap.get(String(salesOrder.leadId));
-//       const account = accountMap[String(salesOrder.accountId)];
-//       let createdByName = salesOrder.createdBy || "";
-
-//       if (createdByName === "Admin") {
-//         createdByName = "Admin";
-//       } else if (
-//         !isNaN(Number(createdByName)) &&
-//         employeeMap[String(createdByName)]
-//       ) {
-//         createdByName = employeeMap[String(createdByName)];
-//       }
-
-//       return {
-//         id: String(salesOrder.salesOrderId),
-
-//         financialYearId: salesOrder.financialYearId,
-
-//         soNo: salesOrder.soNo || "",
-
-//         quotationId: String(salesOrder.quotationId || ""),
-
-//         qNo: quotationMap[String(salesOrder.quotationId)] || "",
-
-//         leadId: salesOrder.leadId,
-//         accountId: salesOrder.accountId || null,
-
-//         ...leadDetails(lead),
-//         modelName: modelMap[String(lead?.model)] || "",
-
-//         qty: Number(salesOrder.qty) || 0,
-
-//         unitPrice: Number(salesOrder.unitPrice) || 0,
-
-//         totalAmount: Number(salesOrder.totalAmount) || 0,
-
-//         // Selected party ka KYC — account table se
-//         partyName: account?.accountName || "",
-//         partyMobile: account?.mobileNo || "",
-//         partyEmail: account?.email || "",
-//         aadharNumber: account?.aadharCardNo || "",
-//         aadharImage: account?.aadharImage || "",
-//         panNumber: account?.panCard || "",
-//         panImage: account?.panImage || "",
-//         gstNumber: account?.gstNo || "",
-//         gstImage: account?.gstImage || "",
-
-//         createdBy: createdByName,
-
-//         createdType: salesOrder.createdtype || "",
-
-//         createdAt: salesOrder.created,
-
-//         updatedAt: salesOrder.updated,
-//       };
-//     });
-
-//     return successResponse(res, data, "Sales Order list fetched successfully");
-//   } catch (error) {
-//     return errorResponse(res, error.message || "Something Went Wrong", error);
-//   }
-// };
 const getSalesOrderList = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -990,7 +479,13 @@ const getSalesOrderList = async (req, res) => {
     }
 
     // CHANGED: pendingOnly, includeSalesOrderId add
-    const { financialYearId, role, pendingOnly, excludeBilled, includeSalesOrderId } = req.query;
+    const {
+      financialYearId,
+      role,
+      pendingOnly,
+      excludeBilled,
+      includeSalesOrderId,
+    } = req.query;
 
     const branchId = req.branchId;
     const employeeId = req.employeeId;
@@ -1032,7 +527,6 @@ const getSalesOrderList = async (req, res) => {
     // FETCH SALES ORDERS
     // ========================================================
 
-    // CHANGED: variable naam salesOrders -> allSalesOrders
     const allSalesOrders = await selectWithJoins(
       "salesorder",
       [],
@@ -1047,6 +541,7 @@ const getSalesOrderList = async (req, res) => {
         "quotationId",
         "leadId",
         "accountId",
+        "expectedDate", // NEW
 
         "qty",
         "unitPrice",
@@ -1061,11 +556,12 @@ const getSalesOrderList = async (req, res) => {
       [["salesOrderId", "DESC"]],
     );
 
-    // NEW: Sales Register dropdown ke liye billed orders hata do
+    // Sales Register dropdown ke liye billed orders hata do
     let salesOrders = allSalesOrders;
     const wantPendingOnly =
       String(pendingOnly) === "true" || String(excludeBilled) === "true";
-    if (String(wantPendingOnly) === "true") {
+
+    if (wantPendingOnly) {
       const billed = await selectWithJoins(
         "sales",
         [],
@@ -1073,7 +569,10 @@ const getSalesOrderList = async (req, res) => {
         ["salesOrderId"],
       );
       const billedIds = new Set(
-        billed.map((b) => b.salesOrderId).filter(Boolean).map(String),
+        billed
+          .map((b) => b.salesOrderId)
+          .filter(Boolean)
+          .map(String),
       );
 
       salesOrders = allSalesOrders.filter(
@@ -1157,9 +656,7 @@ const getSalesOrderList = async (req, res) => {
     // ========================================================
 
     const accountIds = [
-      ...new Set(
-        salesOrders.map((item) => item.accountId).filter((id) => id),
-      ),
+      ...new Set(salesOrders.map((item) => item.accountId).filter((id) => id)),
     ];
 
     let accountMap = {};
@@ -1225,6 +722,7 @@ const getSalesOrderList = async (req, res) => {
         console.error("Error fetching models:", err.message);
       }
     }
+
     // ========================================================
     // FORMAT RESPONSE
     // ========================================================
@@ -1256,6 +754,7 @@ const getSalesOrderList = async (req, res) => {
 
         leadId: salesOrder.leadId,
         accountId: salesOrder.accountId || null,
+        expectedDate: formatDateOnly(salesOrder.expectedDate), // NEW
 
         ...leadDetails(lead),
         modelName: modelMap[String(lead?.model)] || "",
@@ -1292,6 +791,7 @@ const getSalesOrderList = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
 // ============================================================
 // GET SALES ORDER BY ID
 // ============================================================
@@ -1327,6 +827,7 @@ const getSalesOrderById = async (req, res) => {
         "quotationId",
         "leadId",
         "accountId",
+        "expectedDate", // NEW
 
         "qty",
         "unitPrice",
@@ -1419,6 +920,7 @@ const getSalesOrderById = async (req, res) => {
         modelName = modelRows[0].itemName || "";
       }
     }
+
     return successResponse(
       res,
       {
@@ -1434,6 +936,7 @@ const getSalesOrderById = async (req, res) => {
 
         leadId: salesOrder.leadId,
         accountId: salesOrder.accountId || null,
+        expectedDate: formatDateOnly(salesOrder.expectedDate), // NEW
 
         ...leadDetails(lead),
         modelName: modelName || "",
@@ -1474,265 +977,6 @@ const getSalesOrderById = async (req, res) => {
 // UPDATE SALES ORDER
 // ============================================================
 
-// const updateSalesOrder = async (req, res) => {
-//   try {
-//     const companyId = req.companyId;
-
-//     if (!companyId) {
-//       return requiredmessage(res, "Unauthorized. Please login again.");
-//     }
-
-//     const { id } = req.params;
-
-//     if (!id) {
-//       return errorResponse(res, "Sales Order id is required.");
-//     }
-
-//     // ========================================================
-//     // EXISTING SALES ORDER
-//     // ========================================================
-
-//     const existingRows = await selectWithJoins(
-//       "salesorder",
-//       [],
-//       {
-//         salesOrderId: id,
-//         companyId,
-//         delete: 0,
-//       },
-//       [
-//         "salesOrderId",
-//         "financialYearId",
-//         "soNo",
-//         "quotationId",
-//         "aadharImage",
-//         "panImage",
-//         "gstImage",
-//       ],
-//     );
-
-//     if (!existingRows.length) {
-//       return requiredmessage(res, "Sales Order not found.");
-//     }
-
-//     const existing = existingRows[0];
-
-//     const {
-//       financialYearId,
-//       quotationId,
-//       leadId,
-
-//       mode,
-
-//       qty,
-//       unitPrice,
-
-//       aadharNumber,
-//       panNumber,
-//       gstNumber,
-
-//       createdBy,
-//       createdType,
-//     } = req.body;
-
-//     // ========================================================
-//     // IMAGE UPLOADS (multer via req.files) — keep existing file
-//     // if no new one was uploaded
-//     // ========================================================
-
-//     const aadharImage = req.files?.aadharImage?.[0]
-//       ? `/Uploadimages/sales_order/${req.files.aadharImage[0].filename}`
-//       : existing.aadharImage || null;
-
-//     const panImage = req.files?.panImage?.[0]
-//       ? `/Uploadimages/sales_order/${req.files.panImage[0].filename}`
-//       : existing.panImage || null;
-
-//     const gstImage = req.files?.gstImage?.[0]
-//       ? `/Uploadimages/sales_order/${req.files.gstImage[0].filename}`
-//       : existing.gstImage || null;
-
-//     // ========================================================
-//     // VALIDATION
-//     // ========================================================
-
-//     if (!financialYearId) {
-//       return errorResponse(
-//         res,
-//         "Financial Year not found. Please select a company year.",
-//       );
-//     }
-
-//     if (!normalizeId(quotationId)) {
-//       return errorResponse(res, "Please select a quotation.");
-//     }
-
-//     if (!normalizeId(leadId)) {
-//       return errorResponse(res, "Please select a lead.");
-//     }
-
-//     if (!["asIs", "manual"].includes(mode)) {
-//       return errorResponse(res, "Mode must be either As Its or Manual.");
-//     }
-
-//     const fy = await getFinancialYearById(financialYearId, companyId);
-
-//     if (!fy) {
-//       return errorResponse(res, "Invalid Financial Year.");
-//     }
-
-//     // ========================================================
-//     // CHECK QUOTATION
-//     // ========================================================
-
-//     const quotationRows = await selectWithJoins(
-//       "quotation",
-//       [],
-//       {
-//         quotationId,
-//         companyId,
-//         financialYearId: fy.financialYearId,
-//         delete: 0,
-//       },
-//       ["quotationId", "qNo", "leadId", "finalPrice"],
-//     );
-
-//     if (!quotationRows.length) {
-//       return errorResponse(res, "Selected quotation was not found.");
-//     }
-
-//     const quotation = quotationRows[0];
-
-//     if (normalizeId(leadId) !== normalizeId(quotation.leadId)) {
-//       return errorResponse(
-//         res,
-//         "Selected lead does not belong to this quotation.",
-//       );
-//     }
-
-//     const leadRows = await selectWithJoins(
-//       "lead",
-//       [],
-//       { leadId: normalizeId(leadId), companyId, delete: 0 },
-//       ["leadId", "leadCode"],
-//     );
-//     if (!leadRows.length) {
-//       return errorResponse(res, "Selected lead was not found.");
-//     }
-//     const lead = leadRows[0];
-
-//     // ========================================================
-//     // DUPLICATE QUOTATION
-//     // ========================================================
-
-//     const duplicate = await selectWithJoins(
-//       "salesorder",
-//       [],
-//       {
-//         companyId,
-//         quotationId,
-//         delete: 0,
-//       },
-//       ["salesOrderId"],
-//     );
-
-//     const anotherSalesOrder = duplicate.find(
-//       (item) => String(item.salesOrderId) !== String(id),
-//     );
-
-//     if (anotherSalesOrder) {
-//       return errorResponse(
-//         res,
-//         "Another Sales Order already exists for this quotation.",
-//       );
-//     }
-
-//     // ========================================================
-//     // AMOUNT
-//     // ========================================================
-
-//     const finalQty = Number(qty) || 0;
-//     const finalUnitPrice = Number(unitPrice) || 0;
-
-//     if (finalQty <= 0) {
-//       return errorResponse(res, "Quantity must be greater than 0.");
-//     }
-
-//     if (finalUnitPrice < 0) {
-//       return errorResponse(res, "Amount cannot be negative.");
-//     }
-
-//     const finalTotalAmount = round2(finalQty * finalUnitPrice);
-
-//     // ========================================================
-//     // UPDATE DATA
-//     // ========================================================
-
-//     const updateData = {
-//       financialYearId: fy.financialYearId,
-
-//       quotationId: quotation.quotationId,
-//       leadId,
-
-//       mode,
-
-//       qty: finalQty,
-//       unitPrice: finalUnitPrice,
-//       totalAmount: finalTotalAmount,
-
-//       aadharNumber: aadharNumber || null,
-//       aadharImage,
-//       panNumber: panNumber || null,
-//       panImage,
-//       gstNumber: gstNumber || null,
-//       gstImage,
-
-//       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-
-//       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
-
-//       updated: new Date(),
-//     };
-
-//     // ========================================================
-//     // UPDATE
-//     // ========================================================
-
-//     await updateModelHelper("salesorder", updateData, {
-//       salesOrderId: id,
-//       companyId,
-//       delete: 0,
-//     });
-
-//     return successResponse(
-//       res,
-//       {
-//         salesOrderId: Number(id),
-
-//         soNo: existing.soNo,
-
-//         quotationId: quotation.quotationId,
-//         qNo: quotation.qNo,
-
-//         leadId,
-
-//         mode,
-//         ...leadDetails(lead),
-
-//         qty: finalQty,
-//         unitPrice: finalUnitPrice,
-//         totalAmount: finalTotalAmount,
-//       },
-//       "Sales Order updated successfully",
-//     );
-//   } catch (error) {
-//     if (error?.name === "SequelizeUniqueConstraintError") {
-//       return errorResponse(res, "This Sales Order already exists.");
-//     }
-
-//     return errorResponse(res, error.message || "Something Went Wrong", error);
-//   }
-// };
 const updateSalesOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -1765,6 +1009,7 @@ const updateSalesOrder = async (req, res) => {
       quotationId,
       leadId,
       accountId,
+      expectedDate, // NEW
 
       qty,
       unitPrice,
@@ -1790,6 +1035,13 @@ const updateSalesOrder = async (req, res) => {
 
     if (!normalizeId(leadId)) {
       return errorResponse(res, "Please select a lead.");
+    }
+
+    // NEW: expected date (optional, but must be a valid date if sent)
+    const finalExpectedDate = normalizeDate(expectedDate);
+
+    if (finalExpectedDate === undefined) {
+      return errorResponse(res, "Invalid expected date.");
     }
 
     const fy = await getFinancialYearById(financialYearId, companyId);
@@ -1906,6 +1158,7 @@ const updateSalesOrder = async (req, res) => {
       quotationId: quotation.quotationId,
       leadId,
       accountId: normalizedAccountId,
+      expectedDate: finalExpectedDate, // NEW
 
       qty: finalQty,
       unitPrice: finalUnitPrice,
@@ -1934,6 +1187,7 @@ const updateSalesOrder = async (req, res) => {
 
         leadId,
         accountId: normalizedAccountId,
+        expectedDate: finalExpectedDate || "", // NEW
         ...leadDetails(lead),
 
         qty: finalQty,
@@ -1949,6 +1203,7 @@ const updateSalesOrder = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
 // ============================================================
 // DELETE SALES ORDER
 // ============================================================
@@ -2006,6 +1261,11 @@ const deleteSalesOrder = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
+// ============================================================
+// PENDING ADVANCE SALES ORDERS
+// ============================================================
+
 const getPendingAdvanceSalesOrders = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -2021,10 +1281,11 @@ const getPendingAdvanceSalesOrders = async (req, res) => {
       "salesorder",
       [],
       where,
-      ["salesOrderId", "soNo", "accountId", "totalAmount"], // ✅ grandTotal -> totalAmount
+      ["salesOrderId", "soNo", "accountId", "totalAmount"],
       [["salesOrderId", "DESC"]],
     );
-    if (!orders.length) return successResponse(res, [], "No pending sales orders");
+    if (!orders.length)
+      return successResponse(res, [], "No pending sales orders");
 
     const soIds = orders.map((o) => o.salesOrderId);
 
@@ -2050,7 +1311,8 @@ const getPendingAdvanceSalesOrders = async (req, res) => {
       ["salesOrderId", "amount"],
     );
     const advMap = advances.reduce((m, a) => {
-      m[String(a.salesOrderId)] = (m[String(a.salesOrderId)] || 0) + Number(a.amount || 0);
+      m[String(a.salesOrderId)] =
+        (m[String(a.salesOrderId)] || 0) + Number(a.amount || 0);
       return m;
     }, {});
 
@@ -2070,11 +1332,16 @@ const getPendingAdvanceSalesOrders = async (req, res) => {
       })
       .filter((o) => o.pendingAmount > 0);
 
-    return successResponse(res, data, "Pending sales orders fetched successfully");
+    return successResponse(
+      res,
+      data,
+      "Pending sales orders fetched successfully",
+    );
   } catch (error) {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
 // ============================================================
 // EXPORT
 // ============================================================
@@ -2087,5 +1354,5 @@ module.exports = {
   getSalesOrderById,
   updateSalesOrder,
   deleteSalesOrder,
-  getPendingAdvanceSalesOrders
+  getPendingAdvanceSalesOrders,
 };

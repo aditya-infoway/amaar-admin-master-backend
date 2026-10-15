@@ -23,7 +23,7 @@ module.exports = (app) => {
     mainProcess.createMainProcess
   );
   routes.get("/list", mainProcess.getMainProcessList);
-
+routes.get("/next-code", mainProcess.getNextProcessCode);
   // "/status/:id" ko "/:id" se pehle rakhna zaruri hai
   routes.put(
     "/status/:id",

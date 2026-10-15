@@ -29,6 +29,16 @@ module.exports = sequelize => {
       allowNull: false,
       field: "roleId"
     },
+        processId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "processId"
+    },
+    subProcessId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "subProcessId"
+    },
      accountId: {
       type: DataTypes.INTEGER,
       allowNull: true,
