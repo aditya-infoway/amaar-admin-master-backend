@@ -46,7 +46,11 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: "accountId",
     },
-
+  expectedDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      field: "expectedDate",
+    },
     qty: {
       type: DataTypes.DECIMAL(15, 2),
       allowNull: false,

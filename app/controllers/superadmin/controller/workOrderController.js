@@ -155,7 +155,95 @@ const getStageMap = async (workOrderIds) => {
 // ============================================================
 // GET NEXT WORK ORDER NO
 // ============================================================
+// Process-wise status (workorderassignment se), per work order
+const getProcessStageMap = async (workOrderIds, companyId) => {
+  const map = new Map();
+  const ids = [...new Set((workOrderIds || []).filter(Boolean))];
+  if (!ids.length) return map;
 
+  const rows = await db.workorderassignment.findAll({
+    where: { companyId, workOrderId: ids, delete: 0 },
+    raw: true,
+  });
+  if (!rows.length) return map;
+
+  const processIds = [...new Set(rows.map((r) => r.processId))];
+  const empIds = [...new Set(rows.map((r) => r.contractorId))];
+
+  const [processRows, employees] = await Promise.all([
+    selectWithJoins(
+      "main_process_detail",
+      [],
+      { processId: processIds, companyId, delete: 0 },
+      ["processId", "processName"],
+    ),
+    selectWithJoins(
+      "employee",
+      [],
+      { employeeId: empIds },
+      ["employeeId", "employeeName", "mobileNumber"],
+    ),
+  ]);
+
+  const processName = new Map(
+    processRows.map((p) => [Number(p.processId), p.processName]),
+  );
+  const empById = new Map(employees.map((e) => [String(e.employeeId), e]));
+
+  // workOrderId -> processId -> rows[]
+  const grouped = new Map();
+  rows.forEach((r) => {
+    const w = String(r.workOrderId);
+    if (!grouped.has(w)) grouped.set(w, new Map());
+    const byProcess = grouped.get(w);
+    const p = Number(r.processId);
+    if (!byProcess.has(p)) byProcess.set(p, []);
+    byProcess.get(p).push(r);
+  });
+
+  grouped.forEach((byProcess, w) => {
+    const list = [];
+
+    byProcess.forEach((g, pid) => {
+      const allDone = g.every((x) => x.status === "Completed");
+      const anyStarted = g.some((x) => x.status !== "Pending");
+      const status = allDone ? "Completed" : anyStarted ? "In Progress" : "Pending";
+
+      const names = [
+        ...new Set(
+          g.map((x) => empById.get(String(x.contractorId))?.employeeName).filter(Boolean),
+        ),
+      ];
+      const mobiles = [
+        ...new Set(
+          g.map((x) => empById.get(String(x.contractorId))?.mobileNumber).filter(Boolean),
+        ),
+      ];
+
+      const times = (key) =>
+        g.map((x) => x[key]).filter(Boolean).map((v) => new Date(v).getTime());
+      const starts = times("startTime");
+      const ends = times("endTime");
+      const created = times("created");
+
+      list.push({
+        label: processName.get(pid) || "",
+        order: pid,
+        status,
+        employeeName: names.join(", "),
+        employeeMobile: mobiles.join(", "),
+        assignedAt: created.length ? new Date(Math.min(...created)) : null,
+        startTime: starts.length ? new Date(Math.min(...starts)) : null,
+        endTime: allDone && ends.length ? new Date(Math.max(...ends)) : null,
+      });
+    });
+
+    list.sort((a, b) => a.order - b.order);
+    map.set(w, list);
+  });
+
+  return map;
+};
 const getNextWorkOrderNo = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -672,7 +760,10 @@ const getWorkOrderList = async (req, res) => {
 
 
     const stageMap = await getStageMap(workOrders.map((w) => w.workOrderId));
-
+const processStageMap = await getProcessStageMap(
+  workOrders.map((w) => w.workOrderId),
+  companyId,
+);
     const data = workOrders.map((workOrder) => {
       const live = liveDetails(
         workOrder,
@@ -714,6 +805,7 @@ const getWorkOrderList = async (req, res) => {
           ? String(workOrder.assignedEmployeeId)
           : null,
         stages: stageMap.get(String(workOrder.workOrderId)) || [],
+        processStages: processStageMap.get(String(workOrder.workOrderId)) || [],
         createdAt: workOrder.created,
         updatedAt: workOrder.updated,
 
@@ -1235,6 +1327,125 @@ const getStageEmployees = async (req, res) => {
   }
 };
 
+// const getMyWorkOrderTasks = async (req, res) => {
+//   try {
+//     const { companyId, employeeId } = req;
+//     const { status } = req.query;
+//     if (!companyId || !employeeId) {
+//       return requiredmessage(res, "Unauthorized. Please login again.");
+//     }
+
+//     // Sirf wahi process jo is employee (contractor) ko assign hui
+//     const mine = await db.workorderassignment.findAll({
+//       where: {
+//         companyId,
+//         contractorId: employeeId,
+//         delete: 0,
+//         ...(status ? { status } : {}),
+//       },
+//       order: [["workOrderAssignmentId", "DESC"]],
+//       raw: true,
+//     });
+//     if (!mine.length) return successResponse(res, [], "No tasks assigned");
+
+//     const workOrderIds = [...new Set(mine.map((m) => m.workOrderId))];
+//     const processIds = [...new Set(mine.map((m) => m.processId))];
+//     const subIds = [
+//       ...new Set(mine.map((m) => m.subProcessId).filter(Boolean)),
+//     ];
+
+//     const [workOrders, processRows, subRows] = await Promise.all([
+//       selectWithJoins(
+//         "workorder",
+//         [],
+//         { workOrderId: workOrderIds, companyId, delete: 0 },
+//         ["workOrderId", "workOrderNo", "customerName", "model", "qty", "created"],
+//       ),
+//       selectWithJoins(
+//         "main_process_detail",
+//         [],
+//         { processId: processIds, companyId, delete: 0 },
+//         ["processId", "processName"],
+//       ),
+//       subIds.length
+//         ? selectWithJoins(
+//             "sub_process",
+//             [],
+//             { subProcessId: subIds, delete: 0 },
+//             ["subProcessId", "subProcessName"],
+//           )
+//         : [],
+//     ]);
+
+//     const woById = new Map(workOrders.map((w) => [String(w.workOrderId), w]));
+//     const processName = new Map(
+//       processRows.map((p) => [Number(p.processId), p.processName]),
+//     );
+//     const subName = new Map(
+//       subRows.map((s) => [Number(s.subProcessId), s.subProcessName]),
+//     );
+
+//     const materialStatusMap = await getMaterialStatusMap(workOrderIds, companyId);
+
+//     const modelIds = [
+//       ...new Set(
+//         workOrders
+//           .map((w) => Number(w.model))
+//           .filter((id) => Number.isInteger(id) && id > 0),
+//       ),
+//     ];
+//     let modelNameById = new Map();
+//     if (modelIds.length) {
+//       const models = await selectWithJoins(
+//         "itemmaster",
+//         [],
+//         { itemId: modelIds, delete: 0 },
+//         ["itemId", "itemName"],
+//       );
+//       modelNameById = new Map(
+//         models.map((m) => [String(m.itemId), m.itemName || ""]),
+//       );
+//     }
+
+//     const data = mine
+//       .filter((m) => woById.has(String(m.workOrderId)))
+//       .map((m) => {
+//         const wo = woById.get(String(m.workOrderId));
+//         const pName = processName.get(Number(m.processId)) || "";
+//         const sName = subName.get(Number(m.subProcessId)) || "";
+
+//         return {
+//           workOrderStageId: m.workOrderAssignmentId, // frontend ke liye same key
+//           workOrderId: m.workOrderId,
+//           workOrderNo: wo.workOrderNo,
+//           workOrderDate: wo.created,
+//           materialStatus:
+//             materialStatusMap.get(String(m.workOrderId)) ||
+//             MATERIAL_STATUS.PENDING_MATERIAL,
+//           stageProgressStatus: null,
+//           customerName: wo.customerName,
+//           model: wo.model,
+//           modelName: modelNameById.get(String(wo.model)) || "",
+//           qty: wo.qty,
+//           processId: m.processId,
+//           subProcessId: m.subProcessId,
+//           stage: pName,
+//           stageLabel: sName ? `${pName} - ${sName}` : pName,
+//           stageOrder: 0,
+//           contractAmount: Number(m.contractAmount) || 0,
+//           status: m.status,
+//           isUnlocked: true,
+//           startTime: m.startTime,
+//           endTime: m.endTime,
+//     itemsVerified: Boolean(m.itemsVerified),
+//         };
+//       });
+
+//     return successResponse(res, data, "Tasks fetched successfully");
+//   } catch (error) {
+//     return errorResponse(res, error.message || "Something Went Wrong", error);
+//   }
+// };
 const getMyWorkOrderTasks = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
@@ -1257,9 +1468,16 @@ const getMyWorkOrderTasks = async (req, res) => {
     if (!mine.length) return successResponse(res, [], "No tasks assigned");
 
     const workOrderIds = [...new Set(mine.map((m) => m.workOrderId))];
-    const processIds = [...new Set(mine.map((m) => m.processId))];
+
+    // Same work orders ke SAARE assignments (pichhle process ka status dekhne ke liye)
+    const allAssignments = await db.workorderassignment.findAll({
+      where: { companyId, workOrderId: workOrderIds, delete: 0 },
+      raw: true,
+    });
+
+    const processIds = [...new Set(allAssignments.map((a) => a.processId))];
     const subIds = [
-      ...new Set(mine.map((m) => m.subProcessId).filter(Boolean)),
+      ...new Set(allAssignments.map((a) => a.subProcessId).filter(Boolean)),
     ];
 
     const [workOrders, processRows, subRows] = await Promise.all([
@@ -1293,6 +1511,20 @@ const getMyWorkOrderTasks = async (req, res) => {
       subRows.map((s) => [Number(s.subProcessId), s.subProcessName]),
     );
 
+  const labelOf = (a) => processName.get(Number(a.processId)) || "";
+
+    // Process ka order: processId (phir subProcessId) ke hisaab se
+    const orderKey = (a) =>
+      Number(a.processId) * 100000 + Number(a.subProcessId || 0);
+
+    const byWorkOrder = new Map();
+    allAssignments.forEach((a) => {
+      const k = String(a.workOrderId);
+      if (!byWorkOrder.has(k)) byWorkOrder.set(k, []);
+      byWorkOrder.get(k).push(a);
+    });
+    byWorkOrder.forEach((list) => list.sort((a, b) => orderKey(a) - orderKey(b)));
+
     const materialStatusMap = await getMaterialStatusMap(workOrderIds, companyId);
 
     const modelIds = [
@@ -1319,8 +1551,26 @@ const getMyWorkOrderTasks = async (req, res) => {
       .filter((m) => woById.has(String(m.workOrderId)))
       .map((m) => {
         const wo = woById.get(String(m.workOrderId));
-        const pName = processName.get(Number(m.processId)) || "";
-        const sName = subName.get(Number(m.subProcessId)) || "";
+
+        // Pichhla process (same work order me, order me ek step pehle wala)
+        const siblings = byWorkOrder.get(String(m.workOrderId)) || [];
+        const idx = siblings.findIndex(
+          (s) => s.workOrderAssignmentId === m.workOrderAssignmentId,
+        );
+        const previous = idx > 0 ? siblings[idx - 1] : null;
+
+        let stageProgressStatus = null;
+        if (previous) {
+          const prevLabel = labelOf(previous);
+          if (previous.status === "Completed") {
+            stageProgressStatus = `${prevLabel} Complete`;
+          } else if (previous.status === "In Progress") {
+            stageProgressStatus = `${prevLabel} In Progress`;
+          } else {
+            stageProgressStatus = `Pending ${prevLabel}`;
+          }
+        }
+        const isUnlocked = !previous || previous.status === "Completed";
 
         return {
           workOrderStageId: m.workOrderAssignmentId, // frontend ke liye same key
@@ -1330,22 +1580,22 @@ const getMyWorkOrderTasks = async (req, res) => {
           materialStatus:
             materialStatusMap.get(String(m.workOrderId)) ||
             MATERIAL_STATUS.PENDING_MATERIAL,
-          stageProgressStatus: null,
+          stageProgressStatus,
           customerName: wo.customerName,
           model: wo.model,
           modelName: modelNameById.get(String(wo.model)) || "",
           qty: wo.qty,
           processId: m.processId,
           subProcessId: m.subProcessId,
-          stage: pName,
-          stageLabel: sName ? `${pName} - ${sName}` : pName,
-          stageOrder: 0,
+          stage: processName.get(Number(m.processId)) || "",
+          stageLabel: labelOf(m),
+          stageOrder: idx + 1,
           contractAmount: Number(m.contractAmount) || 0,
           status: m.status,
-          isUnlocked: true,
+          isUnlocked,
           startTime: m.startTime,
           endTime: m.endTime,
-          itemsVerified: true,
+          itemsVerified: Boolean(m.itemsVerified),
         };
       });
 
@@ -1354,7 +1604,6 @@ const getMyWorkOrderTasks = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 const updateWorkOrderStages = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -1532,30 +1781,48 @@ const endWorkOrderStage = async (req, res) => {
   }
 };
 
-// the logged-in employee's own stage row, or null
-const loadMyStage = async (req, workOrderStageId) => {
-  const rows = await selectWithJoins(
-    "workorderstage",
-    [],
-    {
-      workOrderStageId,
+// ============================================================
+// ITEM PROCESS (stage items + verification)
+// NOTE: workOrderStageId jo frontend bhejta hai wo ab
+//       workorderassignment.workOrderAssignmentId hai.
+// ============================================================
+
+// the logged-in contractor's own assignment row, or null
+const loadMyAssignment = async (req, assignmentId) =>
+  db.workorderassignment.findOne({
+    where: {
+      workOrderAssignmentId: assignmentId,
       companyId: req.companyId,
-      employeeId: req.employeeId,
+      contractorId: req.employeeId,
       delete: 0,
     },
-    [
-      "workOrderStageId",
-      "workOrderId",
-      "stage",
-      "status",
-      "itemsVerified",
-      "startTime",
-    ],
+    raw: true,
+  });
+
+// Process name (e.g. "Material Cutting") -> WORK_ORDER_STAGES key, jisse BOM items nikalte hain
+const resolveStageKeyByProcess = async (companyId, processId) => {
+  const rows = await selectWithJoins(
+    "main_process_detail",
+    [],
+    { processId, companyId, delete: 0 },
+    ["processId", "processName"],
   );
-  return rows[0] || null;
+  const name = String(rows[0]?.processName || "").trim().toLowerCase();
+  if (!name) return null;
+
+  const stage = WORK_ORDER_STAGES.find(
+    (s) =>
+      String(s.label || "").trim().toLowerCase() === name ||
+      String(s.key || "").trim().toLowerCase() === name,
+  );
+  return stage ? stage.key : null;
 };
 
-// Items to verify for one stage task
+// workorderassignment me itemsVerified column hai ya nahi
+const assignmentHasVerifyColumn = () =>
+  Boolean(db.workorderassignment?.rawAttributes?.itemsVerified);
+
+// Items to verify for one assigned process task
 const getMyStageItems = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
@@ -1568,13 +1835,40 @@ const getMyStageItems = async (req, res) => {
       return errorResponse(res, "Work order task is required.");
     }
 
-    const task = await loadMyStage(req, workOrderStageId);
+    const task = await loadMyAssignment(req, workOrderStageId);
     if (!task) return errorResponse(res, "Work order task not found.");
+
+    // Verification column na ho to tasks list ki tarah "verified" maana jayega
+    const itemsVerified = assignmentHasVerifyColumn()
+      ? Boolean(task.itemsVerified)
+      : true;
+
+    const stageKey = await resolveStageKeyByProcess(companyId, task.processId);
+
+    if (!stageKey) {
+      const woRows = await selectWithJoins(
+        "workorder",
+        [],
+        { workOrderId: task.workOrderId, companyId, delete: 0 },
+        ["workOrderId", "workOrderNo"],
+      );
+      return successResponse(
+        res,
+        {
+          workOrderStageId,
+          workOrderNo: woRows[0]?.workOrderNo || "",
+          status: task.status,
+          itemsVerified,
+          items: [],
+        },
+        "No items mapped for this process",
+      );
+    }
 
     const result = await getStageItems({
       companyId,
       workOrderId: task.workOrderId,
-      stageKey: task.stage,
+      stageKey,
     });
     if (result.error) return errorResponse(res, result.error);
 
@@ -1584,7 +1878,7 @@ const getMyStageItems = async (req, res) => {
         workOrderStageId,
         workOrderNo: result.workOrder.workOrderNo,
         status: task.status,
-        itemsVerified: Boolean(task.itemsVerified),
+        itemsVerified,
         items: result.items,
       },
       "Stage items fetched successfully",
@@ -1594,7 +1888,7 @@ const getMyStageItems = async (req, res) => {
   }
 };
 
-// Save: every item of the stage must be verified
+// Save: every item of the process must be verified
 const saveStageItemVerification = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
@@ -1612,21 +1906,32 @@ const saveStageItemVerification = async (req, res) => {
       ),
     );
 
-    const task = await loadMyStage(req, workOrderStageId);
+    const task = await loadMyAssignment(req, workOrderStageId);
     if (!task) return errorResponse(res, "Work order task not found.");
 
     if (task.status !== "In Progress") {
       return errorResponse(res, "Work is not in progress.");
     }
+    if (!assignmentHasVerifyColumn()) {
+      return errorResponse(
+        res,
+        "Item verification is not enabled for assigned processes.",
+      );
+    }
     if (task.itemsVerified) {
       return errorResponse(res, "Items are already verified.");
+    }
+
+    const stageKey = await resolveStageKeyByProcess(companyId, task.processId);
+    if (!stageKey) {
+      return errorResponse(res, "No items are mapped for this process.");
     }
 
     // the server decides which items count, not the client
     const result = await getStageItems({
       companyId,
       workOrderId: task.workOrderId,
-      stageKey: task.stage,
+      stageKey,
     });
     if (result.error) return errorResponse(res, result.error);
 
@@ -1635,19 +1940,21 @@ const saveStageItemVerification = async (req, res) => {
     }
 
     const now = new Date();
-    const [updated] = await db.workorderstage.update(
-      { itemsVerified: true, itemsVerifiedAt: now, updated: now },
-      {
-        where: {
-          workOrderStageId,
-          companyId,
-          employeeId,
-          status: "In Progress",
-          itemsVerified: false,
-          delete: 0,
-        },
+    const updateData = { itemsVerified: true, updated: now };
+    if (db.workorderassignment.rawAttributes.itemsVerifiedAt) {
+      updateData.itemsVerifiedAt = now;
+    }
+
+    const [updated] = await db.workorderassignment.update(updateData, {
+      where: {
+        workOrderAssignmentId: workOrderStageId,
+        companyId,
+        contractorId: employeeId,
+        status: "In Progress",
+        itemsVerified: false,
+        delete: 0,
       },
-    );
+    });
     if (!updated) {
       return errorResponse(
         res,
@@ -1925,5 +2232,6 @@ module.exports = {
   saveStageItemVerification,
   endWorkOrderStage,
   getWorkOrderModelItems,
-  getAssignedProcesses
+  getAssignedProcesses,
+  getProcessStageMap
 };

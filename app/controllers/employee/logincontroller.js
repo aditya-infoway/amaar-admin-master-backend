@@ -9,8 +9,67 @@ const {
   selectWithJoins,
   selectWithJoinsV2,
   updateModel,
-    saveModel,
+  saveModel,
 } = require("../../helper/index.js");
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+const isProductionDept = (department) =>
+  String(department || "").toLowerCase() === "production";
+
+// NEW: Production employee ke liye process / sub-process ki details nikalta hai.
+//   loginType:
+//     "ROLE"        -> normal employee (role based)
+//     "PROCESS"     -> Production employee, sirf process (subProcess nahi)
+//     "SUB_PROCESS" -> Production employee, process + sub-process
+const getProcessInfo = async (employee) => {
+  const info = {
+    processId: null,
+    processName: "",
+    subProcessId: null,
+    subProcessName: "",
+    loginType: "ROLE",
+  };
+
+  if (!isProductionDept(employee.department)) {
+    return info;
+  }
+
+  const processId = Number(employee.processId) || null;
+  const subProcessId = Number(employee.subProcessId) || null;
+
+  info.processId = processId;
+  info.subProcessId = subProcessId;
+  info.loginType = subProcessId ? "SUB_PROCESS" : "PROCESS";
+
+  if (processId) {
+    const processRows = await selectWithJoins(
+      "main_process_detail",
+      [],
+      { processId, companyId: employee.companyId, delete: 0 },
+      ["processId", "processName"]
+    );
+    if (processRows.length > 0) {
+      info.processName = processRows[0].processName || "";
+    }
+  }
+
+  if (subProcessId) {
+    const subRows = await selectWithJoins(
+      "sub_process",
+      [],
+      { subProcessId, delete: 0 },
+      ["subProcessId", "subProcessName"]
+    );
+    if (subRows.length > 0) {
+      info.subProcessName = subRows[0].subProcessName || "";
+    }
+  }
+
+  return info;
+};
 
 // ---------------- LOGIN ----------------
 const employeeLogin = async (req, res) => {
@@ -33,6 +92,9 @@ const employeeLogin = async (req, res) => {
         "department",
         "branch",
         "roleId",
+        "processId", // NEW
+        "subProcessId", // NEW
+        "accountId", // NEW
         "employeeName",
         "email",
         "password",
@@ -69,7 +131,7 @@ const employeeLogin = async (req, res) => {
     }
 
     const company = companyRows[0];
-      const { latitude, longitude } = req.body;
+    const { latitude, longitude } = req.body;
 
     const companyDetailsRows = await selectWithJoins(
       "companydetails",
@@ -80,7 +142,7 @@ const employeeLogin = async (req, res) => {
 
     const companyDetails = companyDetailsRows[0];
 
- if (
+    if (
       companyDetails &&
       companyDetails.latitude != null &&
       companyDetails.longitude != null
@@ -120,6 +182,7 @@ const employeeLogin = async (req, res) => {
     }
 
     // ---- Step 5: role table se roleName lookup ----
+    // (Production employee ka roleId 0 hota hai, isliye roleName "" rahega)
     let roleName = "";
     if (employee.roleId) {
       const roleRows = await selectWithJoins(
@@ -134,7 +197,9 @@ const employeeLogin = async (req, res) => {
       }
     }
 
-   
+    // ---- Step 5.5 (NEW): Production employee ke liye process / sub-process ----
+    const processInfo = await getProcessInfo(employee);
+
     const token = crypto.randomBytes(30).toString("hex");
 
     await updateModel(
@@ -143,94 +208,93 @@ const employeeLogin = async (req, res) => {
       { employeeId: employee.employeeId }
     );
 
-    // ---- Step 6.5: Attendance check-in (saved directly on employee row) ----
-       // ---- Step 6.5: Attendance check-in (attendance table, one row per session) ----
-  const now = new Date();
-const todayDateStr = getDateString(now);
+    // ---- Step 6.5: Attendance check-in (attendance table, one row per session) ----
+    const now = new Date();
+    const todayDateStr = getDateString(now);
 
-const openAttendanceRows = await selectWithJoins(
-  "attendance",
-  [],
-  { employeeId: employee.employeeId, isCheckedIn: true, delete: 0 },
-  ["attendanceId", "checkinDate", "checkinTime", "lastCheckinTime", "countTime"],
-  [["attendanceId", "DESC"]]
-);
-
-const openRow = openAttendanceRows[0];
-
-if (openRow && openRow.checkinDate === todayDateStr) {
-  await updateModel(
-    "attendance",
-    { updated: now },
-    { attendanceId: openRow.attendanceId }
-  );
-} else if (openRow && openRow.checkinDate !== todayDateStr) {
-  const lastCheckin = new Date(openRow.lastCheckinTime || openRow.checkinTime);
-  const endOfThatDay = new Date(openRow.checkinDate + "T23:59:59");
-  const sessionSeconds = Math.max(0, Math.floor((endOfThatDay - lastCheckin) / 1000));
-  const finalCountTime = (openRow.countTime || 0) + sessionSeconds;
-
-  await updateModel(
-    "attendance",
-    {
-      isCheckedIn: false,
-      checkoutTime: endOfThatDay,
-      countTime: finalCountTime,
-      status: "AUTO_CLOSED",
-      updated: now,
-    },
-    { attendanceId: openRow.attendanceId }
-  );
-
-  await saveModel("attendance", {
-    companyId: employee.companyId,
-    employeeId: employee.employeeId,
-    employeeName: employee.employeeName,
-    checkinDate: todayDateStr,
-    checkinTime: now,
-    lastCheckinTime: now,
-    checkinLatitude: latitude ?? null,
-    checkinLongitude: longitude ?? null,
-    countTime: 0,
-    isCheckedIn: true,
-    delete: 0,
-  });
-} else {
-  const todayRows = await selectWithJoins(
-    "attendance",
-    [],
-    { employeeId: employee.employeeId, checkinDate: todayDateStr, delete: 0 },
-    ["attendanceId", "countTime"]
-  );
-
-  if (todayRows.length > 0) {
-    await updateModel(
+    const openAttendanceRows = await selectWithJoins(
       "attendance",
-      {
-        isCheckedIn: true,
+      [],
+      { employeeId: employee.employeeId, isCheckedIn: true, delete: 0 },
+      ["attendanceId", "checkinDate", "checkinTime", "lastCheckinTime", "countTime"],
+      [["attendanceId", "DESC"]]
+    );
+
+    const openRow = openAttendanceRows[0];
+
+    if (openRow && openRow.checkinDate === todayDateStr) {
+      await updateModel(
+        "attendance",
+        { updated: now },
+        { attendanceId: openRow.attendanceId }
+      );
+    } else if (openRow && openRow.checkinDate !== todayDateStr) {
+      const lastCheckin = new Date(openRow.lastCheckinTime || openRow.checkinTime);
+      const endOfThatDay = new Date(openRow.checkinDate + "T23:59:59");
+      const sessionSeconds = Math.max(0, Math.floor((endOfThatDay - lastCheckin) / 1000));
+      const finalCountTime = (openRow.countTime || 0) + sessionSeconds;
+
+      await updateModel(
+        "attendance",
+        {
+          isCheckedIn: false,
+          checkoutTime: endOfThatDay,
+          countTime: finalCountTime,
+          status: "AUTO_CLOSED",
+          updated: now,
+        },
+        { attendanceId: openRow.attendanceId }
+      );
+
+      await saveModel("attendance", {
+        companyId: employee.companyId,
+        employeeId: employee.employeeId,
+        employeeName: employee.employeeName,
+        checkinDate: todayDateStr,
+        checkinTime: now,
         lastCheckinTime: now,
         checkinLatitude: latitude ?? null,
         checkinLongitude: longitude ?? null,
-        updated: now,
-      },
-      { attendanceId: todayRows[0].attendanceId }
-    );
-  } else {
-    await saveModel("attendance", {
-      companyId: employee.companyId,
-      employeeId: employee.employeeId,
-      employeeName: employee.employeeName,
-      checkinDate: todayDateStr,
-      checkinTime: now,
-      lastCheckinTime: now,
-      checkinLatitude: latitude ?? null,
-      checkinLongitude: longitude ?? null,
-      countTime: 0,
-      isCheckedIn: true,
-      delete: 0,
-    });
-  }
-}
+        countTime: 0,
+        isCheckedIn: true,
+        delete: 0,
+      });
+    } else {
+      const todayRows = await selectWithJoins(
+        "attendance",
+        [],
+        { employeeId: employee.employeeId, checkinDate: todayDateStr, delete: 0 },
+        ["attendanceId", "countTime"]
+      );
+
+      if (todayRows.length > 0) {
+        await updateModel(
+          "attendance",
+          {
+            isCheckedIn: true,
+            lastCheckinTime: now,
+            checkinLatitude: latitude ?? null,
+            checkinLongitude: longitude ?? null,
+            updated: now,
+          },
+          { attendanceId: todayRows[0].attendanceId }
+        );
+      } else {
+        await saveModel("attendance", {
+          companyId: employee.companyId,
+          employeeId: employee.employeeId,
+          employeeName: employee.employeeName,
+          checkinDate: todayDateStr,
+          checkinTime: now,
+          lastCheckinTime: now,
+          checkinLatitude: latitude ?? null,
+          checkinLongitude: longitude ?? null,
+          countTime: 0,
+          isCheckedIn: true,
+          delete: 0,
+        });
+      }
+    }
 
     const responseData = {
       employeeId: employee.employeeId,
@@ -242,6 +306,15 @@ if (openRow && openRow.checkinDate === todayDateStr) {
       branch: employee.branch,
       roleId: employee.roleId,
       roleName,
+
+      // NEW: Production login ke liye
+      loginType: processInfo.loginType, // ROLE | PROCESS | SUB_PROCESS
+      processId: processInfo.processId,
+      processName: processInfo.processName,
+      subProcessId: processInfo.subProcessId,
+      subProcessName: processInfo.subProcessName,
+      accountId: employee.accountId || null,
+
       token,
     };
 
@@ -336,6 +409,9 @@ const getEmployeeProfile = async (req, res) => {
         "department",
         "branch",
         "roleId",
+        "processId", // NEW
+        "subProcessId", // NEW
+        "accountId", // NEW
         "employeeName",
         "mobileNumber",
         "alternateNumber",
@@ -361,12 +437,20 @@ const getEmployeeProfile = async (req, res) => {
       employee.roleName = roleRows.length > 0 ? roleRows[0].roleName : "";
     }
 
+    // NEW: Production employee ke liye process / sub-process details
+    const processInfo = await getProcessInfo(employee);
+    employee.loginType = processInfo.loginType;
+    employee.processId = processInfo.processId;
+    employee.processName = processInfo.processName;
+    employee.subProcessId = processInfo.subProcessId;
+    employee.subProcessName = processInfo.subProcessName;
+
     return successResponse(res, employee, "Profile fetched successfully.");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
-// ---------------- CHECK OUT ----------------
+
 // ---------------- CHECK OUT ----------------
 const employeeCheckout = async (req, res) => {
   try {
@@ -427,6 +511,7 @@ const employeeCheckout = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
+
 const getAttendanceStatus = async (req, res) => {
   try {
     const employeeId = req.employeeId;
@@ -451,8 +536,8 @@ const getAttendanceStatus = async (req, res) => {
       res,
       {
         isCheckedIn: true,
-        countTime: row.countTime || 0,           // is session shuru hone se pehle ka cumulative
-        lastCheckinTime: row.lastCheckinTime,     // frontend isse live elapsed calculate karega
+        countTime: row.countTime || 0, // is session shuru hone se pehle ka cumulative
+        lastCheckinTime: row.lastCheckinTime, // frontend isse live elapsed calculate karega
       },
       "Status fetched"
     );
@@ -460,10 +545,11 @@ const getAttendanceStatus = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
+
 module.exports = {
   employeeLogin,
   employeeCheckout,
-    getAttendanceStatus,
+  getAttendanceStatus,
   getFinancialYears,
   getEmployeeProfile,
 };
