@@ -7,23 +7,20 @@ const {
   selectWithJoins,
 } = require("../../../helper/index.js");
 
-// payload ke andar duplicate code / serial check
-const checkDuplicateProcesses = (processes = []) => {
-  const codes = new Set();
+const toPlain = (row) => (row && row.toJSON ? row.toJSON() : row);
+
+// payload ke andar duplicate serial check
+const checkDuplicateSerials = (processes = []) => {
   const serials = new Set();
 
   for (const p of processes) {
-    const code = String(p.processCode).trim().toLowerCase();
     const serial = String(p.serialNo);
-
-    if (codes.has(code)) return `Duplicate Process Code: ${p.processCode}`;
     if (serials.has(serial)) return `Duplicate Serial No: ${p.serialNo}`;
-
-    codes.add(code);
     serials.add(serial);
   }
   return null;
 };
+
 // serial no 1 se continuous hona chahiye (1,2,3...)
 const checkSerialSequence = (processes = []) => {
   const serials = processes
@@ -38,29 +35,28 @@ const checkSerialSequence = (processes = []) => {
   return null;
 };
 
-// process code poori company me unique (edit me apna main process exclude)
-const checkProcessCodeUnique = async (companyId, processes = [], excludeMainProcessId = null) => {
+// ---------- PROCESS CODE GENERATION (001, 002, ...) ----------
+const formatProcessCode = (num) => String(num).padStart(3, "0");
+
+// DB se company ka sabse bada generated code (deleted rows bhi count, taaki code reuse na ho)
+const getLastCodeNumber = async (companyId) => {
   const rows = await selectWithJoins(
     "main_process_detail",
     [],
-    { companyId, delete: 0 },
-    ["processId", "mainProcessId", "processCode"]
+    { companyId },
+    ["processId", "processCode"]
   );
 
-  const taken = new Set();
+  let max = 0;
   (rows || []).map(toPlain).forEach((r) => {
-    if (excludeMainProcessId && String(r.mainProcessId) === String(excludeMainProcessId)) return;
-    taken.add(String(r.processCode).trim().toLowerCase());
+    const code = String(r.processCode || "").trim();
+    // sirf 3-digit generated codes (001-999) count karo, purane random codes ignore
+    if (!/^\d{3}$/.test(code)) return;
+    const n = parseInt(code, 10);
+    if (n > max) max = n;
   });
-
-  for (const p of processes) {
-    if (taken.has(String(p.processCode).trim().toLowerCase())) {
-      return `Process Code ${p.processCode} already exists.`;
-    }
-  }
-  return null;
+  return max;
 };
-const toPlain = (row) => (row && row.toJSON ? row.toJSON() : row);
 
 // createdBy id -> name (Super Admin = company, baaki = employee)
 const attachCreatedByName = async (rows) => {
@@ -126,13 +122,12 @@ const createMainProcess = async (req, res) => {
 
     const { financialYearId, mainProcess, processes, createdBy, createdType } = req.body;
 
-    const dupError = checkDuplicateProcesses(processes);
+    const dupError = checkDuplicateSerials(processes);
     if (dupError) return errorResponse(res, dupError);
-  const serialError = checkSerialSequence(processes);
+
+    const serialError = checkSerialSequence(processes);
     if (serialError) return errorResponse(res, serialError);
 
-    const codeError = await checkProcessCodeUnique(companyId, processes);
-    if (codeError) return errorResponse(res, codeError);
     const exists = await selectWithJoins(
       "main_process",
       [],
@@ -147,17 +142,24 @@ const createMainProcess = async (req, res) => {
       companyId,
       financialYearId: financialYearId || null,
       mainProcess: mainProcess.trim(),
-            status: "Inactive",
+      status: "Inactive",
       createdBy: createdBy || 0,
       createdType: createdType || null,
       delete: 0,
     });
 
-    for (const p of processes) {
+    // DB check karke serial order me code assign: 001, 002 ...
+    let lastCode = await getLastCodeNumber(companyId);
+    const sorted = [...processes].sort(
+      (a, b) => Number(a.serialNo) - Number(b.serialNo)
+    );
+
+    for (const p of sorted) {
+      lastCode += 1;
       await saveModel("main_process_detail", {
         mainProcessId: main.mainProcessId,
         companyId,
-        processCode: p.processCode.trim(),
+        processCode: formatProcessCode(lastCode),
         processName: p.processName.trim(),
         serialNo: Number(p.serialNo),
         delete: 0,
@@ -227,7 +229,7 @@ const getMainProcessList = async (req, res) => {
       id: r.mainProcessId,
       financialYearId: r.financialYearId,
       mainProcess: r.mainProcess,
-        status: r.status,
+      status: r.status,
       createdBy: r.createdBy,
       createdType: r.createdType,
       createdByName: r.createdByName,
@@ -276,7 +278,7 @@ const getMainProcessById = async (req, res) => {
         id: main.mainProcessId,
         financialYearId: main.financialYearId,
         mainProcess: main.mainProcess,
-           status: main.status,
+        status: main.status,
         createdBy: main.createdBy,
         createdType: main.createdType,
         createdByName: withName.createdByName,
@@ -307,14 +309,12 @@ const updateMainProcess = async (req, res) => {
     );
     if (existing.length === 0) return requiredmessage(res, "Main process not found");
 
-    const dupError = checkDuplicateProcesses(processes);
+    const dupError = checkDuplicateSerials(processes);
     if (dupError) return errorResponse(res, dupError);
 
     const serialError = checkSerialSequence(processes);
     if (serialError) return errorResponse(res, serialError);
 
-    const codeError = await checkProcessCodeUnique(companyId, processes, id);
-    if (codeError) return errorResponse(res, codeError);
     // same naam kisi dusre record pe na ho
     const nameExists = await selectWithJoins(
       "main_process",
@@ -326,7 +326,7 @@ const updateMainProcess = async (req, res) => {
       return errorResponse(res, "Main Process already exists.");
     }
 
-      await updateModelHelper(
+    await updateModelHelper(
       "main_process",
       { mainProcess: mainProcess.trim(), updated: new Date() },
       { mainProcessId: id, companyId }
@@ -353,25 +353,32 @@ const updateMainProcess = async (req, res) => {
       }
     }
 
-    // update ya naya create
-    for (const p of processes) {
-      const detailPayload = {
-        processCode: p.processCode.trim(),
-        processName: p.processName.trim(),
-        serialNo: Number(p.serialNo),
-      };
+    let lastCode = await getLastCodeNumber(companyId);
+    const sorted = [...processes].sort(
+      (a, b) => Number(a.serialNo) - Number(b.serialNo)
+    );
 
+    for (const p of sorted) {
       if (p.id && oldIds.includes(String(p.id))) {
+        // purani row: processCode touch nahi karna
         await updateModelHelper(
           "main_process_detail",
-          { ...detailPayload, updated: new Date() },
+          {
+            processName: p.processName.trim(),
+            serialNo: Number(p.serialNo),
+            updated: new Date(),
+          },
           { processId: p.id, mainProcessId: id }
         );
       } else {
+        // nayi row: next code
+        lastCode += 1;
         await saveModel("main_process_detail", {
           mainProcessId: id,
           companyId,
-          ...detailPayload,
+          processCode: formatProcessCode(lastCode),
+          processName: p.processName.trim(),
+          serialNo: Number(p.serialNo),
           delete: 0,
         });
       }
@@ -383,7 +390,6 @@ const updateMainProcess = async (req, res) => {
   }
 };
 
-// ---------------- STATUS TOGGLE ----------------
 // ---------------- STATUS TOGGLE ----------------
 const updateMainProcessStatus = async (req, res) => {
   try {
@@ -467,6 +473,23 @@ const deleteMainProcess = async (req, res) => {
   }
 };
 
+// ---------------- NEXT CODE (drawer ke input ke liye) ----------------
+const getNextProcessCode = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const last = await getLastCodeNumber(companyId);
+    return successResponse(
+      res,
+      { nextCode: formatProcessCode(last + 1) },
+      "Next process code fetched successfully"
+    );
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
 module.exports = {
   createMainProcess,
   getMainProcessList,
@@ -474,4 +497,5 @@ module.exports = {
   updateMainProcess,
   updateMainProcessStatus,
   deleteMainProcess,
+  getNextProcessCode,
 };

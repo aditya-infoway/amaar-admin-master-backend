@@ -39,7 +39,7 @@ module.exports = (app) => {
     "/list",
     workOrder.getWorkOrderList
   );
-
+routes.get("/assigned-processes", workOrder.getAssignedProcesses);
   routes.get("/stage-employees", workOrder.getStageEmployees);
   routes.get("/model-items/:id", workOrder.getWorkOrderModelItems);
   // Get Work Order by ID
