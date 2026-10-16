@@ -191,7 +191,7 @@ module.exports = sequelize => {
     tableName: "employee",
     comment: "",
     indexes: [
-      { unique: true, fields: ["companyId", "mobileNumber"] },
+      // mobileNumber par unique index hata diya gaya hai (same mobile number allowed)
       { unique: true, fields: ["companyId", "email"] },
       { fields: ["companyId", "employeeCode"] },
     ]

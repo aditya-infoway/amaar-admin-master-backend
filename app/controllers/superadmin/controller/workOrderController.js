@@ -23,7 +23,7 @@ const {
   getMaterialStatusMap,
 } = require("../../../helper/workOrderMaterialStatus.js");
 const { getStageItems } = require("../../../helper/workOrderStageItems.js");
-
+   const { getProcessStageMap } = require("./processStageMap.js");
 
 // ============================================================
 // HELPERS
@@ -156,94 +156,94 @@ const getStageMap = async (workOrderIds) => {
 // GET NEXT WORK ORDER NO
 // ============================================================
 // Process-wise status (workorderassignment se), per work order
-const getProcessStageMap = async (workOrderIds, companyId) => {
-  const map = new Map();
-  const ids = [...new Set((workOrderIds || []).filter(Boolean))];
-  if (!ids.length) return map;
+// const getProcessStageMap = async (workOrderIds, companyId) => {
+//   const map = new Map();
+//   const ids = [...new Set((workOrderIds || []).filter(Boolean))];
+//   if (!ids.length) return map;
 
-  const rows = await db.workorderassignment.findAll({
-    where: { companyId, workOrderId: ids, delete: 0 },
-    raw: true,
-  });
-  if (!rows.length) return map;
+//   const rows = await db.workorderassignment.findAll({
+//     where: { companyId, workOrderId: ids, delete: 0 },
+//     raw: true,
+//   });
+//   if (!rows.length) return map;
 
-  const processIds = [...new Set(rows.map((r) => r.processId))];
-  const empIds = [...new Set(rows.map((r) => r.contractorId))];
+//   const processIds = [...new Set(rows.map((r) => r.processId))];
+//   const empIds = [...new Set(rows.map((r) => r.contractorId))];
 
-  const [processRows, employees] = await Promise.all([
-    selectWithJoins(
-      "main_process_detail",
-      [],
-      { processId: processIds, companyId, delete: 0 },
-      ["processId", "processName"],
-    ),
-    selectWithJoins(
-      "employee",
-      [],
-      { employeeId: empIds },
-      ["employeeId", "employeeName", "mobileNumber"],
-    ),
-  ]);
+//   const [processRows, employees] = await Promise.all([
+//     selectWithJoins(
+//       "main_process_detail",
+//       [],
+//       { processId: processIds, companyId, delete: 0 },
+//       ["processId", "processName"],
+//     ),
+//     selectWithJoins(
+//       "employee",
+//       [],
+//       { employeeId: empIds },
+//       ["employeeId", "employeeName", "mobileNumber"],
+//     ),
+//   ]);
 
-  const processName = new Map(
-    processRows.map((p) => [Number(p.processId), p.processName]),
-  );
-  const empById = new Map(employees.map((e) => [String(e.employeeId), e]));
+//   const processName = new Map(
+//     processRows.map((p) => [Number(p.processId), p.processName]),
+//   );
+//   const empById = new Map(employees.map((e) => [String(e.employeeId), e]));
 
-  // workOrderId -> processId -> rows[]
-  const grouped = new Map();
-  rows.forEach((r) => {
-    const w = String(r.workOrderId);
-    if (!grouped.has(w)) grouped.set(w, new Map());
-    const byProcess = grouped.get(w);
-    const p = Number(r.processId);
-    if (!byProcess.has(p)) byProcess.set(p, []);
-    byProcess.get(p).push(r);
-  });
+//   // workOrderId -> processId -> rows[]
+//   const grouped = new Map();
+//   rows.forEach((r) => {
+//     const w = String(r.workOrderId);
+//     if (!grouped.has(w)) grouped.set(w, new Map());
+//     const byProcess = grouped.get(w);
+//     const p = Number(r.processId);
+//     if (!byProcess.has(p)) byProcess.set(p, []);
+//     byProcess.get(p).push(r);
+//   });
 
-  grouped.forEach((byProcess, w) => {
-    const list = [];
+//   grouped.forEach((byProcess, w) => {
+//     const list = [];
 
-    byProcess.forEach((g, pid) => {
-      const allDone = g.every((x) => x.status === "Completed");
-      const anyStarted = g.some((x) => x.status !== "Pending");
-      const status = allDone ? "Completed" : anyStarted ? "In Progress" : "Pending";
+//     byProcess.forEach((g, pid) => {
+//       const allDone = g.every((x) => x.status === "Completed");
+//       const anyStarted = g.some((x) => x.status !== "Pending");
+//       const status = allDone ? "Completed" : anyStarted ? "In Progress" : "Pending";
 
-      const names = [
-        ...new Set(
-          g.map((x) => empById.get(String(x.contractorId))?.employeeName).filter(Boolean),
-        ),
-      ];
-      const mobiles = [
-        ...new Set(
-          g.map((x) => empById.get(String(x.contractorId))?.mobileNumber).filter(Boolean),
-        ),
-      ];
+//       const names = [
+//         ...new Set(
+//           g.map((x) => empById.get(String(x.contractorId))?.employeeName).filter(Boolean),
+//         ),
+//       ];
+//       const mobiles = [
+//         ...new Set(
+//           g.map((x) => empById.get(String(x.contractorId))?.mobileNumber).filter(Boolean),
+//         ),
+//       ];
 
-      const times = (key) =>
-        g.map((x) => x[key]).filter(Boolean).map((v) => new Date(v).getTime());
-      const starts = times("startTime");
-      const ends = times("endTime");
-      const created = times("created");
+//       const times = (key) =>
+//         g.map((x) => x[key]).filter(Boolean).map((v) => new Date(v).getTime());
+//       const starts = times("startTime");
+//       const ends = times("endTime");
+//       const created = times("created");
 
-      list.push({
-        label: processName.get(pid) || "",
-        order: pid,
-        status,
-        employeeName: names.join(", "),
-        employeeMobile: mobiles.join(", "),
-        assignedAt: created.length ? new Date(Math.min(...created)) : null,
-        startTime: starts.length ? new Date(Math.min(...starts)) : null,
-        endTime: allDone && ends.length ? new Date(Math.max(...ends)) : null,
-      });
-    });
+//       list.push({
+//         label: processName.get(pid) || "",
+//         order: pid,
+//         status,
+//         employeeName: names.join(", "),
+//         employeeMobile: mobiles.join(", "),
+//         assignedAt: created.length ? new Date(Math.min(...created)) : null,
+//         startTime: starts.length ? new Date(Math.min(...starts)) : null,
+//         endTime: allDone && ends.length ? new Date(Math.max(...ends)) : null,
+//       });
+//     });
 
-    list.sort((a, b) => a.order - b.order);
-    map.set(w, list);
-  });
+//     list.sort((a, b) => a.order - b.order);
+//     map.set(w, list);
+//   });
 
-  return map;
-};
+//   return map;
+// };
 const getNextWorkOrderNo = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -1327,125 +1327,20 @@ const getStageEmployees = async (req, res) => {
   }
 };
 
-// const getMyWorkOrderTasks = async (req, res) => {
-//   try {
-//     const { companyId, employeeId } = req;
-//     const { status } = req.query;
-//     if (!companyId || !employeeId) {
-//       return requiredmessage(res, "Unauthorized. Please login again.");
-//     }
 
-//     // Sirf wahi process jo is employee (contractor) ko assign hui
-//     const mine = await db.workorderassignment.findAll({
-//       where: {
-//         companyId,
-//         contractorId: employeeId,
-//         delete: 0,
-//         ...(status ? { status } : {}),
-//       },
-//       order: [["workOrderAssignmentId", "DESC"]],
-//       raw: true,
-//     });
-//     if (!mine.length) return successResponse(res, [], "No tasks assigned");
 
-//     const workOrderIds = [...new Set(mine.map((m) => m.workOrderId))];
-//     const processIds = [...new Set(mine.map((m) => m.processId))];
-//     const subIds = [
-//       ...new Set(mine.map((m) => m.subProcessId).filter(Boolean)),
-//     ];
+// ============================================================
+// Flow rule:
+//   - Same process ki sub-processes (Cutting 1, Cutting 2 ...) independent hain,
+//     har ek apni marzi se Start / End kar sakti hai.
+//   - Agla process tab hi unlock hoga jab pichhle process ki SAARI
+//     sub-processes Completed ho chuki hon.
+//   - Process ka order = processId (chhota pehle).
+// ============================================================
 
-//     const [workOrders, processRows, subRows] = await Promise.all([
-//       selectWithJoins(
-//         "workorder",
-//         [],
-//         { workOrderId: workOrderIds, companyId, delete: 0 },
-//         ["workOrderId", "workOrderNo", "customerName", "model", "qty", "created"],
-//       ),
-//       selectWithJoins(
-//         "main_process_detail",
-//         [],
-//         { processId: processIds, companyId, delete: 0 },
-//         ["processId", "processName"],
-//       ),
-//       subIds.length
-//         ? selectWithJoins(
-//             "sub_process",
-//             [],
-//             { subProcessId: subIds, delete: 0 },
-//             ["subProcessId", "subProcessName"],
-//           )
-//         : [],
-//     ]);
-
-//     const woById = new Map(workOrders.map((w) => [String(w.workOrderId), w]));
-//     const processName = new Map(
-//       processRows.map((p) => [Number(p.processId), p.processName]),
-//     );
-//     const subName = new Map(
-//       subRows.map((s) => [Number(s.subProcessId), s.subProcessName]),
-//     );
-
-//     const materialStatusMap = await getMaterialStatusMap(workOrderIds, companyId);
-
-//     const modelIds = [
-//       ...new Set(
-//         workOrders
-//           .map((w) => Number(w.model))
-//           .filter((id) => Number.isInteger(id) && id > 0),
-//       ),
-//     ];
-//     let modelNameById = new Map();
-//     if (modelIds.length) {
-//       const models = await selectWithJoins(
-//         "itemmaster",
-//         [],
-//         { itemId: modelIds, delete: 0 },
-//         ["itemId", "itemName"],
-//       );
-//       modelNameById = new Map(
-//         models.map((m) => [String(m.itemId), m.itemName || ""]),
-//       );
-//     }
-
-//     const data = mine
-//       .filter((m) => woById.has(String(m.workOrderId)))
-//       .map((m) => {
-//         const wo = woById.get(String(m.workOrderId));
-//         const pName = processName.get(Number(m.processId)) || "";
-//         const sName = subName.get(Number(m.subProcessId)) || "";
-
-//         return {
-//           workOrderStageId: m.workOrderAssignmentId, // frontend ke liye same key
-//           workOrderId: m.workOrderId,
-//           workOrderNo: wo.workOrderNo,
-//           workOrderDate: wo.created,
-//           materialStatus:
-//             materialStatusMap.get(String(m.workOrderId)) ||
-//             MATERIAL_STATUS.PENDING_MATERIAL,
-//           stageProgressStatus: null,
-//           customerName: wo.customerName,
-//           model: wo.model,
-//           modelName: modelNameById.get(String(wo.model)) || "",
-//           qty: wo.qty,
-//           processId: m.processId,
-//           subProcessId: m.subProcessId,
-//           stage: pName,
-//           stageLabel: sName ? `${pName} - ${sName}` : pName,
-//           stageOrder: 0,
-//           contractAmount: Number(m.contractAmount) || 0,
-//           status: m.status,
-//           isUnlocked: true,
-//           startTime: m.startTime,
-//           endTime: m.endTime,
-//     itemsVerified: Boolean(m.itemsVerified),
-//         };
-//       });
-
-//     return successResponse(res, data, "Tasks fetched successfully");
-//   } catch (error) {
-//     return errorResponse(res, error.message || "Something Went Wrong", error);
-//   }
-// };
+// ============================================================
+// MY TASKS (Start Work / Pending Work screens)
+// ============================================================
 const getMyWorkOrderTasks = async (req, res) => {
   try {
     const { companyId, employeeId } = req;
@@ -1479,8 +1374,11 @@ const getMyWorkOrderTasks = async (req, res) => {
     const subIds = [
       ...new Set(allAssignments.map((a) => a.subProcessId).filter(Boolean)),
     ];
+    const contractorIds = [
+      ...new Set(allAssignments.map((a) => a.contractorId).filter(Boolean)),
+    ];
 
-    const [workOrders, processRows, subRows] = await Promise.all([
+    const [workOrders, processRows, subRows, employees] = await Promise.all([
       selectWithJoins(
         "workorder",
         [],
@@ -1501,6 +1399,14 @@ const getMyWorkOrderTasks = async (req, res) => {
             ["subProcessId", "subProcessName"],
           )
         : [],
+      contractorIds.length
+        ? selectWithJoins(
+            "employee",
+            [],
+            { employeeId: contractorIds },
+            ["employeeId", "employeeName"],
+          )
+        : [],
     ]);
 
     const woById = new Map(workOrders.map((w) => [String(w.workOrderId), w]));
@@ -1510,20 +1416,29 @@ const getMyWorkOrderTasks = async (req, res) => {
     const subName = new Map(
       subRows.map((s) => [Number(s.subProcessId), s.subProcessName]),
     );
+    const empName = new Map(
+      employees.map((e) => [String(e.employeeId), e.employeeName]),
+    );
 
-  const labelOf = (a) => processName.get(Number(a.processId)) || "";
+    const labelOfProcess = (pid) => processName.get(Number(pid)) || "";
 
-    // Process ka order: processId (phir subProcessId) ke hisaab se
-    const orderKey = (a) =>
-      Number(a.processId) * 100000 + Number(a.subProcessId || 0);
-
-    const byWorkOrder = new Map();
+    // workOrderId -> processId -> assignments[]  (sub-processes subProcessId order me)
+    const groupsByWorkOrder = new Map();
     allAssignments.forEach((a) => {
-      const k = String(a.workOrderId);
-      if (!byWorkOrder.has(k)) byWorkOrder.set(k, []);
-      byWorkOrder.get(k).push(a);
+      const w = String(a.workOrderId);
+      if (!groupsByWorkOrder.has(w)) groupsByWorkOrder.set(w, new Map());
+      const groups = groupsByWorkOrder.get(w);
+      const pid = Number(a.processId);
+      if (!groups.has(pid)) groups.set(pid, []);
+      groups.get(pid).push(a);
     });
-    byWorkOrder.forEach((list) => list.sort((a, b) => orderKey(a) - orderKey(b)));
+    groupsByWorkOrder.forEach((groups) =>
+      groups.forEach((rows) =>
+        rows.sort(
+          (a, b) => Number(a.subProcessId || 0) - Number(b.subProcessId || 0),
+        ),
+      ),
+    );
 
     const materialStatusMap = await getMaterialStatusMap(workOrderIds, companyId);
 
@@ -1551,26 +1466,33 @@ const getMyWorkOrderTasks = async (req, res) => {
       .filter((m) => woById.has(String(m.workOrderId)))
       .map((m) => {
         const wo = woById.get(String(m.workOrderId));
+        const groups = groupsByWorkOrder.get(String(m.workOrderId)) || new Map();
 
-        // Pichhla process (same work order me, order me ek step pehle wala)
-        const siblings = byWorkOrder.get(String(m.workOrderId)) || [];
-        const idx = siblings.findIndex(
-          (s) => s.workOrderAssignmentId === m.workOrderAssignmentId,
-        );
-        const previous = idx > 0 ? siblings[idx - 1] : null;
+        // Process order (processId ascending)
+        const orderedPids = [...groups.keys()].sort((a, b) => a - b);
+        const ownPid = Number(m.processId);
+        const ownIdx = orderedPids.indexOf(ownPid);
+
+        // Pichhla process = ek step pehle wala PROCESS (uski saari sub-processes)
+        const prevPid = ownIdx > 0 ? orderedPids[ownIdx - 1] : null;
+        const prevRows = prevPid !== null ? groups.get(prevPid) || [] : [];
+        const prevAllDone =
+          prevRows.length > 0 && prevRows.every((r) => r.status === "Completed");
 
         let stageProgressStatus = null;
-        if (previous) {
-          const prevLabel = labelOf(previous);
-          if (previous.status === "Completed") {
-            stageProgressStatus = `${prevLabel} Complete`;
-          } else if (previous.status === "In Progress") {
-            stageProgressStatus = `${prevLabel} In Progress`;
-          } else {
-            stageProgressStatus = `Pending ${prevLabel}`;
-          }
+        if (prevPid !== null) {
+          const prevLabel = labelOfProcess(prevPid);
+          stageProgressStatus = prevAllDone
+            ? `${prevLabel} Complete`
+            : `Pending ${prevLabel}`;
         }
-        const isUnlocked = !previous || previous.status === "Completed";
+
+        const isUnlocked = prevPid === null || prevAllDone;
+
+        // Drawer ke liye: pichhle process ki sub-processes (na ho to apna process)
+   const referencePid = ownPid;
+        const referenceRows = groups.get(referencePid) || [];
+        const referenceProcessName = labelOfProcess(referencePid);
 
         return {
           workOrderStageId: m.workOrderAssignmentId, // frontend ke liye same key
@@ -1587,15 +1509,28 @@ const getMyWorkOrderTasks = async (req, res) => {
           qty: wo.qty,
           processId: m.processId,
           subProcessId: m.subProcessId,
-          stage: processName.get(Number(m.processId)) || "",
-          stageLabel: labelOf(m),
-          stageOrder: idx + 1,
+          stage: labelOfProcess(m.processId),
+          stageLabel: labelOfProcess(m.processId),
+          stageOrder: ownIdx + 1,
           contractAmount: Number(m.contractAmount) || 0,
           status: m.status,
           isUnlocked,
           startTime: m.startTime,
           endTime: m.endTime,
           itemsVerified: Boolean(m.itemsVerified),
+
+          // NEW: view drawer ka data
+          referenceProcessName,
+          referenceSubProcesses: referenceRows.map((r) => ({
+            id: r.workOrderAssignmentId,
+            subProcessId: r.subProcessId,
+            subProcessName:
+              subName.get(Number(r.subProcessId)) || referenceProcessName,
+            employeeName: empName.get(String(r.contractorId)) || "",
+            status: r.status,
+            startTime: r.startTime,
+            endTime: r.endTime,
+          })),
         };
       });
 
@@ -1604,6 +1539,91 @@ const getMyWorkOrderTasks = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
+// ============================================================
+// START WORK (backend lock bhi lagaya: pichhla process poora complete hona chahiye)
+// ============================================================
+const startWorkOrderStage = async (req, res) => {
+  try {
+    const { companyId, employeeId } = req;
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const id = normalizeId(req.body.workOrderStageId);
+    if (!id) return errorResponse(res, "Please select a Work Order.");
+
+    // Task isi employee ka hona chahiye
+    const task = await db.workorderassignment.findOne({
+      where: {
+        workOrderAssignmentId: id,
+        companyId,
+        contractorId: employeeId,
+        delete: 0,
+      },
+      raw: true,
+    });
+    if (!task) return errorResponse(res, "Work order task not found.");
+    if (task.status !== "Pending") {
+      return errorResponse(res, "This work has already been started.");
+    }
+
+    // Pichhle process ki SAARI sub-processes Completed honi chahiye
+    const siblings = await db.workorderassignment.findAll({
+      where: { companyId, workOrderId: task.workOrderId, delete: 0 },
+      raw: true,
+    });
+    const earlier = siblings.filter(
+      (s) => Number(s.processId) < Number(task.processId),
+    );
+
+    if (earlier.length) {
+      const prevPid = Math.max(...earlier.map((s) => Number(s.processId)));
+      const prevRows = siblings.filter((s) => Number(s.processId) === prevPid);
+
+      if (!prevRows.every((s) => s.status === "Completed")) {
+        const nameRows = await selectWithJoins(
+          "main_process_detail",
+          [],
+          { processId: prevPid, companyId, delete: 0 },
+          ["processId", "processName"],
+        );
+        const prevName = nameRows[0]?.processName || "Previous process";
+        return errorResponse(
+          res,
+          `${prevName} is not completed yet. All its sub processes must be completed first.`,
+        );
+      }
+    }
+
+    const startTime = new Date();
+    const [updated] = await db.workorderassignment.update(
+      { status: "In Progress", startTime, updated: startTime },
+      {
+        where: {
+          workOrderAssignmentId: id,
+          companyId,
+          contractorId: employeeId,
+          status: "Pending",
+          delete: 0,
+        },
+      },
+    );
+    if (!updated) {
+      return errorResponse(res, "This work has already been started.");
+    }
+
+    return successResponse(
+      res,
+      { workOrderStageId: id, startTime },
+      "Work started successfully",
+    );
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
 const updateWorkOrderStages = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -1685,48 +1705,48 @@ const updateWorkOrderStages = async (req, res) => {
   }
 };
 
-const startWorkOrderStage = async (req, res) => {
-  try {
-    const { companyId, employeeId } = req;
-    if (!companyId || !employeeId) {
-      return requiredmessage(res, "Unauthorized. Please login again.");
-    }
+// const startWorkOrderStage = async (req, res) => {
+//   try {
+//     const { companyId, employeeId } = req;
+//     if (!companyId || !employeeId) {
+//       return requiredmessage(res, "Unauthorized. Please login again.");
+//     }
 
-    const id = normalizeId(req.body.workOrderStageId);
-    if (!id) return errorResponse(res, "Please select a Work Order.");
+//     const id = normalizeId(req.body.workOrderStageId);
+//     if (!id) return errorResponse(res, "Please select a Work Order.");
 
-    // Task isi employee ka hona chahiye
-    const task = await db.workorderassignment.findOne({
-      where: { workOrderAssignmentId: id, companyId, contractorId: employeeId, delete: 0 },
-      raw: true,
-    });
-    if (!task) return errorResponse(res, "Work order task not found.");
-    if (task.status !== "Pending") {
-      return errorResponse(res, "This work has already been started.");
-    }
+//     // Task isi employee ka hona chahiye
+//     const task = await db.workorderassignment.findOne({
+//       where: { workOrderAssignmentId: id, companyId, contractorId: employeeId, delete: 0 },
+//       raw: true,
+//     });
+//     if (!task) return errorResponse(res, "Work order task not found.");
+//     if (task.status !== "Pending") {
+//       return errorResponse(res, "This work has already been started.");
+//     }
 
-    const startTime = new Date();
-    const [updated] = await db.workorderassignment.update(
-      { status: "In Progress", startTime, updated: startTime },
-      {
-        where: {
-          workOrderAssignmentId: id,
-          companyId,
-          contractorId: employeeId,
-          status: "Pending",
-          delete: 0,
-        },
-      },
-    );
-    if (!updated) {
-      return errorResponse(res, "This work has already been started.");
-    }
+//     const startTime = new Date();
+//     const [updated] = await db.workorderassignment.update(
+//       { status: "In Progress", startTime, updated: startTime },
+//       {
+//         where: {
+//           workOrderAssignmentId: id,
+//           companyId,
+//           contractorId: employeeId,
+//           status: "Pending",
+//           delete: 0,
+//         },
+//       },
+//     );
+//     if (!updated) {
+//       return errorResponse(res, "This work has already been started.");
+//     }
 
-    return successResponse(res, { workOrderStageId: id, startTime }, "Work started successfully");
-  } catch (error) {
-    return errorResponse(res, error.message || "Something Went Wrong", error);
-  }
-};
+//     return successResponse(res, { workOrderStageId: id, startTime }, "Work started successfully");
+//   } catch (error) {
+//     return errorResponse(res, error.message || "Something Went Wrong", error);
+//   }
+// };
 
 const endWorkOrderStage = async (req, res) => {
   try {
