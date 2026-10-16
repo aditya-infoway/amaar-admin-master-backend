@@ -37,8 +37,11 @@ const validateSalesOrder = Joi.object().keys({
   address: Joi.any().optional(),
   city: Joi.any().optional(),
   model: Joi.any().optional(),
+  
   remark: Joi.any().optional(),
-
+expectedDate: Joi.date().allow(null, "").optional().messages({
+  "date.base": "Expected Date must be a valid date",
+}),
   qty: Joi.number().positive().required().messages({
     "number.base": "Quantity must be a number",
     "number.positive": "Quantity must be greater than 0",

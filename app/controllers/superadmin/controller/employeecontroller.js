@@ -86,16 +86,7 @@ const createEmployee = async (req, res) => {
     }
 
     // mobile number companyId-wise unique
-    const mobileExists = await selectWithJoins(
-      "employee",
-      [],
-      { mobileNumber: mobileNumber.trim(), companyId, delete: 0 },
-      ["employeeId"]
-    );
-
-    if (mobileExists.length > 0) {
-      return errorResponse(res, "Mobile number already exists. Please enter a different number.");
-    }
+  
 
     // email companyId-wise unique
     const emailExists = await selectWithJoins(
@@ -365,20 +356,7 @@ const updateEmployee = async (req, res) => {
     }
 
     // mobile number uniqueness (khud ko exclude karke)
-    const mobileExists = await selectWithJoins(
-      "employee",
-      [],
-      { mobileNumber: mobileNumber.trim(), companyId, delete: 0 },
-      ["employeeId"]
-    );
 
-    const mobileTakenByOther = mobileExists.some(
-      (row) => String(row.employeeId) !== String(employeeId)
-    );
-
-    if (mobileTakenByOther) {
-      return errorResponse(res, "Mobile number already exists. Please enter a different number.");
-    }
 
     // email uniqueness (khud ko exclude karke)
     const emailExists = await selectWithJoins(

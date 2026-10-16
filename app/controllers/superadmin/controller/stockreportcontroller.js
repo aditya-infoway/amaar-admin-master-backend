@@ -196,7 +196,7 @@ const getStockReportList = async (req, res) => {
 };
 
 
-// ---------------- STOCK REPORT DETAILS ----------------
+
 // ---------------- STOCK REPORT DETAILS ----------------
 const getStockReportDetails = async (req, res) => {
   try {
@@ -279,48 +279,64 @@ const getStockReportDetails = async (req, res) => {
     const currentStock = openingStock + totalPurchaseQty - totalIssuedQty; // ✅ issued minus
     const purchasePrice = totalPurchaseQty > 0 ? totalPurchaseValue / totalPurchaseQty : 0;
 
-    // ---- History rows — Purchase (+) aur Outward (-) dono ek saath, date se sort ----
-    const rows = [];
-    rows.push({
-      id: "opening", date: "", type: "Opening",
-      partyName: "", billNo: "",
-      qty: String(openingStock), billAmount: "",
-      currentStock: String(openingStock),
-    });
+    // Sales (Sales Order etc.) - not built yet. When ready, push entries like:
+    // { date, type: "Sales Order", partyName, voucherNo,
+    //   qtyIn: 0, qtyOut: qty, reserve: qty, isSales: true, sortKey: date }
+    const salesMovements = [];
 
     const movements = [
       ...purchaseDetails.map((d) => ({
         date: purchaseMap[d.purchaseId]?.purchaseDate || "",
         type: "Purchase",
         partyName: accountMap[purchaseMap[d.purchaseId]?.accountId] || "",
-        billNo: purchaseMap[d.purchaseId]?.purchaseBillNo || "",
-        qty: Number(d.qty) || 0,
-        billAmount: d.total ?? "",
+        voucherNo: purchaseMap[d.purchaseId]?.purchaseBillNo || "",
+        qtyIn: Number(d.qty) || 0,
+        qtyOut: 0,
+        reserve: 0,
         sortKey: purchaseMap[d.purchaseId]?.purchaseDate || d.created || "",
       })),
       ...itemIssues.map((d) => ({
         date: d.created,
         type: "Outward",
         partyName: employeeMap[d.issuedTo] || "",
-        billNo: d.billNo || "-",
-        qty: -(Number(d.qty) || 0), // ✅ negative — stock ghatega
-        billAmount: "",
+        voucherNo: d.billNo || "-",
+        qtyIn: 0,
+        qtyOut: Number(d.qty) || 0,
+        reserve: 0,
         sortKey: d.created,
       })),
+      ...salesMovements,
     ].sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
 
-    let runningQtyBalance = openingStock;
+    const rows = [
+      {
+        id: "opening", date: "", type: "Opening",
+        voucherNo: "", partyName: "",
+        qtyIn: String(openingStock), qtyOut: "0",
+        physicalStock: String(openingStock),
+        reservedQty: "0", reservedTotal: "0",
+        availableStock: String(openingStock),
+      },
+    ];
+
+    let physical = openingStock;
+    let reservedTotal = 0;
     movements.forEach((m, idx) => {
-      runningQtyBalance += m.qty;
+      // Sales qty shows in Qty Out but only reserves; real outflow reduces Physical
+      physical += m.qtyIn - (m.isSales ? 0 : m.qtyOut);
+      reservedTotal += m.reserve;
       rows.push({
         id: `mv-${idx}`,
         date: m.date || "",
         type: m.type,
+        voucherNo: m.voucherNo,
         partyName: m.partyName,
-        billNo: m.billNo,
-        qty: String(m.qty),
-        billAmount: String(m.billAmount ?? ""),
-        currentStock: String(runningQtyBalance),
+        qtyIn: String(m.qtyIn),
+        qtyOut: String(m.qtyOut),
+        physicalStock: String(physical),
+        reservedQty: String(m.reserve),
+        reservedTotal: String(reservedTotal),
+        availableStock: String(physical - reservedTotal),
       });
     });
 
