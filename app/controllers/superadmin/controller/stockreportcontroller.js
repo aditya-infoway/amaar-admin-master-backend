@@ -5,6 +5,7 @@ const {
   selectWithJoins,
   selectWithJoinsV2,
 } = require("../../../helper/index.js");
+const { getSalesReservationLines } = require("../../../helper/salesReservation.js");
 
 // ---------------- STOCK REPORT LIST ----------------
 const getStockReportList = async (req, res) => {
@@ -67,6 +68,13 @@ const getStockReportList = async (req, res) => {
     issueRows.forEach((d) => {
       const qty = Number(d.qty) || 0;
       issuedMap[d.itemId] = (issuedMap[d.itemId] || 0) + qty;
+    });
+
+
+    // Reserved by Sales Orders (via BOM leaf items)
+    const reservedMap = {};
+    (await getSalesReservationLines(companyId)).forEach((l) => {
+      reservedMap[l.itemId] = (reservedMap[l.itemId] || 0) + l.qty;
     });
 
     // ---------------------------------------------------------
@@ -151,6 +159,8 @@ const getStockReportList = async (req, res) => {
       // Final current stock = Opening + Purchase - Issued
       const currentStock = openingStock + purchaseStock - issuedStock;
 
+      const reservedStock = Number(reservedMap[item.itemId]) || 0;
+
       return {
         id: String(item.itemId),
 
@@ -177,6 +187,8 @@ const getStockReportList = async (req, res) => {
         // Opening Stock + Purchase Stock - Issued Stock
         currentStock:
           String(currentStock),
+        reservedStock: String(reservedStock),
+        availableStock: String(currentStock - reservedStock),
       };
     });
 
@@ -282,7 +294,19 @@ const getStockReportDetails = async (req, res) => {
     // Sales (Sales Order etc.) - not built yet. When ready, push entries like:
     // { date, type: "Sales Order", partyName, voucherNo,
     //   qtyIn: 0, qtyOut: qty, reserve: qty, isSales: true, sortKey: date }
-    const salesMovements = [];
+    const salesLines = await getSalesReservationLines(companyId, { itemId });
+    const salesMovements = salesLines.map((s) => ({
+      date: s.date,
+      type: "Sales Order",
+      partyName: s.partyName,
+      voucherNo: s.soNo,
+      qtyIn: 0,
+      qtyOut: 0,
+      reserve: s.qty,
+      isSales: true,
+      sortKey: s.sortKey,
+    }));
+    const totalReserved = salesMovements.reduce((s, m) => s + m.reserve, 0);
 
     const movements = [
       ...purchaseDetails.map((d) => ({
@@ -343,6 +367,8 @@ const getStockReportDetails = async (req, res) => {
     return successResponse(res, {
       itemId: String(item.itemId), itemCode: item.itemCode || "", itemName: item.itemName || "",
       currentStock: String(currentStock), purchasePrice: purchasePrice.toFixed(2), unit: item.unit || "",
+      reservedStock: String(totalReserved),
+      availableStock: String(currentStock - totalReserved),
       hsnCode: item.hsnCode || "", brand: "", category: item.categoryName || "", group: item.groupName || "",
       rows,
     }, "Stock report details fetched successfully");
