@@ -46,7 +46,41 @@ module.exports = (sequelize) => {
       allowNull: true,
       field: "remarks",
     },
+        department: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "department", // Cutting / Welding / Blasting / Paint / QC
+    },
 
+    processId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "processId",
+    },
+
+    subProcessId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "subProcessId",
+    },
+    requestType: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "Issue", // Issue / Return
+      field: "requestType",
+    },
+
+    requestNo: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+      field: "requestNo", // Issue ID (auto generate)
+    },
+
+    issueDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+      field: "issueDate",
+    },
     created: {
       type: DataTypes.DATE,
       allowNull: false,

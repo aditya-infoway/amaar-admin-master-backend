@@ -34,7 +34,13 @@ const resolveBom = async (companyId, modelItemId) => {
 };
 
 // -> { error } or { workOrder, bom, items }
-const getStageItems = async ({ companyId, workOrderId, stageKey }) => {
+const getStageItems = async ({
+    companyId,
+    workOrderId,
+    processId,
+    subProcessId,
+    stageKey,
+}) => {
     const stage = WORK_ORDER_STAGES.find((s) => s.key === stageKey);
     if (!stage || !stage.categoryStage) {
         return { error: "Invalid stage." };
@@ -61,18 +67,24 @@ const getStageItems = async ({ companyId, workOrderId, stageKey }) => {
     if (!bom) return { error: "No BOM found for this Work Order's product." };
 
     // categories mapped to this stage (Settings > Item Category)
-    const stageCategories = await selectWithJoins(
-        "itemcategorystage",
-        [],
-        {
-            companyId,
-            financialYearId: workOrder.financialYearId,
-            stage: stage.categoryStage,
-            delete: 0,
-        },
-        ["categoryId"],
-    );
-    const categoryIds = [...new Set(stageCategories.map((c) => Number(c.categoryId)))];
+  // categories mapped to this process (Settings > Item Category)
+const processCategories = await selectWithJoins(
+    "itemcategorystage",
+    [],
+    {
+        companyId,
+        financialYearId: workOrder.financialYearId,
+        processId: Number(processId),
+        delete: 0,
+    },
+    ["categoryId"],
+);
+
+const categoryIds = [
+    ...new Set(
+        processCategories.map((c) => Number(c.categoryId))
+    ),
+];
     if (!categoryIds.length) return { workOrder, bom, items: [] };
 
     // Only the parent / finished-goods item decides if this stage is relevant.

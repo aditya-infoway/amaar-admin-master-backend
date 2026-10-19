@@ -59,19 +59,6 @@ const validateWorkOrder = Joi.object().keys({
   }),
 
 
-  stages: Joi.object(
-    Object.fromEntries(
-      WORK_ORDER_STAGES.map((s) => [
-        s.key,
-        Joi.number().integer().positive().required().messages({
-          "number.base": `Please select an employee for ${s.label}`,
-          "any.required": `Please select an employee for ${s.label}`,
-        }),
-      ]),
-    ),
-  )
-    .required()
-    .messages({ "any.required": "Please select employees for all stages" }),
 
   createdBy: Joi.alternatives()
     .try(Joi.number(), Joi.string())

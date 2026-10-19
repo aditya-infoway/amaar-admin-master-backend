@@ -10,6 +10,9 @@ module.exports = sequelize => {
     issuedTo: { type: DataTypes.INTEGER },
     issuedBy: { type: DataTypes.INTEGER },
     billNo: { type: DataTypes.STRING(100) },
+        issueNo: { type: DataTypes.STRING(50) },
+    issueDate: { type: DataTypes.DATEONLY },
+    financialYearId: { type: DataTypes.INTEGER },
     status: { type: DataTypes.STRING(20), defaultValue: "Pending" }, // ✅ naya field
     created: {
       type: DataTypes.DATE,

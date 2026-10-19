@@ -9,11 +9,6 @@ const {
 
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 
-// Frontend ke STAGE_OPTIONS ke sath match rakhna
-const STAGE_MAP = {
-  cutting: "Cutting",
-};
-
 const normalizeId = (value) => {
   if (value === undefined || value === null || value === "") return null;
   const id = Number(value);
@@ -35,6 +30,17 @@ const getCategoryRow = async (categoryId, companyId) => {
   return rows[0] || null;
 };
 
+// Process ki validation + name DB se (frontend ke bheje name pe bharosa nahi)
+const getProcessRow = async (processId, companyId) => {
+  const rows = await selectWithJoins(
+    "main_process_detail",
+    [],
+    { processId, companyId, delete: 0 },
+    ["processId", "processName"],
+  );
+  return rows[0] || null;
+};
+
 // ============================================================
 // CREATE
 // ============================================================
@@ -46,7 +52,7 @@ const createItemCategoryStage = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { financialYearId, stage, categoryId, createdBy, createdType } =
+    const { financialYearId, processId, categoryId, createdBy, createdType } =
       req.body;
 
     if (!financialYearId) {
@@ -59,9 +65,16 @@ const createItemCategoryStage = async (req, res) => {
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) return errorResponse(res, "Invalid Financial Year.");
 
-    if (!STAGE_MAP[stage]) {
-      return errorResponse(res, "Invalid stage selected.");
+    const normalizedProcessId = normalizeId(processId);
+    if (!normalizedProcessId) {
+      return errorResponse(res, "Please select a stage.");
     }
+
+    const process = await getProcessRow(normalizedProcessId, companyId);
+    if (!process) {
+      return errorResponse(res, "Selected stage was not found.");
+    }
+    const stageName = process.processName || "";
 
     const normalizedCategoryId = normalizeId(categoryId);
     if (!normalizedCategoryId) {
@@ -79,7 +92,7 @@ const createItemCategoryStage = async (req, res) => {
       {
         companyId,
         financialYearId: fy.financialYearId,
-        stage,
+        processId: normalizedProcessId,
         categoryId: normalizedCategoryId,
         delete: 0,
       },
@@ -95,7 +108,8 @@ const createItemCategoryStage = async (req, res) => {
     const saved = await saveModel("itemcategorystage", {
       companyId,
       financialYearId: fy.financialYearId,
-      stage,
+      stage: stageName,
+      processId: normalizedProcessId,
       categoryId: normalizedCategoryId,
       createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
       createdtype: req.employeeId ? "Sale Executive" : createdType || null,
@@ -107,8 +121,9 @@ const createItemCategoryStage = async (req, res) => {
       {
         itemCategoryStageId: saved.itemCategoryStageId,
         financialYearId: fy.financialYearId,
-        stage,
-        stageName: STAGE_MAP[stage],
+        processId: normalizedProcessId,
+        stage: stageName,
+        stageName,
         categoryId: normalizedCategoryId,
         categoryName: category[CATEGORY_NAME_COL] || "",
       },
@@ -146,6 +161,7 @@ const getItemCategoryStageList = async (req, res) => {
         "itemCategoryStageId",
         "financialYearId",
         "stage",
+        "processId",
         "categoryId",
         "created",
         "updated",
@@ -175,16 +191,46 @@ const getItemCategoryStageList = async (req, res) => {
       console.error("Error fetching item categories:", err.message);
     }
 
-    const data = rows.map((r) => ({
-      id: String(r.itemCategoryStageId),
-      financialYearId: r.financialYearId,
-      stage: r.stage,
-      stageName: STAGE_MAP[r.stage] || r.stage,
-      categoryId: String(r.categoryId),
-      categoryName: categoryMap[String(r.categoryId)] || "",
-      createdAt: r.created,
-      updatedAt: r.updated,
-    }));
+    // Process ka current name (process rename hua ho to bhi sahi dikhe)
+    const processIds = [
+      ...new Set(rows.map((r) => r.processId).filter((v) => v != null)),
+    ];
+
+    let processMap = {};
+    if (processIds.length > 0) {
+      try {
+        const processes = await selectWithJoins(
+          "main_process_detail",
+          [],
+          { processId: processIds, companyId },
+          ["processId", "processName"],
+        );
+        processMap = processes.reduce((map, p) => {
+          map[String(p.processId)] = p.processName || "";
+          return map;
+        }, {});
+      } catch (err) {
+        console.error("Error fetching processes:", err.message);
+      }
+    }
+
+    const data = rows.map((r) => {
+      // processId na ho (purana record) to saved stage text fallback
+      const stageName =
+        (r.processId != null && processMap[String(r.processId)]) || r.stage;
+
+      return {
+        id: String(r.itemCategoryStageId),
+        financialYearId: r.financialYearId,
+        processId: r.processId != null ? String(r.processId) : null,
+        stage: stageName,
+        stageName,
+        categoryId: String(r.categoryId),
+        categoryName: categoryMap[String(r.categoryId)] || "",
+        createdAt: r.created,
+        updatedAt: r.updated,
+      };
+    });
 
     return successResponse(res, data, "Item category list fetched successfully");
   } catch (error) {
@@ -216,7 +262,7 @@ const updateItemCategoryStage = async (req, res) => {
       return requiredmessage(res, "Record not found.");
     }
 
-    const { financialYearId, stage, categoryId } = req.body;
+    const { financialYearId, processId, categoryId } = req.body;
 
     if (!financialYearId) {
       return errorResponse(
@@ -228,9 +274,16 @@ const updateItemCategoryStage = async (req, res) => {
     const fy = await getFinancialYearById(financialYearId, companyId);
     if (!fy) return errorResponse(res, "Invalid Financial Year.");
 
-    if (!STAGE_MAP[stage]) {
-      return errorResponse(res, "Invalid stage selected.");
+    const normalizedProcessId = normalizeId(processId);
+    if (!normalizedProcessId) {
+      return errorResponse(res, "Please select a stage.");
     }
+
+    const process = await getProcessRow(normalizedProcessId, companyId);
+    if (!process) {
+      return errorResponse(res, "Selected stage was not found.");
+    }
+    const stageName = process.processName || "";
 
     const normalizedCategoryId = normalizeId(categoryId);
     if (!normalizedCategoryId) {
@@ -248,7 +301,7 @@ const updateItemCategoryStage = async (req, res) => {
       {
         companyId,
         financialYearId: fy.financialYearId,
-        stage,
+        processId: normalizedProcessId,
         categoryId: normalizedCategoryId,
         delete: 0,
       },
@@ -268,7 +321,8 @@ const updateItemCategoryStage = async (req, res) => {
       "itemcategorystage",
       {
         financialYearId: fy.financialYearId,
-        stage,
+        stage: stageName,
+        processId: normalizedProcessId,
         categoryId: normalizedCategoryId,
         updated: new Date(),
       },
@@ -280,8 +334,9 @@ const updateItemCategoryStage = async (req, res) => {
       {
         itemCategoryStageId: Number(id),
         financialYearId: fy.financialYearId,
-        stage,
-        stageName: STAGE_MAP[stage],
+        processId: normalizedProcessId,
+        stage: stageName,
+        stageName,
         categoryId: normalizedCategoryId,
         categoryName: category[CATEGORY_NAME_COL] || "",
       },

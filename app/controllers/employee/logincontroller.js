@@ -40,6 +40,12 @@ const getProcessInfo = async (employee) => {
   const processId = Number(employee.processId) || null;
   const subProcessId = Number(employee.subProcessId) || null;
 
+  // Process hi assign nahi hai -> ye normal role-based employee hai
+  // (jaise Store Manager jiska department production hai)
+  if (!processId && !subProcessId) {
+    return info; // loginType = "ROLE"
+  }
+
   info.processId = processId;
   info.subProcessId = subProcessId;
   info.loginType = subProcessId ? "SUB_PROCESS" : "PROCESS";
@@ -70,7 +76,6 @@ const getProcessInfo = async (employee) => {
 
   return info;
 };
-
 // ---------------- LOGIN ----------------
 const employeeLogin = async (req, res) => {
   try {
