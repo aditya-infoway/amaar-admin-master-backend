@@ -20,9 +20,14 @@ module.exports = (sequelize) => {
             field: "financialYearId",
         },
         stage: {
-            type: DataTypes.STRING(50), // abhi sirf "cutting"
+            type: DataTypes.STRING(50), // process name (display ke liye snapshot)
             allowNull: false,
             field: "stage",
+        },
+        processId: {
+            type: DataTypes.INTEGER,
+            allowNull: true, // purane records ke liye null
+            field: "processId",
         },
         categoryId: {
             type: DataTypes.INTEGER,
@@ -65,6 +70,7 @@ module.exports = (sequelize) => {
         indexes: [
             { fields: ["companyId", "financialYearId"] },
             { fields: ["companyId", "stage"] },
+            { fields: ["companyId", "processId"] },
             { fields: ["companyId", "categoryId"] },
         ],
     };

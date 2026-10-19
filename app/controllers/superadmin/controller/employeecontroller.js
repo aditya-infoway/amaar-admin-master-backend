@@ -557,10 +557,10 @@ const getRegisteredEmployeeList = async (req, res) => {
       whereCondition.financialYearId = Number(financialYearId);
     }
 
-    console.log(
-      "Registered Employee List Where:",
-      whereCondition
-    );
+    // console.log(
+    //   "Registered Employee List Where:",
+    //   whereCondition
+    // );
 
     const list = await selectWithJoins(
       "employee",
@@ -635,10 +635,10 @@ const getRegisteredEmployeeList = async (req, res) => {
       row.toJSON ? row.toJSON() : row
     );
 
-    console.log(
-      "Registered Employee List Count:",
-      data.length
-    );
+    // console.log(
+    //   "Registered Employee List Count:",
+    //   data.length
+    // );
 
     return successResponse(
       res,

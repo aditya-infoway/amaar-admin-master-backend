@@ -5,6 +5,7 @@ const {
   selectWithJoins,
 } = require("../../../helper/index.js");
 const { getLeadMapBySalesOrder } = require("../../../helper/leadDetails.js");
+const { getSalesReservationLines } = require("../../../helper/salesReservation.js");
 
 const db = require("../../../modelses");
 const Bom = db.bom;
@@ -202,16 +203,50 @@ const getMaterialAvailability = async (req, res) => {
       ]),
     );
 
+
+
+    // ---- live physical stock (opening + purchase - issued) and reserved ----
+    const sumBy = (rows) => {
+      const m = new Map();
+      rows.forEach((r) => {
+        const k = Number(r.itemId);
+        m.set(k, (m.get(k) || 0) + (Number(r.qty) || 0));
+      });
+      return m;
+    };
+    const [purchRows, issueRows, salesLines] = await Promise.all([
+      selectWithJoins("purchasedetails", [], { itemId: itemIds, companyId, delete: 0 }, ["itemId", "qty"]),
+      selectWithJoins("itemissue", [], { itemId: itemIds, companyId, delete: 0 }, ["itemId", "qty"]),
+      getSalesReservationLines(companyId),
+    ]);
+    const purchasedMap = sumBy(purchRows);
+    const issuedMap = sumBy(issueRows);
+    const reservedAll = new Map();
+    const reservedOwn = new Map(); // reserved by THIS work order's own sales order
+    salesLines.forEach((l) => {
+      reservedAll.set(l.itemId, (reservedAll.get(l.itemId) || 0) + l.qty);
+      if (String(l.salesOrderId) === String(workOrder.salesOrderId)) {
+        reservedOwn.set(l.itemId, (reservedOwn.get(l.itemId) || 0) + l.qty);
+      }
+    });
+
     const productionQty = Number(workOrder.qty) || 1;
 
     // ---- one row per LEAF bom_item — duplicates (same item, different
     // branches of the tree) are kept as separate rows, not merged ----
     const rows = leafRows.map((li) => {
       const item = itemMap.get(Number(li.itemId));
-      const availableStock = item ? Number(item.openingStock) || 0 : 0;
+      const iid = Number(li.itemId);
+      const physical = item
+        ? (Number(item.openingStock) || 0) + (purchasedMap.get(iid) || 0) - (issuedMap.get(iid) || 0)
+        : 0;
+      const availableStock = round2(physical - (reservedAll.get(iid) || 0));
       const requiredStock = round2((Number(li.quantity) || 0) * productionQty);
+      // this WO's own sales order already reserved its own materials,
+      // so don't count that against the WO itself when judging shortage
+      const availableForThisWo = physical - ((reservedAll.get(iid) || 0) - (reservedOwn.get(iid) || 0));
       const purchaseRequired = round2(
-        Math.max(requiredStock - availableStock, 0),
+        Math.max(requiredStock - availableForThisWo, 0),
       );
 
       return {

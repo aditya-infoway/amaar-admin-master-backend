@@ -5,7 +5,7 @@ const {
   saveModel,
   selectWithJoins,
 } = require("../../../helper/index.js");
-
+const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const db = require("../../../modelses");
 const Bom = db.bom;
 const BomItem = db.bomItem;
@@ -88,6 +88,56 @@ const getBomItemsByModel = async (companyId, modelId) => {
 // 1. GET ASSIGNED WORK ORDERS (for dropdown)
 //    You can also reuse the existing /contractor/workorder/list
 // ============================================================
+// ============================================================
+// HELPER: Work Order me item-wise net issued qty (Issue minus Return)
+// Return request ki qty is se zyada nahi ho sakti
+// ============================================================
+const getNetIssuedByItem = async (companyId, workOrderId) => {
+  const issueReqs = await selectWithJoins(
+    "itemrequest",
+    [],
+    { companyId, workOrderId, requestType: "Issue", delete: 0 },
+    ["itemRequestId"],
+  );
+  const returnReqs = await selectWithJoins(
+    "itemrequest",
+    [],
+    { companyId, workOrderId, requestType: "Return", delete: 0 },
+    ["itemRequestId"],
+  );
+
+  const net = {};
+
+  if (issueReqs.length) {
+    const issues = await selectWithJoins(
+      "itemissue",
+      [],
+      {
+        itemRequestId: issueReqs.map((r) => r.itemRequestId),
+        companyId,
+        delete: 0,
+      },
+      ["itemId", "qty"],
+    );
+    issues.forEach((i) => {
+      net[i.itemId] = (net[i.itemId] || 0) + (Number(i.qty) || 0);
+    });
+  }
+
+  if (returnReqs.length) {
+    const returned = await selectWithJoins(
+      "itemrequestdetail",
+      [],
+      { itemRequestId: returnReqs.map((r) => r.itemRequestId), delete: 0 },
+      ["itemId", "qty"],
+    );
+    returned.forEach((i) => {
+      net[i.itemId] = (net[i.itemId] || 0) - (Number(i.qty) || 0);
+    });
+  }
+
+  return net;
+};
 const getAssignedWorkOrders = async (req, res) => {
   try {
     res.set(
@@ -126,7 +176,7 @@ const getAssignedWorkOrders = async (req, res) => {
       where.financialYearId = Number(financialYearId);
     }
 
- 
+
 
     const workOrders = await selectWithJoins(
       "workorder",
@@ -141,7 +191,7 @@ const getAssignedWorkOrders = async (req, res) => {
       [["workOrderId", "DESC"]],
     );
 
-  
+
 
     const data = workOrders.map((wo) => ({
       id: Number(wo.workOrderId),
@@ -160,7 +210,7 @@ const getAssignedWorkOrders = async (req, res) => {
           : null,
     }));
 
-  
+
 
     return successResponse(
       res,
@@ -176,7 +226,7 @@ const getAssignedWorkOrders = async (req, res) => {
     return errorResponse(
       res,
       error.message ||
-        "Something Went Wrong",
+      "Something Went Wrong",
       error,
     );
   }
@@ -234,86 +284,177 @@ const getItemsByWorkOrder = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-
 // ============================================================
+// NEXT ISSUE NO (Issue / Return) - form khulte hi preview ke liye
+// ============================================================
+const getNextIssueNo = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const { financialYearId, requestType = "Issue" } = req.query;
+
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId) {
+      return errorResponse(res, "Financial Year not found in session. Please select a company year.");
+    }
+
+    const { voucherNo } = await generateVoucherNo({
+      companyId,
+      financialYearId,
+      tableName: "itemrequest",
+      idColumn: "itemRequestId",
+      fixedPrefix: requestType === "Return" ? "RET" : "ISS",
+      extraWhere: { requestType },
+    });
+
+    return successResponse(res, { issueNo: voucherNo }, "Issue number generated successfully");
+  } catch (error) {
+    console.error("getNextIssueNo error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+const getNextStoreIssueNo = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const { financialYearId } = req.query;
+
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+    if (!financialYearId) {
+      return errorResponse(res, "Financial Year not found in session. Please select a company year.");
+    }
+
+    const { voucherNo } = await generateVoucherNo({
+      companyId,
+      financialYearId,
+      tableName: "itemissue",
+      idColumn: "itemIssueId",
+      fixedPrefix: "ISS",
+    });
+
+    return successResponse(res, { issueNo: voucherNo }, "Issue number generated successfully");
+  } catch (error) {
+    console.error("getNextStoreIssueNo error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+// ==
+// ==========================================================
 // 3. CREATE ITEM REQUEST (Request to Store Manager)
 // ============================================================
 const createItemRequest = async (req, res) => {
   try {
     const companyId = req.companyId;
     const employeeId = req.employeeId;
+    const department = req.department || null; // department route se aata hai
 
     if (!companyId) {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { workOrderId, items, financialYearId, remarks } = req.body;
+    const {
+      workOrderId,
+      items,
+      financialYearId,
+      remarks,
+      requestType = "Issue",
+      issueDate,
+    } = req.body;
 
     // ---------- Validation ----------
+    if (!["Issue", "Return"].includes(requestType)) {
+      return errorResponse(res, "Invalid request type");
+    }
     if (!workOrderId) {
       return errorResponse(res, "Please select a Work Order");
     }
-
+    if (requestType === "Issue" && !issueDate) {
+      return errorResponse(res, "Please select Order  Date");
+    }
     if (!Array.isArray(items) || items.length === 0) {
       return errorResponse(res, "Please add at least one item");
     }
 
-    // Check Work Order exists + is assigned to current user
+    // Department route pe assignedEmployeeId check skip (stage assignment alag hai)
+    // Purana contractor route (department nahi) pe check waisa hi rahega
+    const woWhere = { workOrderId, companyId, delete: 0 };
+    if (!department) woWhere.assignedEmployeeId = employeeId;
+
     const workOrders = await selectWithJoins(
       "workorder",
       [],
-      {
-        workOrderId,
-        companyId,
-        assignedEmployeeId: employeeId,
-        delete: 0,
-      },
+      woWhere,
       ["workOrderId", "workOrderNo", "model"],
     );
 
     if (!workOrders.length) {
-      return errorResponse(
-        res,
-        "Work Order not found or not assigned to you",
-      );
+      return errorResponse(res, "Work Order not found or not assigned to you");
     }
 
-    // ---------- Validate qty against BOM ----------
     const modelId = workOrders[0].model ? Number(workOrders[0].model) : null;
-
     if (!modelId) {
       return errorResponse(res, "No model linked to this Work Order");
     }
 
-    const bomLeaves = await getBomItemsByModel(companyId, modelId);
+    // ---------- Qty validation ----------
+    if (requestType === "Issue") {
+      const bomLeaves = await getBomItemsByModel(companyId, modelId);
 
-    for (const row of items) {
-      if (!row.itemId || !row.qty || Number(row.qty) <= 0) continue;
+      for (const row of items) {
+        if (!row.itemId || !row.qty || Number(row.qty) <= 0) continue;
 
-      const requestedQty = Number(row.qty);
-
-      // Allowed if any BOM leaf for this item can cover the requested qty
-      const matchingLeaf = bomLeaves.find(
-        (leaf) =>
-          leaf.itemId === Number(row.itemId) &&
-          requestedQty <= leaf.bomQty,
-      );
-
-      if (!matchingLeaf) {
-        const maxForItem = Math.max(
-          0,
-          ...bomLeaves
-            .filter((leaf) => leaf.itemId === Number(row.itemId))
-            .map((leaf) => leaf.bomQty),
+        const requestedQty = Number(row.qty);
+        const matchingLeaf = bomLeaves.find(
+          (leaf) =>
+            leaf.itemId === Number(row.itemId) && requestedQty <= leaf.bomQty,
         );
 
-        return errorResponse(
-          res,
-          `Qty for "${row.itemName || row.itemCode || "item"}" cannot exceed ${maxForItem} (BOM quantity)`,
-        );
+        if (!matchingLeaf) {
+          const maxForItem = Math.max(
+            0,
+            ...bomLeaves
+              .filter((leaf) => leaf.itemId === Number(row.itemId))
+              .map((leaf) => leaf.bomQty),
+          );
+          return errorResponse(
+            res,
+            `Qty for "${row.itemName || row.itemCode || "item"}" cannot exceed ${maxForItem} (BOM quantity)`,
+          );
+        }
+      }
+    } else {
+      // Return: is work order me jitna issue hua (minus pehle ka return) usse zyada nahi
+      const net = await getNetIssuedByItem(companyId, workOrderId);
+
+      for (const row of items) {
+        if (!row.itemId || !row.qty || Number(row.qty) <= 0) continue;
+
+        const maxReturn = Number(net[row.itemId]) || 0;
+        if (Number(row.qty) > maxReturn) {
+          return errorResponse(
+            res,
+            `Return qty for "${row.itemName || row.itemCode || "item"}" cannot exceed ${maxReturn} (issued qty)`,
+          );
+        }
       }
     }
 
+    // ---------- Request No: ISS-0001 / RET-0001 ----------
+    const { voucherNo: requestNo } = await generateVoucherNo({
+      companyId,
+      financialYearId,
+      tableName: "itemrequest",
+      idColumn: "itemRequestId",
+      fixedPrefix: requestType === "Return" ? "RET" : "ISS",
+      extraWhere: { requestType },
+    });
+ const empRows = await selectWithJoins(
+      "employee",
+      [],
+      { employeeId, companyId, delete: 0 },
+      ["employeeId", "processId", "subProcessId"],
+    );
+    const processId = empRows[0]?.processId || null;
+    const subProcessId = empRows[0]?.subProcessId || null;
     // ---------- Create Header ----------
     const header = await saveModel("itemrequest", {
       companyId,
@@ -322,6 +463,12 @@ const createItemRequest = async (req, res) => {
       requestedBy: employeeId,
       status: "Pending",
       remarks: remarks || null,
+      requestType,
+      requestNo,
+      issueDate: requestType === "Issue" ? issueDate : null,
+      department,
+       processId,       
+      subProcessId,  
       delete: 0,
     });
 
@@ -344,7 +491,7 @@ const createItemRequest = async (req, res) => {
 
     return successResponse(
       res,
-      { itemRequestId },
+      { itemRequestId, requestNo },
       "Item Request sent to Store Manager successfully",
     );
   } catch (error) {
@@ -382,6 +529,10 @@ const getMyItemRequests = async (req, res) => {
         "status",
         "remarks",
         "requestedBy",
+        "requestType",
+        "requestNo",
+        "issueDate",
+        "department",
         "created",
         "updated",
       ],
@@ -438,6 +589,10 @@ const getMyItemRequests = async (req, res) => {
       const wo = workOrderMap[r.workOrderId] || {};
       return {
         itemRequestId: r.itemRequestId,
+        requestNo: r.requestNo || `#${r.itemRequestId}`,
+        requestType: r.requestType || "Issue",
+        issueDate: r.issueDate,
+        department: r.department || "Contractor",
         workOrderId: wo.workOrderNo || r.workOrderId || "",
         model: modelNameMap[wo.model] || "",
         contractorName: employeeMap[r.requestedBy] || "",
@@ -454,7 +609,97 @@ const getMyItemRequests = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+// ============================================================
+// LIST: Department employee ki apni item requests
+// ============================================================
+const getDepartmentItemRequests = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const employeeId = req.employeeId;
+    const department = req.department || null;
 
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const where = { companyId, requestedBy: employeeId, delete: 0 };
+    if (department) where.department = department;
+    if (req.query.financialYearId) {
+      where.financialYearId = Number(req.query.financialYearId);
+    }
+
+    const requests = await selectWithJoins(
+      "itemrequest",
+      [],
+      where,
+      [
+        "itemRequestId",
+        "workOrderId",
+        "status",
+        "requestType",
+        "requestNo",
+        "issueDate",
+        "created",
+      ],
+      [["itemRequestId", "DESC"]],
+    );
+
+    if (!requests.length) {
+      return successResponse(res, [], "Item Requests fetched");
+    }
+
+    const workOrderIds = [
+      ...new Set(requests.map((r) => r.workOrderId).filter(Boolean)),
+    ];
+    const workOrders = await selectWithJoins(
+      "workorder",
+      [],
+      { workOrderId: workOrderIds, companyId, delete: 0 },
+      ["workOrderId", "workOrderNo"],
+    );
+    const woMap = {};
+    workOrders.forEach((w) => {
+      woMap[w.workOrderId] = w.workOrderNo;
+    });
+
+    const details = await selectWithJoins(
+      "itemrequestdetail",
+      [],
+      { itemRequestId: requests.map((r) => r.itemRequestId), delete: 0 },
+      ["itemRequestId", "itemId", "itemCode", "itemName", "qty", "unit"],
+    );
+    const detailMap = {};
+    details.forEach((d) => {
+      (detailMap[d.itemRequestId] = detailMap[d.itemRequestId] || []).push({
+        itemId: d.itemId,
+        itemCode: d.itemCode,
+        itemName: d.itemName,
+        qty: Number(d.qty) || 0,
+        unit: d.unit,
+      });
+    });
+
+    const data = requests.map((r) => {
+      const rowItems = detailMap[r.itemRequestId] || [];
+      return {
+        id: r.itemRequestId,
+        requestNo: r.requestNo || `#${r.itemRequestId}`,
+        requestType: r.requestType,
+        issueDate: r.issueDate,
+        workOrderNo: woMap[r.workOrderId] || "",
+        status: r.status,
+        totalItems: rowItems.length,
+        items: rowItems,
+        createdAt: r.created,
+      };
+    });
+
+    return successResponse(res, data, "Item Requests fetched");
+  } catch (error) {
+    console.error("getDepartmentItemRequests error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
 const getItemRequestDetail = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -472,7 +717,8 @@ const getItemRequestDetail = async (req, res) => {
       "itemrequest",
       [],
       { itemRequestId: id, companyId, delete: 0 },
-      ["itemRequestId", "workOrderId", "requestedBy", "status", "remarks", "created"],
+   ["itemRequestId", "workOrderId", "requestedBy", "status", "remarks", "created",
+ "requestType", "requestNo", "issueDate", "department"],
     );
 
     if (!headers.length) {
@@ -518,7 +764,11 @@ const getItemRequestDetail = async (req, res) => {
 
     if (!details.length) {
       return successResponse(res, {
-        itemRequestId: header.itemRequestId,
+         itemRequestId: header.itemRequestId,
+  requestNo: header.requestNo || `#${header.itemRequestId}`,
+  requestType: header.requestType || "Issue",
+  issueDate: header.issueDate,
+  panel: header.department ,
         workOrderId: workOrder.workOrderId || null,
         workOrderNo: workOrder.workOrderNo || "",
         modelName,
@@ -536,7 +786,7 @@ const getItemRequestDetail = async (req, res) => {
       "itemmaster",
       [],
       { itemId: itemIds, companyId, delete: 0 },
-      ["itemId", "itemCode", "itemName", "unit", "openingStock", "itemLocation"],
+      ["itemId", "itemCode", "itemName", "unit", "openingStock", "itemLocation","hsnCode", "itemCategoryId", ],
     );
     const masterById = {};
     itemMasters.forEach((m) => { masterById[String(m.itemId)] = m; });
@@ -560,7 +810,27 @@ const getItemRequestDetail = async (req, res) => {
       );
       locationRows.forEach((l) => { locationNameById[String(l.locationId)] = l.locationName; });
     }
+const categoryIds = [
+  ...new Set(
+    itemMasters
+      .map((m) => m.itemCategoryId)
+      .filter((val) => val && /^\d+$/.test(String(val)))
+      .map((val) => Number(val)),
+  ),
+];
 
+let categoryNameById = {};
+if (categoryIds.length) {
+  const categoryRows = await selectWithJoins(
+    "itemcategory",
+    [],
+    { itemCategoryId: categoryIds, companyId, delete: 0 },
+    ["itemCategoryId", "categoryName"],
+  );
+  categoryRows.forEach((c) => {
+    categoryNameById[String(c.itemCategoryId)] = c.categoryName;
+  });
+}
     // ---- Purchase qty (Stock Report jaisi hi logic — available qty ke liye) ----
     const purchaseDetails = await selectWithJoins(
       "purchasedetails",
@@ -575,7 +845,7 @@ const getItemRequestDetail = async (req, res) => {
     });
 
     // ---- ✅ NEW — Issued qty (Stock Report jaisi hi logic, availableQty se minus) ----
-     // ---- ✅ NEW — Issued qty for AVAILABLE STOCK calculation (company-wide, itemId-based — sahi rehne do) ----
+    // ---- ✅ NEW — Issued qty for AVAILABLE STOCK calculation (company-wide, itemId-based — sahi rehne do) ----
     const itemIssues = await selectWithJoins(
       "itemissue",
       [],
@@ -603,33 +873,40 @@ const getItemRequestDetail = async (req, res) => {
         (issuedByDetailMap[d.itemRequestDetailId] || 0) + qty;
     });
 
-    const items = details.map((d) => {
-      const master = masterById[String(d.itemId)] || {};
-      const openingStock = Number(master.openingStock) || 0;
-      const purchaseStock = Number(stockMap[d.itemId]) || 0;
-      const issuedStock = Number(issuedMap[d.itemId]) || 0;
-      const availableQty = openingStock + purchaseStock - issuedStock; // ✅ issued minus
+   const items = details.map((d) => {
+  const master = masterById[String(d.itemId)] || {};
+  const openingStock = Number(master.openingStock) || 0;
+  const purchaseStock = Number(stockMap[d.itemId]) || 0;
+  const issuedStock = Number(issuedMap[d.itemId]) || 0;
+  const availableQty = openingStock + purchaseStock - issuedStock;
 
-      // ✅ agar itemLocation numeric hai to location table se naam lo, warna text as-is
-      const rawLocation = master.itemLocation;
-      const resolvedLocation =
-        rawLocation && /^\d+$/.test(String(rawLocation))
-          ? locationNameById[String(rawLocation)] || rawLocation
-          : rawLocation || "";
+  const rawLocation = master.itemLocation;
+  const resolvedLocation =
+    rawLocation && /^\d+$/.test(String(rawLocation))
+      ? locationNameById[String(rawLocation)] || rawLocation
+      : rawLocation || "";
 
-      return {
-        id: d.itemRequestDetailId,
-        itemId: Number(d.itemId),
-        itemCode: d.itemCode || master.itemCode || "",
-        itemName: d.itemName || master.itemName || "",
-        itemLocation: resolvedLocation,
-            issuedQty: Number(issuedByDetailMap[d.itemRequestDetailId]) || 0, 
-        orderQty: Number(d.qty) || 0,
-        availableQty,
-        unit: d.unit || master.unit || "",
-      };
-    });
+  // 👇 NEW
+  const rawCategory = master.itemCategoryId;
+  const resolvedCategory =
+    rawCategory && /^\d+$/.test(String(rawCategory))
+      ? categoryNameById[String(rawCategory)] || ""
+      : rawCategory || "";
 
+  return {
+    id: d.itemRequestDetailId,
+    itemId: Number(d.itemId),
+    itemCode: d.itemCode || master.itemCode || "",
+    itemName: d.itemName || master.itemName || "",
+    hsnCode: master.hsnCode || "",
+    itemCategory: resolvedCategory,   // 👈 master. hata diya
+    itemLocation: resolvedLocation,
+    issuedQty: Number(issuedByDetailMap[d.itemRequestDetailId]) || 0,
+    orderQty: Number(d.qty) || 0,
+    availableQty,
+    unit: d.unit || master.unit || "",
+  };
+});
     const data = {
       itemRequestId: header.itemRequestId,
       workOrderId: workOrder.workOrderId || null,
@@ -659,7 +936,7 @@ const issueItemRequestItem = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { itemRequestDetailId, qty } = req.body;
+      const { itemRequestDetailId, qty, issueNo, issueDate, financialYearId } = req.body;
     const issueQty = Number(qty);
 
     if (!itemRequestDetailId) {
@@ -692,7 +969,7 @@ const issueItemRequestItem = async (req, res) => {
     const alreadyIssued = priorIssues.reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
     const remainingOrderQty = orderQty - alreadyIssued;
 
-        if (remainingOrderQty <= 0) {
+    if (remainingOrderQty <= 0) {
       return errorResponse(
         res,
         `The full ordered quantity (${orderQty}) for this item has already been issued.`,
@@ -732,7 +1009,7 @@ const issueItemRequestItem = async (req, res) => {
 
     const availableQty = openingStock + purchaseStock - issuedStock;
 
-      if (issueQty > availableQty) {
+    if (issueQty > availableQty) {
       return errorResponse(
         res,
         `Not enough stock available. Only ${availableQty} in stock right now.`,
@@ -749,9 +1026,10 @@ const issueItemRequestItem = async (req, res) => {
     const requestedBy = headers[0]?.requestedBy || null;
 
     // ---- Issue record insert ----
-      // ---- Issue record insert ----
-    await saveModel("itemissue", {
+    // ---- Issue record insert ----
+       await saveModel("itemissue", {
       companyId,
+      financialYearId: financialYearId || null,
       itemRequestId: line.itemRequestId,
       itemRequestDetailId: line.itemRequestDetailId,
       itemId: line.itemId,
@@ -759,6 +1037,8 @@ const issueItemRequestItem = async (req, res) => {
       issuedTo: requestedBy,
       issuedBy: employeeId,
       billNo: null,
+      issueNo: issueNo || null,
+      issueDate: issueDate || new Date(),
       delete: 0,
     });
 
@@ -801,11 +1081,73 @@ const issueItemRequestItem = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+// ============================================================
+// STORE MANAGER: Open (not complete) requests, work order wise grouping ke liye
+// ============================================================
+const getOpenItemRequests = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const all = await selectWithJoins(
+      "itemrequest",
+      [],
+      { companyId, delete: 0 },
+      [
+        "itemRequestId", "workOrderId", "requestedBy", "status",
+        "requestType", "requestNo", "issueDate", "department", "created",
+      ],
+      [["itemRequestId", "DESC"]],
+    );
+
+    const requests = all.filter((r) => r.status !== "Complete");
+    if (!requests.length) return successResponse(res, [], "Open requests fetched");
+
+    const workOrderIds = [...new Set(requests.map((r) => r.workOrderId).filter(Boolean))];
+    const workOrders = await selectWithJoins(
+      "workorder", [], { workOrderId: workOrderIds, companyId, delete: 0 },
+      ["workOrderId", "workOrderNo"],
+    );
+    const woMap = {};
+    workOrders.forEach((w) => { woMap[w.workOrderId] = w.workOrderNo; });
+
+    const employeeIds = [...new Set(requests.map((r) => r.requestedBy).filter(Boolean))];
+    const employees = await selectWithJoins(
+      "employee", [], { employeeId: employeeIds, companyId, delete: 0 },
+      ["employeeId", "employeeName"],
+    );
+    const empMap = {};
+    employees.forEach((e) => { empMap[e.employeeId] = e.employeeName; });
+
+    const data = requests.map((r) => ({
+      itemRequestId: r.itemRequestId,
+      requestNo: r.requestNo || `#${r.itemRequestId}`,
+      requestType: r.requestType || "Issue",
+      issueDate: r.issueDate,
+      workOrderId: r.workOrderId,
+      workOrderNo: woMap[r.workOrderId] || "",
+      requesterName: empMap[r.requestedBy] || "",
+      panel: r.department || "Contractor",
+      status: r.status,
+    }));
+
+    return successResponse(res, data, "Open requests fetched");
+  } catch (error) {
+    console.error("getOpenItemRequests error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
 module.exports = {
   getAssignedWorkOrders,
   getItemsByWorkOrder,
   createItemRequest,
+  getNextIssueNo,
   getMyItemRequests,
-  getItemRequestDetail, 
-   issueItemRequestItem,
+  getDepartmentItemRequests,
+  getItemRequestDetail,
+  issueItemRequestItem,
+  getNextStoreIssueNo,
+  getOpenItemRequests
 };

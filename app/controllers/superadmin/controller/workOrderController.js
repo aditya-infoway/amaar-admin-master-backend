@@ -471,10 +471,10 @@ const createWorkOrder = async (req, res) => {
       }
     }
 
-    const stageCheck = await validateStageAssignments(stages, companyId);
-    if (stageCheck.error) {
-      return errorResponse(res, stageCheck.error);
-    }
+    // const stageCheck = await validateStageAssignments(stages, companyId);
+    // if (stageCheck.error) {
+    //   return errorResponse(res, stageCheck.error);
+    // }
 
     // ========================================================
     // SAVE
@@ -506,26 +506,26 @@ const createWorkOrder = async (req, res) => {
       delete: 0,
     });
 
-    try {
-      await db.workorderstage.bulkCreate(
-        stageCheck.rows.map((r) => ({
-          companyId,
-          workOrderId: workOrder.workOrderId,
-          stage: r.stage,
-          stageOrder: r.stageOrder,
-          employeeId: r.employeeId,
-          status: "Pending",
-          delete: 0,
-        })),
-      );
-    } catch (stageError) {
-      await updateModelHelper(
-        "workorder",
-        { delete: 1, updated: new Date() },
-        { workOrderId: workOrder.workOrderId, companyId },
-      );
-      throw stageError;
-    }
+    // try {
+    //   await db.workorderstage.bulkCreate(
+    //     stageCheck.rows.map((r) => ({
+    //       companyId,
+    //       workOrderId: workOrder.workOrderId,
+    //       stage: r.stage,
+    //       stageOrder: r.stageOrder,
+    //       employeeId: r.employeeId,
+    //       status: "Pending",
+    //       delete: 0,
+    //     })),
+    //   );
+    // } catch (stageError) {
+    //   await updateModelHelper(
+    //     "workorder",
+    //     { delete: 1, updated: new Date() },
+    //     { workOrderId: workOrder.workOrderId, companyId },
+    //   );
+    //   throw stageError;
+    // }
 
     return successResponse(
       res,
@@ -1830,11 +1830,23 @@ const resolveStageKeyByProcess = async (companyId, processId) => {
   const name = String(rows[0]?.processName || "").trim().toLowerCase();
   if (!name) return null;
 
-  const stage = WORK_ORDER_STAGES.find(
+  let stage = WORK_ORDER_STAGES.find(
     (s) =>
       String(s.label || "").trim().toLowerCase() === name ||
       String(s.key || "").trim().toLowerCase() === name,
   );
+
+  if (!stage) {
+    stage = WORK_ORDER_STAGES.find((s) => {
+      const label = String(s.label || "").trim().toLowerCase();
+      const key = String(s.key || "").trim().toLowerCase();
+      return (
+        (label && (name.includes(label) || label.includes(name))) ||
+        (key && (name.includes(key) || key.includes(name)))
+      );
+    });
+  }
+
   return stage ? stage.key : null;
 };
 
@@ -1863,7 +1875,14 @@ const getMyStageItems = async (req, res) => {
       ? Boolean(task.itemsVerified)
       : true;
 
-    const stageKey = await resolveStageKeyByProcess(companyId, task.processId);
+
+
+const stageKey = await resolveStageKeyByProcess(
+  companyId,
+  task.processId
+);
+
+
 
     if (!stageKey) {
       const woRows = await selectWithJoins(
@@ -1885,11 +1904,13 @@ const getMyStageItems = async (req, res) => {
       );
     }
 
-    const result = await getStageItems({
-      companyId,
-      workOrderId: task.workOrderId,
-      stageKey,
-    });
+ const result = await getStageItems({
+  companyId,
+  workOrderId: task.workOrderId,
+  processId: task.processId,
+  subProcessId: task.subProcessId,
+  stageKey,
+});
     if (result.error) return errorResponse(res, result.error);
 
     return successResponse(
@@ -1951,6 +1972,8 @@ const saveStageItemVerification = async (req, res) => {
     const result = await getStageItems({
       companyId,
       workOrderId: task.workOrderId,
+         processId: task.processId,
+      subProcessId: task.subProcessId,
       stageKey,
     });
     if (result.error) return errorResponse(res, result.error);
