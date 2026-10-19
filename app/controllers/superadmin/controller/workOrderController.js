@@ -471,10 +471,10 @@ const createWorkOrder = async (req, res) => {
       }
     }
 
-    const stageCheck = await validateStageAssignments(stages, companyId);
-    if (stageCheck.error) {
-      return errorResponse(res, stageCheck.error);
-    }
+    // const stageCheck = await validateStageAssignments(stages, companyId);
+    // if (stageCheck.error) {
+    //   return errorResponse(res, stageCheck.error);
+    // }
 
     // ========================================================
     // SAVE
@@ -506,26 +506,26 @@ const createWorkOrder = async (req, res) => {
       delete: 0,
     });
 
-    try {
-      await db.workorderstage.bulkCreate(
-        stageCheck.rows.map((r) => ({
-          companyId,
-          workOrderId: workOrder.workOrderId,
-          stage: r.stage,
-          stageOrder: r.stageOrder,
-          employeeId: r.employeeId,
-          status: "Pending",
-          delete: 0,
-        })),
-      );
-    } catch (stageError) {
-      await updateModelHelper(
-        "workorder",
-        { delete: 1, updated: new Date() },
-        { workOrderId: workOrder.workOrderId, companyId },
-      );
-      throw stageError;
-    }
+    // try {
+    //   await db.workorderstage.bulkCreate(
+    //     stageCheck.rows.map((r) => ({
+    //       companyId,
+    //       workOrderId: workOrder.workOrderId,
+    //       stage: r.stage,
+    //       stageOrder: r.stageOrder,
+    //       employeeId: r.employeeId,
+    //       status: "Pending",
+    //       delete: 0,
+    //     })),
+    //   );
+    // } catch (stageError) {
+    //   await updateModelHelper(
+    //     "workorder",
+    //     { delete: 1, updated: new Date() },
+    //     { workOrderId: workOrder.workOrderId, companyId },
+    //   );
+    //   throw stageError;
+    // }
 
     return successResponse(
       res,

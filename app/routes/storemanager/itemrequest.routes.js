@@ -14,10 +14,12 @@ module.exports = (app) => {
 
   // Submit request
   routes.post("/", itemRequest.createItemRequest);
-routes.post("/issue", itemRequest.issueItemRequestItem);
+  routes.post("/issue", itemRequest.issueItemRequestItem);
   // Optional list
   routes.get("/list", itemRequest.getMyItemRequests);
-// Detail view (work order + items list for issuing)
-routes.get("/:id", itemRequest.getItemRequestDetail);
+  // Detail view (work order + items list for issuing)
+  routes.get("/open", itemRequest.getOpenItemRequests);
+    routes.get("/next-issue-no", itemRequest.getNextStoreIssueNo);
+  routes.get("/:id", itemRequest.getItemRequestDetail);
   app.use("/storemanager/itemrequest", routes);
 };

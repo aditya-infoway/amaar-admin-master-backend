@@ -261,11 +261,11 @@ const getStockReportDetails = async (req, res) => {
     }
 
     // ---- ✅ NEW — Issue records (Outward) ----
-    const itemIssues = await selectWithJoins(
-      "itemissue", [],
-      { itemId, companyId, delete: 0 },
-      ["itemIssueId", "qty", "issuedTo", "billNo", "created"]
-    );
+const itemIssues = await selectWithJoins(
+  "itemissue", [],
+  { itemId, companyId, delete: 0 },
+  ["itemIssueId", "qty", "issuedTo", "billNo", "issueNo", "issueDate", "created"]
+);
 
     const issuedEmployeeIds = [...new Set(itemIssues.map((d) => d.issuedTo).filter(Boolean))];
     let employeeMap = {};
@@ -319,16 +319,19 @@ const getStockReportDetails = async (req, res) => {
         reserve: 0,
         sortKey: purchaseMap[d.purchaseId]?.purchaseDate || d.created || "",
       })),
-      ...itemIssues.map((d) => ({
-        date: d.created,
-        type: "Outward",
-        partyName: employeeMap[d.issuedTo] || "",
-        voucherNo: d.billNo || "-",
-        qtyIn: 0,
-        qtyOut: Number(d.qty) || 0,
-        reserve: 0,
-        sortKey: d.created,
-      })),
+    ...itemIssues.map((d) => {
+  const dt = d.issueDate || d.created;
+  return {
+    date: dt,
+    type: "Issue",
+    partyName: employeeMap[d.issuedTo] || "",
+    voucherNo: d.issueNo || d.billNo || "-",
+    qtyIn: 0,
+    qtyOut: Number(d.qty) || 0,
+    reserve: 0,
+    sortKey: dt ? new Date(dt).toISOString() : "",
+  };
+}),
       ...salesMovements,
     ].sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
 
