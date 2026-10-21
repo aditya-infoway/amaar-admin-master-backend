@@ -8,8 +8,8 @@ const createItemCategory = Joi.object().keys({
     "any.only": "Status must be either active or inactive",
     "string.empty": "Status is required",
   }),
-   createdBy: Joi.number().allow(null, ""),          
-  createdType: Joi.string().trim().allow(null, ""), 
+  createdBy: Joi.number().allow(null, ""),
+  createdType: Joi.string().trim().allow(null, ""),
 });
 
 const updateItemCategory = Joi.object().keys({
@@ -23,7 +23,7 @@ const updateItemCategory = Joi.object().keys({
     "any.only": "Status must be either active or inactive",
     "string.empty": "Status is required",
   }),
-   
+
 });
 
 const deleteItemCategory = Joi.object().keys({

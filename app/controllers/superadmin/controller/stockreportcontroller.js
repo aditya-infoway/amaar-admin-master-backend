@@ -37,6 +37,8 @@ const getStockReportList = async (req, res) => {
         "taxSlab",
         "openingStock",
         "stockValue",
+        "minQty",
+        "maxQty",
       ],
     );
 
@@ -197,6 +199,8 @@ const getStockReportList = async (req, res) => {
         // Opening Stock + Purchase Stock - Issued Stock
         currentStock:
           String(currentStock),
+        minQty: String(item.minQty ?? "0"),
+        maxQty: String(item.maxQty ?? "0"),
         reservedStock: String(reservedStock),
         availableStock: String(currentStock - reservedStock),
       };
@@ -368,7 +372,7 @@ const getStockReportDetails = async (req, res) => {
         return {
           date: dt,
           type: "Issue",
-                 partyName: clientByReq[d.itemRequestId] || employeeMap[d.issuedTo] || "",
+          partyName: clientByReq[d.itemRequestId] || employeeMap[d.issuedTo] || "",
           voucherNo: d.issueNo || d.billNo || "-",
           qtyIn: 0,
           qtyOut: Number(d.qty) || 0,

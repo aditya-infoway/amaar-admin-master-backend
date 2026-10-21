@@ -182,6 +182,7 @@ const getItemMasterList = async (req, res) => {
         'itemmaster."itemName"',
         'itemmaster."shortName"',
         'itemmaster."hsnCode"',
+        'itemmaster."itemLocation"',
         'ic."categoryName" AS "categoryName"',
         'ig."groupName" AS "groupName"',
         'itemmaster."unit"',
@@ -795,7 +796,7 @@ const bulkImportItemMaster = async (req, res) => {
     items.forEach((row, i) => {
       const rowNum = i + 2;
 
-      const itemCode = row.itemCode.trim();
+     const itemCode = String(row.itemCode).trim();
       const categoryName = row.categoryName.trim();
       const groupName = row.groupName.trim();
       const barcode = (row.barcode || "").toString().trim();

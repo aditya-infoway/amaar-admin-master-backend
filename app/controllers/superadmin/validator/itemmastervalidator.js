@@ -35,36 +35,36 @@ const baseSchema = {
     "string.empty": "Tax Slab is required",
   }),
   openingStock: Joi.number().required().min(0).messages({
-  "any.required": "Opening Stock is required",
-  "number.base": "Opening Stock must be a number",
-  "number.min": "Opening Stock cannot be negative",
-}),
+    "any.required": "Opening Stock is required",
+    "number.base": "Opening Stock must be a number",
+    "number.min": "Opening Stock cannot be negative",
+  }),
 
-stockValue: Joi.number().required().min(0).messages({
-  "any.required": "Stock Value is required",
-  "number.base": "Stock Value must be a number",
-  "number.min": "Stock Value cannot be negative",
-}),
+  stockValue: Joi.number().required().min(0).messages({
+    "any.required": "Stock Value is required",
+    "number.base": "Stock Value must be a number",
+    "number.min": "Stock Value cannot be negative",
+  }),
 
- thickness: Joi.number().allow(null, "").min(0).messages({
-  "number.base": "Thickness must be a number",
-  "number.min": "Thickness cannot be negative",
-}),
+  thickness: Joi.number().allow(null, "").min(0).messages({
+    "number.base": "Thickness must be a number",
+    "number.min": "Thickness cannot be negative",
+  }),
 
-length: Joi.number().allow(null, "").min(0).messages({
-  "number.base": "Length must be a number",
-  "number.min": "Length cannot be negative",
-}),
+  length: Joi.number().allow(null, "").min(0).messages({
+    "number.base": "Length must be a number",
+    "number.min": "Length cannot be negative",
+  }),
 
-width: Joi.number().allow(null, "").min(0).messages({
-  "number.base": "Width must be a number",
-  "number.min": "Width cannot be negative",
-}),
+  width: Joi.number().allow(null, "").min(0).messages({
+    "number.base": "Width must be a number",
+    "number.min": "Width cannot be negative",
+  }),
 
-weight: Joi.number().allow(null, "").min(0).messages({
-  "number.base": "Weight must be a number",
-  "number.min": "Weight cannot be negative",
-}),
+  weight: Joi.number().allow(null, "").min(0).messages({
+    "number.base": "Weight must be a number",
+    "number.min": "Weight cannot be negative",
+  }),
 
   stockMapping: Joi.boolean().default(false),
   minQty: Joi.when("stockMapping", {
@@ -117,8 +117,8 @@ weight: Joi.number().allow(null, "").min(0).messages({
   }),
 
   status: Joi.string().valid("active", "inactive").default("active"),
-  createdBy: Joi.number().allow(null, ""),         
-createdType: Joi.string().trim().allow(null, ""),  
+  createdBy: Joi.number().allow(null, ""),
+  createdType: Joi.string().trim().allow(null, ""),
 };
 
 const createItemMaster = Joi.object().keys(baseSchema);
@@ -158,7 +158,18 @@ const bulkImportItemMaster = Joi.object().keys({
   items: Joi.array()
     .items(
       Joi.object().keys({
-        itemCode: Joi.string().trim().required(),
+        itemCode: Joi.alternatives()
+          .try(
+            Joi.string().trim().min(1),   // reject empty string
+            Joi.number()
+          )
+          .required()
+          .messages({
+            "alternatives.match": "Item Code must be text or a number",
+            "any.required": "Item Code is required",
+            "string.empty": "Item Code cannot be empty",
+            "string.min": "Item Code cannot be empty",
+          }),
         itemName: Joi.string().trim().required(),
         categoryName: Joi.string().trim().required(),
         groupName: Joi.string().trim().required(),
@@ -171,11 +182,11 @@ const bulkImportItemMaster = Joi.object().keys({
         // salesPrice: Joi.number().allow(null, ""),
         // mrp: Joi.number().allow(null, ""),
         barcode: Joi.alternatives()
-  .try(
-    Joi.string().trim(),
-    Joi.number()
-  )
-  .allow("", null),
+          .try(
+            Joi.string().trim(),
+            Joi.number()
+          )
+          .allow("", null),
       })
     )
     .min(1)
