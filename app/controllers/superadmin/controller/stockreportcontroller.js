@@ -6,7 +6,7 @@ const {
   selectWithJoinsV2,
 } = require("../../../helper/index.js");
 const { getSalesReservationLines } = require("../../../helper/salesReservation.js");
-
+const { getLeadMapBySalesOrder } = require("../../../helper/leadDetails.js");
 // ---------------- STOCK REPORT LIST ----------------
 const getStockReportList = async (req, res) => {
   try {
@@ -37,6 +37,8 @@ const getStockReportList = async (req, res) => {
         "taxSlab",
         "openingStock",
         "stockValue",
+        "minQty",
+        "maxQty",
       ],
     );
 
@@ -70,7 +72,16 @@ const getStockReportList = async (req, res) => {
       issuedMap[d.itemId] = (issuedMap[d.itemId] || 0) + qty;
     });
 
-
+    const returnRows = await selectWithJoins(
+      "itemreturn", [],
+      { companyId, delete: 0 },
+      ["itemId", "qty"],
+    );
+    const returnedMap = {};
+    returnRows.forEach((d) => {
+      const qty = Number(d.qty) || 0;
+      returnedMap[d.itemId] = (returnedMap[d.itemId] || 0) + qty;
+    });
     // Reserved by Sales Orders (via BOM leaf items)
     const reservedMap = {};
     (await getSalesReservationLines(companyId)).forEach((l) => {
@@ -155,9 +166,10 @@ const getStockReportList = async (req, res) => {
 
       // ✅ Issued stock from Item Issue
       const issuedStock = Number(issuedMap[item.itemId]) || 0;
+      const returnedStock = Number(returnedMap[item.itemId]) || 0;
 
-      // Final current stock = Opening + Purchase - Issued
-      const currentStock = openingStock + purchaseStock - issuedStock;
+      // Final current stock = Opening + Purchase - Issued + Returned
+      const currentStock = openingStock + purchaseStock - issuedStock + returnedStock;
 
       const reservedStock = Number(reservedMap[item.itemId]) || 0;
 
@@ -187,6 +199,8 @@ const getStockReportList = async (req, res) => {
         // Opening Stock + Purchase Stock - Issued Stock
         currentStock:
           String(currentStock),
+        minQty: String(item.minQty ?? "0"),
+        maxQty: String(item.maxQty ?? "0"),
         reservedStock: String(reservedStock),
         availableStock: String(currentStock - reservedStock),
       };
@@ -261,13 +275,22 @@ const getStockReportDetails = async (req, res) => {
     }
 
     // ---- ✅ NEW — Issue records (Outward) ----
-const itemIssues = await selectWithJoins(
-  "itemissue", [],
-  { itemId, companyId, delete: 0 },
-  ["itemIssueId", "qty", "issuedTo", "billNo", "issueNo", "issueDate", "created"]
-);
-
-    const issuedEmployeeIds = [...new Set(itemIssues.map((d) => d.issuedTo).filter(Boolean))];
+    const itemIssues = await selectWithJoins(
+      "itemissue", [],
+      { itemId, companyId, delete: 0 },
+      ["itemIssueId", "itemRequestId", "qty", "issuedTo", "billNo", "issueNo", "issueDate", "created"]
+    );
+    const itemReturns = await selectWithJoins(
+      "itemreturn", [],
+      { itemId, companyId, delete: 0 },
+      ["itemReturnId", "itemRequestId", "qty", "returnedBy", "returnNo", "returnDate", "created"]
+    );
+    const issuedEmployeeIds = [
+      ...new Set([
+        ...itemIssues.map((d) => d.issuedTo),
+        ...itemReturns.map((d) => d.returnedBy),
+      ].filter(Boolean)),
+    ];
     let employeeMap = {};
     if (issuedEmployeeIds.length) {
       const employees = await selectWithJoins(
@@ -276,7 +299,31 @@ const itemIssues = await selectWithJoins(
       );
       employees.forEach((e) => { employeeMap[e.employeeId] = e.employeeName; });
     }
-
+    // itemRequestId -> Sales Order ka Client Name
+    const clientByReq = {};
+    const reqIds = [
+      ...new Set([...itemIssues, ...itemReturns].map((d) => d.itemRequestId).filter(Boolean)),
+    ];
+    if (reqIds.length) {
+      const reqs = await selectWithJoins(
+        "itemrequest", [], { itemRequestId: reqIds, companyId, delete: 0 },
+        ["itemRequestId", "workOrderId"]
+      );
+      const woIds = [...new Set(reqs.map((r) => r.workOrderId).filter(Boolean))];
+      if (woIds.length) {
+        const wos = await selectWithJoins(
+          "workorder", [], { workOrderId: woIds, companyId, delete: 0 },
+          ["workOrderId", "salesOrderId", "customerName"]
+        );
+        const leadBySO = await getLeadMapBySalesOrder(wos.map((w) => w.salesOrderId), companyId);
+        const nameByWo = {};
+        wos.forEach((w) => {
+          const lead = leadBySO.get(String(w.salesOrderId));
+          nameByWo[w.workOrderId] = lead?.name || w.customerName || "";
+        });
+        reqs.forEach((r) => { clientByReq[r.itemRequestId] = nameByWo[r.workOrderId] || ""; });
+      }
+    }
     let totalPurchaseQty = 0;
     let totalPurchaseValue = 0;
     purchaseDetails.forEach((d) => {
@@ -287,8 +334,9 @@ const itemIssues = await selectWithJoins(
     });
 
     const totalIssuedQty = itemIssues.reduce((sum, d) => sum + (Number(d.qty) || 0), 0);
+    const totalReturnedQty = itemReturns.reduce((sum, d) => sum + (Number(d.qty) || 0), 0);
 
-    const currentStock = openingStock + totalPurchaseQty - totalIssuedQty; // ✅ issued minus
+    const currentStock = openingStock + totalPurchaseQty - totalIssuedQty + totalReturnedQty;// ✅ issued minus
     const purchasePrice = totalPurchaseQty > 0 ? totalPurchaseValue / totalPurchaseQty : 0;
 
     // Sales (Sales Order etc.) - not built yet. When ready, push entries like:
@@ -319,19 +367,32 @@ const itemIssues = await selectWithJoins(
         reserve: 0,
         sortKey: purchaseMap[d.purchaseId]?.purchaseDate || d.created || "",
       })),
-    ...itemIssues.map((d) => {
-  const dt = d.issueDate || d.created;
-  return {
-    date: dt,
-    type: "Issue",
-    partyName: employeeMap[d.issuedTo] || "",
-    voucherNo: d.issueNo || d.billNo || "-",
-    qtyIn: 0,
-    qtyOut: Number(d.qty) || 0,
-    reserve: 0,
-    sortKey: dt ? new Date(dt).toISOString() : "",
-  };
-}),
+      ...itemIssues.map((d) => {
+        const dt = d.issueDate || d.created;
+        return {
+          date: dt,
+          type: "Issue",
+          partyName: clientByReq[d.itemRequestId] || employeeMap[d.issuedTo] || "",
+          voucherNo: d.issueNo || d.billNo || "-",
+          qtyIn: 0,
+          qtyOut: Number(d.qty) || 0,
+          reserve: 0,
+          sortKey: dt ? new Date(dt).toISOString() : "",
+        };
+      }),
+      ...itemReturns.map((d) => {
+        const dt = d.returnDate || d.created;
+        return {
+          date: dt,
+          type: "Return",
+                  partyName: clientByReq[d.itemRequestId] || employeeMap[d.returnedBy] || "",
+          voucherNo: d.returnNo || "-",
+          qtyIn: Number(d.qty) || 0,   // return = stock IN
+          qtyOut: 0,
+          reserve: 0,
+          sortKey: dt ? new Date(dt).toISOString() : "",
+        };
+      }),
       ...salesMovements,
     ].sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
 

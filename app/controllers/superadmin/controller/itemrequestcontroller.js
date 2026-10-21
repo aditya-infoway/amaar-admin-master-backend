@@ -9,14 +9,10 @@ const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const db = require("../../../modelses");
 const Bom = db.bom;
 const BomItem = db.bomItem;
+const { getFinancialYearById } = require("../../../helper/financialYear.js");
 
 
-// ============================================================
-// HELPER: Get all items (flat) from a BOM by finishedGoodsItemId
-// (falls back to bomName == itemName match, since
-//  finishedGoodsItemId is not yet saved on BOM create/update)
-// ============================================================
-const getBomItemsByModel = async (companyId, modelId) => {
+const getBomItemsByModel = async (companyId, modelId, productionQty = 1) => {
   if (!modelId) return [];
 
   let bom = await Bom.findOne({
@@ -70,41 +66,52 @@ const getBomItemsByModel = async (companyId, modelId) => {
   const itemById = {};
   items.forEach((it) => { itemById[String(it.itemId)] = it; });
 
+  const prodQty = Number(productionQty) || 1;
+
   return leafRows
     .filter((bi) => itemById[String(bi.itemId)])
     .map((bi) => {
       const master = itemById[String(bi.itemId)];
+      // Material Availability jaisa: BOM quantity x work order qty
+      const perUnitQty = Number(bi.quantity) || 0;
       return {
         id: bi.bomItemId,
         itemId: Number(bi.itemId),
         itemCode: master.itemCode || "",
         itemName: master.itemName || "",
         unit: master.unit || "",
-        bomQty: Number(bi.asslyQty) || 0,
+        bomQty: Math.round(perUnitQty * prodQty * 100) / 100,
       };
     });
 };
-// ============================================================
-// 1. GET ASSIGNED WORK ORDERS (for dropdown)
-//    You can also reuse the existing /contractor/workorder/list
-// ============================================================
-// ============================================================
-// HELPER: Work Order me item-wise net issued qty (Issue minus Return)
-// Return request ki qty is se zyada nahi ho sakti
-// ============================================================
-const getNetIssuedByItem = async (companyId, workOrderId) => {
-  const issueReqs = await selectWithJoins(
-    "itemrequest",
-    [],
-    { companyId, workOrderId, requestType: "Issue", delete: 0 },
-    ["itemRequestId"],
-  );
-  const returnReqs = await selectWithJoins(
-    "itemrequest",
-    [],
-    { companyId, workOrderId, requestType: "Return", delete: 0 },
-    ["itemRequestId"],
-  );
+
+const getNetIssuedByItem = async (companyId, workOrderId, scope = null) => {
+  // scope = { employeeId, department } -> sirf isi panel ki requests count hongi
+  const inScope = (r) => {
+    if (!scope) return true;
+    return (
+      Number(r.requestedBy) === Number(scope.employeeId) &&
+      (r.department || null) === (scope.department || null)
+    );
+  };
+
+  const issueReqs = (
+    await selectWithJoins(
+      "itemrequest",
+      [],
+      { companyId, workOrderId, requestType: "Issue", delete: 0 },
+      ["itemRequestId", "requestedBy", "department"],
+    )
+  ).filter(inScope);
+
+  const returnReqs = (
+    await selectWithJoins(
+      "itemrequest",
+      [],
+      { companyId, workOrderId, requestType: "Return", delete: 0 },
+      ["itemRequestId", "requestedBy", "department"],
+    )
+  ).filter(inScope)
 
   const net = {};
 
@@ -138,6 +145,206 @@ const getNetIssuedByItem = async (companyId, workOrderId) => {
 
   return net;
 };
+// Work Order me item-wise: ab tak Order ki hui qty minus Return ki hui qty
+// Order: Pending + Complete dono count (double order na ho)
+// Return: sirf store manager ke accept (status "Complete") ke baad wapas add hoga
+const getNetOrderedByItem = async (companyId, workOrderId) => {
+  const reqs = await selectWithJoins(
+    "itemrequest",
+    [],
+    { companyId, workOrderId, delete: 0 },
+    ["itemRequestId", "requestType", "status"],
+  );
+  if (!reqs.length) return {};
+
+  const infoById = {};
+  reqs.forEach((r) => { infoById[r.itemRequestId] = r; });
+
+  const details = await selectWithJoins(
+    "itemrequestdetail",
+    [],
+    { itemRequestId: reqs.map((r) => r.itemRequestId), delete: 0 },
+    ["itemRequestId", "itemId", "qty"],
+  );
+
+  const net = {};
+  details.forEach((d) => {
+    const req = infoById[d.itemRequestId];
+    if (!req) return;
+    const q = Number(d.qty) || 0;
+
+    if (req.requestType === "Return") {
+      if (req.status !== "Complete") return; // pending return ignore
+      net[d.itemId] = (net[d.itemId] || 0) - q;
+    } else {
+      net[d.itemId] = (net[d.itemId] || 0) + q;
+    }
+  });
+  return net;
+};
+// ============================================================
+// RETURN: Sirf wahi Work Orders jinme store manager ne item ISSUE kiya hai
+// (net issued > 0, yaani poora return nahi ho chuka)
+// ============================================================
+const getIssuedWorkOrders = async (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+
+    const companyId = req.companyId;
+    const employeeId = req.employeeId;
+    const department = req.department || null;
+
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { financialYearId } = req.query;
+
+    // 1. Is employee ki is panel ki Issue requests
+    const issueReqsAll = await selectWithJoins(
+      "itemrequest",
+      [],
+      { companyId, requestType: "Issue", requestedBy: employeeId, delete: 0 },
+      ["itemRequestId", "workOrderId", "department"],
+    );
+    const issueReqs = issueReqsAll.filter(
+      (r) => (r.department || null) === department,
+    );
+
+    if (!issueReqs.length) {
+      return successResponse(res, [], "No issued work orders");
+    }
+
+    // 2. Inme se kin requests ke against store manager ne actually issue kiya
+    const issuedRows = await selectWithJoins(
+      "itemissue",
+      [],
+      {
+        itemRequestId: issueReqs.map((r) => r.itemRequestId),
+        companyId,
+        delete: 0,
+      },
+      ["itemRequestId", "qty"],
+    );
+
+    const issuedRequestIds = new Set(
+      issuedRows
+        .filter((i) => Number(i.qty) > 0)
+        .map((i) => Number(i.itemRequestId)),
+    );
+
+    const candidateWoIds = [
+      ...new Set(
+        issueReqs
+          .filter((r) => issuedRequestIds.has(Number(r.itemRequestId)))
+          .map((r) => Number(r.workOrderId))
+          .filter(Boolean),
+      ),
+    ];
+
+    if (!candidateWoIds.length) {
+      return successResponse(res, [], "No issued work orders");
+    }
+
+    // 3. Net issued (issue - return) > 0 wale hi rakho, sirf isi panel ke scope me
+    const validWoIds = [];
+    for (const woId of candidateWoIds) {
+      const net = await getNetIssuedByItem(companyId, woId, {
+        employeeId,
+        department,
+      });
+      const hasReturnable = Object.values(net).some((q) => Number(q) > 0);
+      if (hasReturnable) validWoIds.push(woId);
+    }
+
+    if (!validWoIds.length) {
+      return successResponse(res, [], "No issued work orders");
+    }
+
+    const where = { workOrderId: validWoIds, companyId, delete: 0 };
+    if (financialYearId) where.financialYearId = Number(financialYearId);
+
+    const workOrders = await selectWithJoins(
+      "workorder",
+      [],
+      where,
+      ["workOrderId", "workOrderNo", "model"],
+      [["workOrderId", "DESC"]],
+    );
+
+    const data = workOrders.map((wo) => ({
+      id: Number(wo.workOrderId),
+      workOrderNo: wo.workOrderNo || "",
+      model: wo.model ? Number(wo.model) : null,
+    }));
+
+    return successResponse(res, data, "Issued Work Orders fetched successfully");
+  } catch (error) {
+    console.error("getIssuedWorkOrders error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+// ============================================================
+// RETURN: Work Order me jo items issue hue hain (net qty > 0)
+// bomQty field me net issued qty bhejte hain taaki frontend ka
+// max-qty validation as it is chale
+// ============================================================
+const getReturnableItemsByWorkOrder = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    const employeeId = req.employeeId;
+    const department = req.department || null;
+
+    if (!companyId || !employeeId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { workOrderId } = req.query;
+    if (!workOrderId) {
+      return errorResponse(res, "Work Order ID is required");
+    }
+
+    // sirf isi employee + isi panel ka net issued
+    const net = await getNetIssuedByItem(companyId, Number(workOrderId), {
+      employeeId,
+      department,
+    });
+
+    const itemIds = Object.keys(net)
+      .filter((id) => Number(net[id]) > 0)
+      .map(Number);
+
+    if (!itemIds.length) {
+      return successResponse(res, [], "No returnable items");
+    }
+
+    const masters = await selectWithJoins(
+      "itemmaster",
+      [],
+      { itemId: itemIds, companyId, delete: 0 },
+      ["itemId", "itemCode", "itemName", "unit"],
+    );
+
+    const data = masters.map((m) => ({
+      id: Number(m.itemId), // return me itemId hi unique hai
+      itemId: Number(m.itemId),
+      itemCode: m.itemCode || "",
+      itemName: m.itemName || "",
+      unit: m.unit || "",
+      bomQty: Number(net[m.itemId]) || 0, // = net issued qty (max return)
+    }));
+
+    return successResponse(res, data, "Returnable items fetched successfully");
+  } catch (error) {
+    console.error("getReturnableItemsByWorkOrder error:", error);
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
 const getAssignedWorkOrders = async (req, res) => {
   try {
     res.set(
@@ -232,10 +439,6 @@ const getAssignedWorkOrders = async (req, res) => {
   }
 };
 
-// ============================================================
-// 2. GET BOM ITEMS BY WORK ORDER
-//    Frontend calls this after selecting a Work Order
-// ============================================================
 const getItemsByWorkOrder = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -243,22 +446,17 @@ const getItemsByWorkOrder = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { workOrderId } = req.query; // or req.params
+    const { workOrderId } = req.query;
 
     if (!workOrderId) {
       return errorResponse(res, "Work Order ID is required");
     }
 
-    // 1. Get the Work Order → its model
     const workOrders = await selectWithJoins(
       "workorder",
       [],
-      {
-        workOrderId,
-        companyId,
-        delete: 0,
-      },
-      ["workOrderId", "workOrderNo", "model"],
+      { workOrderId, companyId, delete: 0 },
+      ["workOrderId", "workOrderNo", "model", "qty"],
     );
 
     if (!workOrders.length) {
@@ -266,13 +464,21 @@ const getItemsByWorkOrder = async (req, res) => {
     }
 
     const modelId = workOrders[0].model ? Number(workOrders[0].model) : null;
+    const productionQty = Number(workOrders[0].qty) || 1;
 
     if (!modelId) {
       return successResponse(res, [], "No model linked to this Work Order");
     }
 
-    // 2. Get all items from the BOM of that model
-    const items = await getBomItemsByModel(companyId, modelId);
+    const bomItems = await getBomItemsByModel(companyId, modelId, productionQty);
+    const ordered = await getNetOrderedByItem(companyId, Number(workOrderId));
+
+    const items = bomItems
+      .map((it) => ({
+        ...it,
+        bomQty: Math.max(0, Math.round((it.bomQty - (ordered[it.itemId] || 0)) * 100) / 100),
+      }))
+      .filter((it) => it.bomQty > 0); // poora order ho chuka to dropdown me mat dikhao
 
     return successResponse(
       res,
@@ -284,9 +490,6 @@ const getItemsByWorkOrder = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
-// ============================================================
-// NEXT ISSUE NO (Issue / Return) - form khulte hi preview ke liye
-// ============================================================
 const getNextIssueNo = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -294,19 +497,22 @@ const getNextIssueNo = async (req, res) => {
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
     if (!financialYearId) {
-      return errorResponse(res, "Financial Year not found in session. Please select a company year.");
+      return errorResponse(res, "Financial Year not found. Please select a company year.");
     }
 
-    const { voucherNo } = await generateVoucherNo({
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year.");
+
+    const { billNo } = await generateVoucherNo({
       companyId,
-      financialYearId,
+      financialYearId: fy.financialYearId,
       tableName: "itemrequest",
       idColumn: "itemRequestId",
-      fixedPrefix: requestType === "Return" ? "RET" : "ISS",
+      prefixFor: requestType === "Return" ? "ITEM RETURN" : "ITEM ORDER",
       extraWhere: { requestType },
     });
 
-    return successResponse(res, { issueNo: voucherNo }, "Issue number generated successfully");
+    return successResponse(res, { issueNo: billNo }, "Number generated successfully");
   } catch (error) {
     console.error("getNextIssueNo error:", error);
     return errorResponse(res, error.message || "Something Went Wrong", error);
@@ -316,22 +522,27 @@ const getNextIssueNo = async (req, res) => {
 const getNextStoreIssueNo = async (req, res) => {
   try {
     const companyId = req.companyId;
-    const { financialYearId } = req.query;
+    const { financialYearId, requestType = "Issue" } = req.query;
 
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
     if (!financialYearId) {
-      return errorResponse(res, "Financial Year not found in session. Please select a company year.");
+      return errorResponse(res, "Financial Year not found. Please select a company year.");
     }
 
-    const { voucherNo } = await generateVoucherNo({
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year.");
+
+    const isReturn = requestType === "Return";
+
+    const { billNo } = await generateVoucherNo({
       companyId,
-      financialYearId,
-      tableName: "itemissue",
-      idColumn: "itemIssueId",
-      fixedPrefix: "ISS",
+      financialYearId: fy.financialYearId,
+      tableName: isReturn ? "itemreturn" : "itemissue",
+      idColumn: isReturn ? "itemReturnId" : "itemIssueId",
+      prefixFor: isReturn ? "STORE RETURN" : "STORE ISSUE",
     });
 
-    return successResponse(res, { issueNo: voucherNo }, "Issue number generated successfully");
+    return successResponse(res, { issueNo: billNo }, "Number generated successfully");
   } catch (error) {
     console.error("getNextStoreIssueNo error:", error);
     return errorResponse(res, error.message || "Something Went Wrong", error);
@@ -367,8 +578,11 @@ const createItemRequest = async (req, res) => {
     if (!workOrderId) {
       return errorResponse(res, "Please select a Work Order");
     }
-    if (requestType === "Issue" && !issueDate) {
-      return errorResponse(res, "Please select Order  Date");
+    if (!issueDate) {
+      return errorResponse(
+        res,
+        `Please select ${requestType === "Return" ? "Return" : "Order"} Date`,
+      );
     }
     if (!Array.isArray(items) || items.length === 0) {
       return errorResponse(res, "Please add at least one item");
@@ -379,11 +593,12 @@ const createItemRequest = async (req, res) => {
     const woWhere = { workOrderId, companyId, delete: 0 };
     if (!department) woWhere.assignedEmployeeId = employeeId;
 
+    // ✅ CHANGE 1: "qty" add kiya (work order ki production qty chahiye)
     const workOrders = await selectWithJoins(
       "workorder",
       [],
       woWhere,
-      ["workOrderId", "workOrderNo", "model"],
+      ["workOrderId", "workOrderNo", "model", "qty"],
     );
 
     if (!workOrders.length) {
@@ -391,14 +606,20 @@ const createItemRequest = async (req, res) => {
     }
 
     const modelId = workOrders[0].model ? Number(workOrders[0].model) : null;
+    // ✅ CHANGE 2: productionQty
+    const productionQty = Number(workOrders[0].qty) || 1;
     if (!modelId) {
       return errorResponse(res, "No model linked to this Work Order");
     }
 
     // ---------- Qty validation ----------
     if (requestType === "Issue") {
-      const bomLeaves = await getBomItemsByModel(companyId, modelId);
-
+      // ✅ CHANGE 3: productionQty pass kiya
+      const bomLeaves = await getBomItemsByModel(companyId, modelId, productionQty);
+      const ordered = await getNetOrderedByItem(companyId, Number(workOrderId));
+      bomLeaves.forEach((l) => {
+        l.bomQty = Math.max(0, Math.round((l.bomQty - (ordered[l.itemId] || 0)) * 100) / 100);
+      });
       for (const row of items) {
         if (!row.itemId || !row.qty || Number(row.qty) <= 0) continue;
 
@@ -417,13 +638,13 @@ const createItemRequest = async (req, res) => {
           );
           return errorResponse(
             res,
-            `Qty for "${row.itemName || row.itemCode || "item"}" cannot exceed ${maxForItem} (BOM quantity)`,
+            `Qty for "${row.itemName || row.itemCode || "item"}" cannot exceed ${maxForItem} (remaining quantity)`
           );
         }
       }
     } else {
       // Return: is work order me jitna issue hua (minus pehle ka return) usse zyada nahi
-      const net = await getNetIssuedByItem(companyId, workOrderId);
+      const net = await getNetIssuedByItem(companyId, workOrderId, { employeeId, department });
 
       for (const row of items) {
         if (!row.itemId || !row.qty || Number(row.qty) <= 0) continue;
@@ -439,15 +660,19 @@ const createItemRequest = async (req, res) => {
     }
 
     // ---------- Request No: ISS-0001 / RET-0001 ----------
-    const { voucherNo: requestNo } = await generateVoucherNo({
+    const fy = await getFinancialYearById(financialYearId, companyId);
+    if (!fy) return errorResponse(res, "Invalid Financial Year.");
+
+    const { billNo: requestNo } = await generateVoucherNo({
       companyId,
-      financialYearId,
+      financialYearId: fy.financialYearId,
       tableName: "itemrequest",
       idColumn: "itemRequestId",
-      fixedPrefix: requestType === "Return" ? "RET" : "ISS",
+      prefixFor: requestType === "Return" ? "ITEM RETURN" : "ITEM ORDER",
       extraWhere: { requestType },
     });
- const empRows = await selectWithJoins(
+
+    const empRows = await selectWithJoins(
       "employee",
       [],
       { employeeId, companyId, delete: 0 },
@@ -455,6 +680,7 @@ const createItemRequest = async (req, res) => {
     );
     const processId = empRows[0]?.processId || null;
     const subProcessId = empRows[0]?.subProcessId || null;
+
     // ---------- Create Header ----------
     const header = await saveModel("itemrequest", {
       companyId,
@@ -465,10 +691,10 @@ const createItemRequest = async (req, res) => {
       remarks: remarks || null,
       requestType,
       requestNo,
-      issueDate: requestType === "Issue" ? issueDate : null,
+      issueDate,
       department,
-       processId,       
-      subProcessId,  
+      processId,
+      subProcessId,
       delete: 0,
     });
 
@@ -717,8 +943,8 @@ const getItemRequestDetail = async (req, res) => {
       "itemrequest",
       [],
       { itemRequestId: id, companyId, delete: 0 },
-   ["itemRequestId", "workOrderId", "requestedBy", "status", "remarks", "created",
- "requestType", "requestNo", "issueDate", "department"],
+      ["itemRequestId", "workOrderId", "requestedBy", "status", "remarks", "created",
+        "requestType", "requestNo", "issueDate", "department"],
     );
 
     if (!headers.length) {
@@ -764,11 +990,11 @@ const getItemRequestDetail = async (req, res) => {
 
     if (!details.length) {
       return successResponse(res, {
-         itemRequestId: header.itemRequestId,
-  requestNo: header.requestNo || `#${header.itemRequestId}`,
-  requestType: header.requestType || "Issue",
-  issueDate: header.issueDate,
-  panel: header.department ,
+        itemRequestId: header.itemRequestId,
+        requestNo: header.requestNo || `#${header.itemRequestId}`,
+        requestType: header.requestType || "Issue",
+        issueDate: header.issueDate,
+        panel: header.department,
         workOrderId: workOrder.workOrderId || null,
         workOrderNo: workOrder.workOrderNo || "",
         modelName,
@@ -786,7 +1012,7 @@ const getItemRequestDetail = async (req, res) => {
       "itemmaster",
       [],
       { itemId: itemIds, companyId, delete: 0 },
-      ["itemId", "itemCode", "itemName", "unit", "openingStock", "itemLocation","hsnCode", "itemCategoryId", ],
+      ["itemId", "itemCode", "itemName", "unit", "openingStock", "itemLocation", "hsnCode", "itemCategoryId",],
     );
     const masterById = {};
     itemMasters.forEach((m) => { masterById[String(m.itemId)] = m; });
@@ -810,27 +1036,27 @@ const getItemRequestDetail = async (req, res) => {
       );
       locationRows.forEach((l) => { locationNameById[String(l.locationId)] = l.locationName; });
     }
-const categoryIds = [
-  ...new Set(
-    itemMasters
-      .map((m) => m.itemCategoryId)
-      .filter((val) => val && /^\d+$/.test(String(val)))
-      .map((val) => Number(val)),
-  ),
-];
+    const categoryIds = [
+      ...new Set(
+        itemMasters
+          .map((m) => m.itemCategoryId)
+          .filter((val) => val && /^\d+$/.test(String(val)))
+          .map((val) => Number(val)),
+      ),
+    ];
 
-let categoryNameById = {};
-if (categoryIds.length) {
-  const categoryRows = await selectWithJoins(
-    "itemcategory",
-    [],
-    { itemCategoryId: categoryIds, companyId, delete: 0 },
-    ["itemCategoryId", "categoryName"],
-  );
-  categoryRows.forEach((c) => {
-    categoryNameById[String(c.itemCategoryId)] = c.categoryName;
-  });
-}
+    let categoryNameById = {};
+    if (categoryIds.length) {
+      const categoryRows = await selectWithJoins(
+        "itemcategory",
+        [],
+        { itemCategoryId: categoryIds, companyId, delete: 0 },
+        ["itemCategoryId", "categoryName"],
+      );
+      categoryRows.forEach((c) => {
+        categoryNameById[String(c.itemCategoryId)] = c.categoryName;
+      });
+    }
     // ---- Purchase qty (Stock Report jaisi hi logic — available qty ke liye) ----
     const purchaseDetails = await selectWithJoins(
       "purchasedetails",
@@ -857,11 +1083,20 @@ if (categoryIds.length) {
       const qty = Number(d.qty) || 0;
       issuedMap[d.itemId] = (issuedMap[d.itemId] || 0) + qty;
     });
-
-    // ---- ✅ FIXED — Issued qty for THIS SPECIFIC request line (itemRequestDetailId-based) ----
+    const itemReturns = await selectWithJoins(
+      "itemreturn",
+      [],
+      { itemId: itemIds, companyId, delete: 0 },
+      ["itemId", "qty"],
+    );
+    const returnedMap = {};
+    itemReturns.forEach((d) => {
+      returnedMap[d.itemId] = (returnedMap[d.itemId] || 0) + (Number(d.qty) || 0);
+    });
     const detailIds = details.map((d) => d.itemRequestDetailId);
+    const lineTable = header.requestType === "Return" ? "itemreturn" : "itemissue";
     const lineIssues = await selectWithJoins(
-      "itemissue",
+      lineTable,
       [],
       { itemRequestDetailId: detailIds, delete: 0 },
       ["itemRequestDetailId", "qty"],
@@ -873,40 +1108,41 @@ if (categoryIds.length) {
         (issuedByDetailMap[d.itemRequestDetailId] || 0) + qty;
     });
 
-   const items = details.map((d) => {
-  const master = masterById[String(d.itemId)] || {};
-  const openingStock = Number(master.openingStock) || 0;
-  const purchaseStock = Number(stockMap[d.itemId]) || 0;
-  const issuedStock = Number(issuedMap[d.itemId]) || 0;
-  const availableQty = openingStock + purchaseStock - issuedStock;
+    const items = details.map((d) => {
+      const master = masterById[String(d.itemId)] || {};
+      const openingStock = Number(master.openingStock) || 0;
+      const purchaseStock = Number(stockMap[d.itemId]) || 0;
+      const issuedStock = Number(issuedMap[d.itemId]) || 0;
+      const availableQty =
+        openingStock + purchaseStock - issuedStock + (Number(returnedMap[d.itemId]) || 0);
 
-  const rawLocation = master.itemLocation;
-  const resolvedLocation =
-    rawLocation && /^\d+$/.test(String(rawLocation))
-      ? locationNameById[String(rawLocation)] || rawLocation
-      : rawLocation || "";
+      const rawLocation = master.itemLocation;
+      const resolvedLocation =
+        rawLocation && /^\d+$/.test(String(rawLocation))
+          ? locationNameById[String(rawLocation)] || rawLocation
+          : rawLocation || "";
 
-  // 👇 NEW
-  const rawCategory = master.itemCategoryId;
-  const resolvedCategory =
-    rawCategory && /^\d+$/.test(String(rawCategory))
-      ? categoryNameById[String(rawCategory)] || ""
-      : rawCategory || "";
+      // 👇 NEW
+      const rawCategory = master.itemCategoryId;
+      const resolvedCategory =
+        rawCategory && /^\d+$/.test(String(rawCategory))
+          ? categoryNameById[String(rawCategory)] || ""
+          : rawCategory || "";
 
-  return {
-    id: d.itemRequestDetailId,
-    itemId: Number(d.itemId),
-    itemCode: d.itemCode || master.itemCode || "",
-    itemName: d.itemName || master.itemName || "",
-    hsnCode: master.hsnCode || "",
-    itemCategory: resolvedCategory,   // 👈 master. hata diya
-    itemLocation: resolvedLocation,
-    issuedQty: Number(issuedByDetailMap[d.itemRequestDetailId]) || 0,
-    orderQty: Number(d.qty) || 0,
-    availableQty,
-    unit: d.unit || master.unit || "",
-  };
-});
+      return {
+        id: d.itemRequestDetailId,
+        itemId: Number(d.itemId),
+        itemCode: d.itemCode || master.itemCode || "",
+        itemName: d.itemName || master.itemName || "",
+        hsnCode: master.hsnCode || "",
+        itemCategory: resolvedCategory,   // 👈 master. hata diya
+        itemLocation: resolvedLocation,
+        issuedQty: Number(issuedByDetailMap[d.itemRequestDetailId]) || 0,
+        orderQty: Number(d.qty) || 0,
+        availableQty,
+        unit: d.unit || master.unit || "",
+      };
+    });
     const data = {
       itemRequestId: header.itemRequestId,
       workOrderId: workOrder.workOrderId || null,
@@ -936,17 +1172,16 @@ const issueItemRequestItem = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-      const { itemRequestDetailId, qty, issueNo, issueDate, financialYearId } = req.body;
+    const { itemRequestDetailId, qty, issueNo, issueDate, financialYearId } = req.body;
     const issueQty = Number(qty);
 
     if (!itemRequestDetailId) {
       return errorResponse(res, "Item Request Detail ID is required");
     }
     if (!issueQty || issueQty <= 0) {
-      return errorResponse(res, "Issue Qty must be greater than 0");
+      return errorResponse(res, "Qty must be greater than 0");
     }
 
-    // ---- Line item + parent header fetch karo ----
     const lines = await selectWithJoins(
       "itemrequestdetail",
       [],
@@ -959,123 +1194,154 @@ const issueItemRequestItem = async (req, res) => {
     const line = lines[0];
     const orderQty = Number(line.qty) || 0;
 
-    // ---- Already issued qty (isi line ke against) ----
-    const priorIssues = await selectWithJoins(
-      "itemissue",
-      [],
-      { itemRequestDetailId, delete: 0 },
-      ["qty"],
-    );
-    const alreadyIssued = priorIssues.reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
-    const remainingOrderQty = orderQty - alreadyIssued;
-
-    if (remainingOrderQty <= 0) {
-      return errorResponse(
-        res,
-        `The full ordered quantity (${orderQty}) for this item has already been issued.`,
-      );
-    }
-
-    if (issueQty > remainingOrderQty) {
-      return errorResponse(
-        res,
-        `Only ${remainingOrderQty} ${remainingOrderQty === 1 ? "unit" : "units"} left to issue (Ordered: ${orderQty}, Already Issued: ${alreadyIssued}).`,
-      );
-    }
-    // ---- Available stock check (Stock Report jaisi hi logic) ----
-    const itemMasters = await selectWithJoins(
-      "itemmaster",
-      [],
-      { itemId: line.itemId, companyId, delete: 0 },
-      ["itemId", "openingStock"],
-    );
-    const openingStock = Number(itemMasters[0]?.openingStock) || 0;
-
-    const purchaseDetails = await selectWithJoins(
-      "purchasedetails",
-      [],
-      { itemId: line.itemId, companyId, delete: 0 },
-      ["qty"],
-    );
-    const purchaseStock = purchaseDetails.reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
-
-    const priorAllIssues = await selectWithJoins(
-      "itemissue",
-      [],
-      { itemId: line.itemId, companyId, delete: 0 },
-      ["qty"],
-    );
-    const issuedStock = priorAllIssues.reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
-
-    const availableQty = openingStock + purchaseStock - issuedStock;
-
-    if (issueQty > availableQty) {
-      return errorResponse(
-        res,
-        `Not enough stock available. Only ${availableQty} in stock right now.`,
-      );
-    }
-
-    // ---- Header se requestedBy (contractor) nikalo ----
     const headers = await selectWithJoins(
       "itemrequest",
       [],
       { itemRequestId: line.itemRequestId, companyId, delete: 0 },
-      ["itemRequestId", "requestedBy"],
+      ["itemRequestId", "requestedBy", "requestType"],
     );
-    const requestedBy = headers[0]?.requestedBy || null;
+    if (!headers.length) {
+      return errorResponse(res, "Item Request not found");
+    }
+    const requestedBy = headers[0].requestedBy || null;
+    const isReturn = headers[0].requestType === "Return";
 
-    // ---- Issue record insert ----
-    // ---- Issue record insert ----
-       await saveModel("itemissue", {
-      companyId,
-      financialYearId: financialYearId || null,
-      itemRequestId: line.itemRequestId,
-      itemRequestDetailId: line.itemRequestDetailId,
-      itemId: line.itemId,
-      qty: issueQty,
-      issuedTo: requestedBy,
-      issuedBy: employeeId,
-      billNo: null,
-      issueNo: issueNo || null,
-      issueDate: issueDate || new Date(),
-      delete: 0,
-    });
+    // Issue -> itemissue, Return -> itemreturn
+    const doneTable = isReturn ? "itemreturn" : "itemissue";
+    const verb = isReturn ? "returned" : "issued";
 
-    // ---- ✅ NEW — check karo saari lines fully issue ho gayi ya nahi, status update karo ----
+    const prior = await selectWithJoins(
+      doneTable,
+      [],
+      { itemRequestDetailId, delete: 0 },
+      ["qty"],
+    );
+    const alreadyDone = prior.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+    const remainingQty = orderQty - alreadyDone;
+
+    if (remainingQty <= 0) {
+      return errorResponse(
+        res,
+        `The full quantity (${orderQty}) for this item has already been ${verb}.`,
+      );
+    }
+    if (issueQty > remainingQty) {
+      return errorResponse(
+        res,
+        `Only ${remainingQty} ${remainingQty === 1 ? "unit" : "units"} left (Requested: ${orderQty}, Already ${verb}: ${alreadyDone}).`,
+      );
+    }
+
+    // Stock check sirf Issue pe (Return me stock badhta hai)
+    if (!isReturn) {
+      const itemMasters = await selectWithJoins(
+        "itemmaster",
+        [],
+        { itemId: line.itemId, companyId, delete: 0 },
+        ["itemId", "openingStock"],
+      );
+      const openingStock = Number(itemMasters[0]?.openingStock) || 0;
+
+      const purchaseDetails = await selectWithJoins(
+        "purchasedetails",
+        [],
+        { itemId: line.itemId, companyId, delete: 0 },
+        ["qty"],
+      );
+      const purchaseStock = purchaseDetails.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+
+      const allIssues = await selectWithJoins(
+        "itemissue",
+        [],
+        { itemId: line.itemId, companyId, delete: 0 },
+        ["qty"],
+      );
+      const issuedStock = allIssues.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+
+      const allReturns = await selectWithJoins(
+        "itemreturn",
+        [],
+        { itemId: line.itemId, companyId, delete: 0 },
+        ["qty"],
+      );
+      const returnedStock = allReturns.reduce((s, r) => s + (Number(r.qty) || 0), 0);
+
+      const availableQty = openingStock + purchaseStock - issuedStock + returnedStock;
+
+      if (issueQty > availableQty) {
+        return errorResponse(
+          res,
+          `Not enough stock available. Only ${availableQty} in stock right now.`,
+        );
+      }
+    }
+
+    if (isReturn) {
+      await saveModel("itemreturn", {
+        companyId,
+        financialYearId: financialYearId || null,
+        itemRequestId: line.itemRequestId,
+        itemRequestDetailId: line.itemRequestDetailId,
+        itemId: line.itemId,
+        qty: issueQty,
+        returnNo: issueNo || null,
+        returnDate: issueDate || new Date(),
+        returnedBy: requestedBy,
+        receivedBy: employeeId,
+        delete: 0,
+      });
+    } else {
+      await saveModel("itemissue", {
+        companyId,
+        financialYearId: financialYearId || null,
+        itemRequestId: line.itemRequestId,
+        itemRequestDetailId: line.itemRequestDetailId,
+        itemId: line.itemId,
+        qty: issueQty,
+        issuedTo: requestedBy,
+        issuedBy: employeeId,
+        billNo: null,
+        issueNo: issueNo || null,
+        issueDate: issueDate || new Date(),
+        delete: 0,
+      });
+    }
+
+    // Saari lines poori hui? to Complete
     const allLines = await selectWithJoins(
       "itemrequestdetail",
       [],
       { itemRequestId: line.itemRequestId, delete: 0 },
       ["itemRequestDetailId", "qty"],
     );
-
-    const allIssuesForRequest = await selectWithJoins(
-      "itemissue",
+    const allDone = await selectWithJoins(
+      doneTable,
       [],
       { itemRequestId: line.itemRequestId, delete: 0 },
       ["itemRequestDetailId", "qty"],
     );
-
-    const issuedByLine = {};
-    allIssuesForRequest.forEach((r) => {
-      const qty = Number(r.qty) || 0;
-      issuedByLine[r.itemRequestDetailId] = (issuedByLine[r.itemRequestDetailId] || 0) + qty;
+    const doneByLine = {};
+    allDone.forEach((r) => {
+      doneByLine[r.itemRequestDetailId] =
+        (doneByLine[r.itemRequestDetailId] || 0) + (Number(r.qty) || 0);
     });
 
-    const isFullyIssued = allLines.every((l) => {
-      const issued = Number(issuedByLine[l.itemRequestDetailId]) || 0;
-      return issued >= (Number(l.qty) || 0);
-    });
+    const isComplete = allLines.every(
+      (l) => (doneByLine[l.itemRequestDetailId] || 0) >= (Number(l.qty) || 0),
+    );
 
-    if (isFullyIssued) {
+    if (isComplete) {
       await db.itemrequest.update(
         { status: "Complete" },
         { where: { itemRequestId: line.itemRequestId } },
       );
     }
 
-    return successResponse(res, { issued: issueQty }, "Item issued successfully");
+    return successResponse(
+      res,
+      { issued: issueQty },
+      isReturn ? "Item return accepted successfully" : "Item issued successfully",
+    );
   } catch (error) {
     console.error("issueItemRequestItem error:", error);
     return errorResponse(res, error.message || "Something Went Wrong", error);
@@ -1149,5 +1415,7 @@ module.exports = {
   getItemRequestDetail,
   issueItemRequestItem,
   getNextStoreIssueNo,
-  getOpenItemRequests
+  getOpenItemRequests,
+  getIssuedWorkOrders,
+  getReturnableItemsByWorkOrder,
 };
