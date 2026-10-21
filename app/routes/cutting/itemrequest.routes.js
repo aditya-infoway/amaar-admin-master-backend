@@ -20,6 +20,11 @@ module.exports = (app) => {
     });
     routes.get("/next-issue-no", controller.getNextIssueNo);
     routes.get("/items-by-workorder", controller.getItemsByWorkOrder);
+
+    // ---- RETURN flow ----
+    routes.get("/issued-workorders", controller.getIssuedWorkOrders);
+    routes.get("/returnable-items", controller.getReturnableItemsByWorkOrder);
+
     routes.get("/", controller.getDepartmentItemRequests);
     routes.post("/", controller.createItemRequest);
 
