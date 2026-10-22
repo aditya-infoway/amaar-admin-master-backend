@@ -1,4 +1,3 @@
-
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 const bcrypt = require("bcryptjs");
@@ -12,13 +11,101 @@ const {
   selectWithJoins,
 } = require("../../../helper/index.js");
 
-// ---------------- CREATE ----------------
 // "" / undefined / null -> null, warna Number
 const toIdOrNull = (v) =>
   v === undefined || v === null || v === "" ? null : Number(v);
 
 const isProductionDept = (department) =>
   String(department || "").toLowerCase() === "production";
+
+// ============================================================
+// ROLE / PROCESS / PARTY common validation (create + update)
+//
+// Production: process YA role (dono me se ek) + party required
+//   - process select  -> roleId 0, processId set
+//   - role select     -> roleId set, processId null
+// Baaki departments: role required
+// ============================================================
+const resolveRoleAndProcess = async ({
+  department,
+  roleId,
+  processId,
+  accountId,
+  companyId,
+}) => {
+  const isProduction = isProductionDept(department);
+
+  if (isProduction) {
+    const hasProcess = Number(processId) > 0;
+    const hasRole = Number(roleId) > 0;
+
+    if (!hasProcess && !hasRole) {
+      return { error: "Please select a role" };
+    }
+    if (!accountId) {
+      return { error: "Please select a party (Sundry Creditor account)" };
+    }
+
+    // Process select hua
+    if (hasProcess) {
+      const processExists = await selectWithJoins(
+        "main_process_detail",
+        [],
+        { processId: Number(processId), companyId, delete: 0 },
+        ["processId"],
+      );
+      if (processExists.length === 0) {
+        return { error: "Selected process not found" };
+      }
+      return {
+        isProduction,
+        isContractorManager: false,
+        finalRoleId: 0,
+        finalProcessId: Number(processId),
+      };
+    }
+
+    // Role select hua (Washing / Production / Store / Contractor / Fitting Manager etc.)
+    const roleExists = await selectWithJoins(
+      "role",
+      [],
+      { roleId: Number(roleId), department, delete: 0 },
+      ["roleId", "roleName"],
+    );
+    if (roleExists.length === 0) {
+      return { error: "Selected role not found for this department" };
+    }
+    return {
+      isProduction,
+      isContractorManager: roleExists[0].roleName === "Contractor Manager",
+      finalRoleId: Number(roleId),
+      finalProcessId: null,
+    };
+  }
+
+  // Baaki departments
+  const roleExists = await selectWithJoins(
+    "role",
+    [],
+    { roleId, department, delete: 0 },
+    ["roleId", "roleName"],
+  );
+  if (roleExists.length === 0) {
+    return { error: "Selected role not found for this department" };
+  }
+
+  const isContractorManager = roleExists[0].roleName === "Contractor Manager";
+  if (isContractorManager && !accountId) {
+    return { error: "Please select a party (Sundry Creditor account)" };
+  }
+
+  return {
+    isProduction,
+    isContractorManager,
+    finalRoleId: Number(roleId),
+    finalProcessId: null,
+  };
+};
 
 // ---------------- CREATE ----------------
 const createEmployee = async (req, res) => {
@@ -45,59 +132,31 @@ const createEmployee = async (req, res) => {
       createdType,
     } = req.body;
 
-    const isProduction = isProductionDept(department);
-    let isContractorManager = false;
+    const resolved = await resolveRoleAndProcess({
+      department,
+      roleId,
+      processId,
+      accountId,
+      companyId,
+    });
+    if (resolved.error) return errorResponse(res, resolved.error);
 
-    if (isProduction) {
-      // Production: role nahi, process + party chahiye
-      if (!processId) {
-        return errorResponse(res, "Please select a process");
-      }
-      if (!accountId) {
-        return errorResponse(res, "Please select a party (Sundry Creditor account)");
-      }
-
-      const processExists = await selectWithJoins(
-        "main_process_detail",
-        [],
-        { processId: Number(processId), companyId, delete: 0 },
-        ["processId"]
-      );
-      if (processExists.length === 0) {
-        return errorResponse(res, "Selected process not found");
-      }
-    } else {
-      // role exists aur usi department ka hona chahiye
-      const roleExists = await selectWithJoins(
-        "role",
-        [],
-        { roleId, department, delete: 0 },
-        ["roleId", "roleName"]
-      );
-
-      if (roleExists.length === 0) {
-        return errorResponse(res, "Selected role not found for this department");
-      }
-
-      isContractorManager = roleExists[0].roleName === "Contractor Manager";
-      if (isContractorManager && !accountId) {
-        return errorResponse(res, "Please select a party (Sundry Creditor account)");
-      }
-    }
-
-    // mobile number companyId-wise unique
-  
+    const { isProduction, isContractorManager, finalRoleId, finalProcessId } =
+      resolved;
 
     // email companyId-wise unique
     const emailExists = await selectWithJoins(
       "employee",
       [],
       { email: email.trim().toLowerCase(), companyId, delete: 0 },
-      ["employeeId"]
+      ["employeeId"],
     );
 
     if (emailExists.length > 0) {
-      return errorResponse(res, "Email already exists. Please enter a different email.");
+      return errorResponse(
+        res,
+        "Email already exists. Please enter a different email.",
+      );
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -107,10 +166,9 @@ const createEmployee = async (req, res) => {
       companyId,
       department,
       branch,
-      // Production me role nahi hota, isliye 0
-      roleId: isProduction ? 0 : roleId,
-      processId: isProduction ? toIdOrNull(processId) : null,
-      subProcessId: isProduction ? toIdOrNull(subProcessId) : null,
+      roleId: finalRoleId,
+      processId: finalProcessId,
+      subProcessId: finalProcessId ? toIdOrNull(subProcessId) : null,
       employeeName,
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
@@ -118,7 +176,8 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-      accountId: isProduction || isContractorManager ? toIdOrNull(accountId) : null,
+      accountId:
+        isProduction || isContractorManager ? toIdOrNull(accountId) : null,
       createdBy,
       createdType,
       delete: 0,
@@ -174,7 +233,7 @@ const getEmployeeList = async (req, res) => {
         "createdType",
         "created",
       ],
-      [["employeeId", "DESC"]]
+      [["employeeId", "DESC"]],
     );
 
     const createdByIds = [
@@ -187,7 +246,7 @@ const getEmployeeList = async (req, res) => {
         "company",
         [],
         { companyId: createdByIds, delete: 0 },
-        ["companyId", "companyName"]
+        ["companyId", "companyName"],
       );
       companyMap = (companies || []).reduce((acc, item) => {
         acc[String(item.companyId)] = item.companyName;
@@ -201,7 +260,7 @@ const getEmployeeList = async (req, res) => {
         "employee",
         [],
         { employeeId: createdByIds, delete: 0 },
-        ["employeeId", "employeeName"]
+        ["employeeId", "employeeName"],
       );
       employeeMap = (employees || []).reduce((acc, item) => {
         acc[String(item.employeeId)] = item.employeeName;
@@ -255,7 +314,7 @@ const getEmployeeById = async (req, res) => {
         "createdBy",
         "createdType",
         "created",
-      ]
+      ],
     );
 
     if (rows.length === 0) {
@@ -269,7 +328,7 @@ const getEmployeeById = async (req, res) => {
         "company",
         [],
         { companyId: employeeRow.createdBy, delete: 0 },
-        ["companyId", "companyName"]
+        ["companyId", "companyName"],
       );
       if (companyRows.length > 0) {
         employeeRow.createdBy = companyRows[0].companyName;
@@ -310,81 +369,56 @@ const updateEmployee = async (req, res) => {
       "employee",
       [],
       { employeeId, companyId, delete: 0 },
-      ["employeeId"]
+      ["employeeId"],
     );
 
     if (existing.length === 0) {
       return requiredmessage(res, "Employee not found");
     }
 
-    const isProduction = isProductionDept(department);
-    let isContractorManager = false;
+    const resolved = await resolveRoleAndProcess({
+      department,
+      roleId,
+      processId,
+      accountId,
+      companyId,
+    });
+    if (resolved.error) return errorResponse(res, resolved.error);
 
-    if (isProduction) {
-      if (!processId) {
-        return errorResponse(res, "Please select a process");
-      }
-      if (!accountId) {
-        return errorResponse(res, "Please select a party (Sundry Creditor account)");
-      }
-
-      const processExists = await selectWithJoins(
-        "main_process_detail",
-        [],
-        { processId: Number(processId), companyId, delete: 0 },
-        ["processId"]
-      );
-      if (processExists.length === 0) {
-        return errorResponse(res, "Selected process not found");
-      }
-    } else {
-      const roleExists = await selectWithJoins(
-        "role",
-        [],
-        { roleId, department, delete: 0 },
-        ["roleId", "roleName"]
-      );
-
-      if (roleExists.length === 0) {
-        return errorResponse(res, "Selected role not found for this department");
-      }
-
-      isContractorManager = roleExists[0].roleName === "Contractor Manager";
-      if (isContractorManager && !accountId) {
-        return errorResponse(res, "Please select a party (Sundry Creditor account)");
-      }
-    }
-
-    // mobile number uniqueness (khud ko exclude karke)
-
+    const { isProduction, isContractorManager, finalRoleId, finalProcessId } =
+      resolved;
 
     // email uniqueness (khud ko exclude karke)
     const emailExists = await selectWithJoins(
       "employee",
       [],
       { email: email.trim().toLowerCase(), companyId, delete: 0 },
-      ["employeeId"]
+      ["employeeId"],
     );
 
     const emailTakenByOther = emailExists.some(
-      (row) => String(row.employeeId) !== String(employeeId)
+      (row) => String(row.employeeId) !== String(employeeId),
     );
 
     if (emailTakenByOther) {
-      return errorResponse(res, "Email already exists. Please enter a different email.");
+      return errorResponse(
+        res,
+        "Email already exists. Please enter a different email.",
+      );
     }
 
     const updatePayload = {
       department,
       branch,
-      roleId: isProduction ? 0 : roleId,
-      processId: isProduction ? toIdOrNull(processId) : null,
-      subProcessId: isProduction ? toIdOrNull(subProcessId) : null,
+      roleId: finalRoleId,
+      processId: finalProcessId,
+      subProcessId: finalProcessId ? toIdOrNull(subProcessId) : null,
       employeeName,
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
       email: email.trim().toLowerCase(),
-      accountId: isProduction || isContractorManager ? toIdOrNull(accountId) : null,
+      accountId:
+        isProduction || isContractorManager ? toIdOrNull(accountId) : null,
       updated: new Date(),
     };
 
@@ -392,7 +426,10 @@ const updateEmployee = async (req, res) => {
       updatePayload.password = await bcrypt.hash(password.trim(), 10);
     }
 
-    await updateModelHelper("employee", updatePayload, { employeeId, companyId });
+    await updateModelHelper("employee", updatePayload, {
+      employeeId,
+      companyId,
+    });
 
     return successResponse(res, {}, "Employee updated successfully");
   } catch (error) {
@@ -418,7 +455,7 @@ const deleteEmployee = async (req, res) => {
       "employee",
       [],
       { employeeId, companyId, delete: 0 },
-      ["employeeId"]
+      ["employeeId"],
     );
 
     if (existing.length === 0) {
@@ -428,7 +465,7 @@ const deleteEmployee = async (req, res) => {
     await updateModelHelper(
       "employee",
       { delete: 1, updated: new Date() },
-      { employeeId, companyId }
+      { employeeId, companyId },
     );
 
     return successResponse(res, {}, "Employee deleted successfully");
@@ -462,10 +499,6 @@ const validateKycPairs = (body, files) => {
   }
   return null;
 };
-
-// ============================================================
-// GET NEXT EMPLOYEE ID (business code, e.g. EMP-000123)
-// ============================================================
 
 // ============================================================
 // GET NEXT EMPLOYEE CODE (same pattern as Sales Order's getNextSalesOrderNo)
@@ -530,18 +563,14 @@ const getNextEmployeeId = async (req, res) => {
 };
 
 // ============================================================
-// GET UNREGISTERED EMPLOYEES (for "Select Employee" combobox —
-// created via master/employee but wizard not yet completed)
+// GET REGISTERED EMPLOYEE LIST
 // ============================================================
 const getRegisteredEmployeeList = async (req, res) => {
   try {
     const companyId = req.companyId;
 
     if (!companyId) {
-      return requiredmessage(
-        res,
-        "Unauthorized. Please login again."
-      );
+      return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
     const { financialYearId } = req.query;
@@ -556,11 +585,6 @@ const getRegisteredEmployeeList = async (req, res) => {
     if (financialYearId) {
       whereCondition.financialYearId = Number(financialYearId);
     }
-
-    // console.log(
-    //   "Registered Employee List Where:",
-    //   whereCondition
-    // );
 
     const list = await selectWithJoins(
       "employee",
@@ -628,36 +652,27 @@ const getRegisteredEmployeeList = async (req, res) => {
         "createdType",
         "created",
       ],
-      [["employeeId", "DESC"]]
+      [["employeeId", "DESC"]],
     );
 
-    const data = (list || []).map((row) =>
-      row.toJSON ? row.toJSON() : row
-    );
-
-    // console.log(
-    //   "Registered Employee List Count:",
-    //   data.length
-    // );
+    const data = (list || []).map((row) => (row.toJSON ? row.toJSON() : row));
 
     return successResponse(
       res,
       data,
-      "Registered employee list fetched successfully"
+      "Registered employee list fetched successfully",
     );
   } catch (error) {
-    console.error(
-      "getRegisteredEmployeeList error:",
-      error
-    );
+    console.error("getRegisteredEmployeeList error:", error);
 
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
+
+// ============================================================
+// GET UNREGISTERED EMPLOYEES (for "Select Employee" combobox —
+// created via master/employee but wizard not yet completed)
+// ============================================================
 const getUnregisteredEmployeeList = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -736,6 +751,7 @@ const registerEmployee = async (req, res) => {
     const employeePhoto = req.files?.employeePhoto?.[0]
       ? `/Uploadimages/employee_register/${req.files.employeePhoto[0].filename}`
       : null;
+
     // ---- KYC bidirectional validation ----
     const kycError = validateKycPairs(body, {
       aadharCardUpload,
@@ -846,10 +862,7 @@ const registerEmployee = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
-// ============================================================
-// GET REGISTERED EMPLOYEES
-// Only employees whose registration wizard is completed
-// ============================================================
+
 // ============================================================
 // GET REGISTERED EMPLOYEE BY ID
 // Full Employee Register/Edit data
@@ -860,10 +873,7 @@ const getRegisteredEmployeeById = async (req, res) => {
     const companyId = req.companyId;
 
     if (!companyId) {
-      return requiredmessage(
-        res,
-        "Unauthorized. Please login again."
-      );
+      return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
     const { id } = req.params;
@@ -882,9 +892,7 @@ const getRegisteredEmployeeById = async (req, res) => {
         delete: 0,
       },
       [
-        // ------------------------------------------------------
         // Master Employee
-        // ------------------------------------------------------
         "employeeId",
         "companyId",
         "department",
@@ -896,9 +904,7 @@ const getRegisteredEmployeeById = async (req, res) => {
         "email",
         "status",
 
-        // ------------------------------------------------------
         // Registration
-        // ------------------------------------------------------
         "financialYearId",
         "employeeCode",
         "isRegistered",
@@ -952,44 +958,32 @@ const getRegisteredEmployeeById = async (req, res) => {
         "workingHoursFrom",
         "workingHoursTo",
         "workingShift",
+
         // Audit
         "createdBy",
         "createdType",
         "created",
         "updated",
-      ]
+      ],
     );
 
     if (!rows || rows.length === 0) {
-      return requiredmessage(
-        res,
-        "Registered employee not found."
-      );
+      return requiredmessage(res, "Registered employee not found.");
     }
 
-    const employee = rows[0].toJSON
-      ? rows[0].toJSON()
-      : rows[0];
+    const employee = rows[0].toJSON ? rows[0].toJSON() : rows[0];
 
     return successResponse(
       res,
       employee,
-      "Registered employee fetched successfully"
+      "Registered employee fetched successfully",
     );
   } catch (error) {
-    console.error(
-      "getRegisteredEmployeeById error:",
-      error
-    );
+    console.error("getRegisteredEmployeeById error:", error);
 
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
-
 
 // ============================================================
 // UPDATE REGISTERED EMPLOYEE
@@ -1001,34 +995,22 @@ const updateRegisteredEmployee = async (req, res) => {
     const companyId = req.companyId;
 
     if (!companyId) {
-      return requiredmessage(
-        res,
-        "Unauthorized. Please login again."
-      );
+      return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
     const { id } = req.params;
 
     if (!id) {
-      return errorResponse(
-        res,
-        "Employee ID is required."
-      );
+      return errorResponse(res, "Employee ID is required.");
     }
 
     const employeeId = Number(id);
 
     if (!employeeId) {
-      return errorResponse(
-        res,
-        "Invalid Employee ID."
-      );
+      return errorResponse(res, "Invalid Employee ID.");
     }
 
-    // ----------------------------------------------------------
     // Existing registered employee
-    // ----------------------------------------------------------
-
     const existingRows = await selectWithJoins(
       "employee",
       [],
@@ -1053,14 +1035,11 @@ const updateRegisteredEmployee = async (req, res) => {
         "drivingLicenceUpload",
         "panUpload",
         "voterIdUpload",
-      ]
+      ],
     );
 
     if (!existingRows || existingRows.length === 0) {
-      return requiredmessage(
-        res,
-        "Registered employee not found."
-      );
+      return requiredmessage(res, "Registered employee not found.");
     }
 
     const existing = existingRows[0].toJSON
@@ -1070,79 +1049,46 @@ const updateRegisteredEmployee = async (req, res) => {
     const body = req.body || {};
     const files = req.files || {};
 
-    // ----------------------------------------------------------
-    // KYC uploads
-    //
-    // New file => use new file
-    // No new file => keep existing file
-    // ----------------------------------------------------------
+    // KYC uploads: new file => use new, no new file => keep existing
+    const aadharCardUpload = files?.aadharCardUpload?.[0]
+      ? `/Uploadimages/employee_register/${files.aadharCardUpload[0].filename}`
+      : existing.aadharCardUpload || null;
 
-    const aadharCardUpload =
-      files?.aadharCardUpload?.[0]
-        ? `/Uploadimages/employee_register/${files.aadharCardUpload[0].filename}`
-        : existing.aadharCardUpload || null;
+    const drivingLicenceUpload = files?.drivingLicenceUpload?.[0]
+      ? `/Uploadimages/employee_register/${files.drivingLicenceUpload[0].filename}`
+      : existing.drivingLicenceUpload || null;
 
-    const drivingLicenceUpload =
-      files?.drivingLicenceUpload?.[0]
-        ? `/Uploadimages/employee_register/${files.drivingLicenceUpload[0].filename}`
-        : existing.drivingLicenceUpload || null;
+    const panUpload = files?.panUpload?.[0]
+      ? `/Uploadimages/employee_register/${files.panUpload[0].filename}`
+      : existing.panUpload || null;
 
-    const panUpload =
-      files?.panUpload?.[0]
-        ? `/Uploadimages/employee_register/${files.panUpload[0].filename}`
-        : existing.panUpload || null;
+    const voterIdUpload = files?.voterIdUpload?.[0]
+      ? `/Uploadimages/employee_register/${files.voterIdUpload[0].filename}`
+      : existing.voterIdUpload || null;
 
-    const voterIdUpload =
-      files?.voterIdUpload?.[0]
-        ? `/Uploadimages/employee_register/${files.voterIdUpload[0].filename}`
-        : existing.voterIdUpload || null;
-    const employeePhoto =
-      files?.employeePhoto?.[0]
-        ? `/Uploadimages/employee_register/${files.employeePhoto[0].filename}`
-        : existing.employeePhoto || null;
+    const employeePhoto = files?.employeePhoto?.[0]
+      ? `/Uploadimages/employee_register/${files.employeePhoto[0].filename}`
+      : existing.employeePhoto || null;
 
-    // ----------------------------------------------------------
-    // KYC validation
-    // Existing files are also considered valid
-    // ----------------------------------------------------------
-
-    const kycError = validateKycPairs(
-      body,
-      {
-        aadharCardUpload,
-        drivingLicenceUpload,
-        panUpload,
-        voterIdUpload,
-      }
-    );
+    // KYC validation (existing files are also considered valid)
+    const kycError = validateKycPairs(body, {
+      aadharCardUpload,
+      drivingLicenceUpload,
+      panUpload,
+      voterIdUpload,
+    });
 
     if (kycError) {
-      return errorResponse(
-        res,
-        kycError
-      );
+      return errorResponse(res, kycError);
     }
 
-
-    // ----------------------------------------------------------
-    // Same permanent address
     // FormData sends boolean as string
-    // ----------------------------------------------------------
-
     const sameAsPermanent =
       body.sameAsPermanentAddress === "true" ||
       body.sameAsPermanentAddress === true;
 
-
-    // ----------------------------------------------------------
-    // Update payload
-    // ----------------------------------------------------------
-
     const updatePayload = {
-      // --------------------------------------------------------
       // Personal Details
-      // --------------------------------------------------------
-
       firstName:
         body.firstName !== undefined
           ? String(body.firstName).trim()
@@ -1153,176 +1099,95 @@ const updateRegisteredEmployee = async (req, res) => {
           ? String(body.lastName).trim()
           : existing.lastName,
 
-      middleName:
-        body.middleName || null,
+      middleName: body.middleName || null,
 
-      dateOfBirth:
-        body.dateOfBirth || null,
+      dateOfBirth: body.dateOfBirth || null,
 
-      gender:
-        body.gender || null,
+      gender: body.gender || null,
 
-      maritalStatus:
-        body.maritalStatus || null,
+      maritalStatus: body.maritalStatus || null,
 
-      bloodGroup:
-        body.bloodGroup || null,
+      bloodGroup: body.bloodGroup || null,
 
-      personalMobileNo:
-        body.personalMobileNo
-          ? String(body.personalMobileNo).trim()
-          : null,
+      personalMobileNo: body.personalMobileNo
+        ? String(body.personalMobileNo).trim()
+        : null,
 
-      personalEmail:
-        body.personalEmail
-          ? String(body.personalEmail).trim().toLowerCase()
-          : null,
+      personalEmail: body.personalEmail
+        ? String(body.personalEmail).trim().toLowerCase()
+        : null,
 
-
-      // --------------------------------------------------------
       // KYC
-      // --------------------------------------------------------
       employeePhoto,
-      aadharNumber:
-        body.aadharNumber || null,
-
+      aadharNumber: body.aadharNumber || null,
       aadharCardUpload,
 
-      drivingLicenceNumber:
-        body.drivingLicenceNumber || null,
-
+      drivingLicenceNumber: body.drivingLicenceNumber || null,
       drivingLicenceUpload,
 
-      panNumber:
-        body.panNumber || null,
-
+      panNumber: body.panNumber || null,
       panUpload,
 
-      voterIdNumber:
-        body.voterIdNumber || null,
-
+      voterIdNumber: body.voterIdNumber || null,
       voterIdUpload,
 
-
-      // --------------------------------------------------------
       // Current Address
-      // --------------------------------------------------------
+      address: body.address || null,
+      country: body.country || null,
+      state: body.state || null,
+      city: body.city || null,
+      pincode: body.pincode || null,
 
-      address:
-        body.address || null,
-
-      country:
-        body.country || null,
-
-      state:
-        body.state || null,
-
-      city:
-        body.city || null,
-
-      pincode:
-        body.pincode || null,
-
-
-      // --------------------------------------------------------
       // Permanent Address
-      // --------------------------------------------------------
+      sameAsPermanentAddress: sameAsPermanent,
 
-      sameAsPermanentAddress:
-        sameAsPermanent,
+      permanentAddress: sameAsPermanent
+        ? body.address || null
+        : body.permanentAddress || null,
 
-      permanentAddress:
-        sameAsPermanent
-          ? body.address || null
-          : body.permanentAddress || null,
+      permanentCountry: sameAsPermanent
+        ? body.country || null
+        : body.permanentCountry || null,
 
-      permanentCountry:
-        sameAsPermanent
-          ? body.country || null
-          : body.permanentCountry || null,
+      permanentState: sameAsPermanent
+        ? body.state || null
+        : body.permanentState || null,
 
-      permanentState:
-        sameAsPermanent
-          ? body.state || null
-          : body.permanentState || null,
+      permanentCity: sameAsPermanent
+        ? body.city || null
+        : body.permanentCity || null,
 
-      permanentCity:
-        sameAsPermanent
-          ? body.city || null
-          : body.permanentCity || null,
+      permanentPincode: sameAsPermanent
+        ? body.pincode || null
+        : body.permanentPincode || null,
 
-      permanentPincode:
-        sameAsPermanent
-          ? body.pincode || null
-          : body.permanentPincode || null,
-
-
-      // --------------------------------------------------------
       // Employee Details
-      // --------------------------------------------------------
+      joiningDate: body.joiningDate || null,
+      employeeType: body.employeeType || null,
+      designation: body.designation || null,
+      branchLocation: body.branchLocation || null,
+      employeeStatus: body.employeeStatus || null,
+      noticePeriod: body.noticePeriod || null,
 
-      joiningDate:
-        body.joiningDate || null,
-
-      employeeType:
-        body.employeeType || null,
-
-      designation:
-        body.designation || null,
-
-      branchLocation:
-        body.branchLocation || null,
-
-      employeeStatus:
-        body.employeeStatus || null,
-
-      noticePeriod:
-        body.noticePeriod || null,
-      workingDays:
-        body.workingDays || existing.workingDays || null,
-
-      weeklyOff:
-        body.weeklyOff || existing.weeklyOff || null,
-
+      workingDays: body.workingDays || existing.workingDays || null,
+      weeklyOff: body.weeklyOff || existing.weeklyOff || null,
       workingHoursFrom:
         body.workingHoursFrom || existing.workingHoursFrom || null,
-
-      workingHoursTo:
-        body.workingHoursTo || existing.workingHoursTo || null,
-
-      workingShift:
-        body.workingShift || existing.workingShift || null,
-      // --------------------------------------------------------
-      // Updated
-      // --------------------------------------------------------
+      workingHoursTo: body.workingHoursTo || existing.workingHoursTo || null,
+      workingShift: body.workingShift || existing.workingShift || null,
 
       updated: new Date(),
     };
 
-
-    // ----------------------------------------------------------
     // Optional department
-    // ----------------------------------------------------------
-
     if (body.department !== undefined) {
-      updatePayload.department =
-        body.department || null;
+      updatePayload.department = body.department || null;
     }
 
-
-    // ----------------------------------------------------------
-    // Update
-    // ----------------------------------------------------------
-
-    await updateModelHelper(
-      "employee",
-      updatePayload,
-      {
-        employeeId,
-        companyId,
-      }
-    );
-
+    await updateModelHelper("employee", updatePayload, {
+      employeeId,
+      companyId,
+    });
 
     return successResponse(
       res,
@@ -1330,22 +1195,15 @@ const updateRegisteredEmployee = async (req, res) => {
         employeeId,
         employeeCode: existing.employeeCode,
       },
-      "Employee updated successfully"
+      "Employee updated successfully",
     );
-
   } catch (error) {
-    console.error(
-      "updateRegisteredEmployee error:",
-      error
-    );
+    console.error("updateRegisteredEmployee error:", error);
 
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
+
 // ============================================================
 // GET EMPLOYEE PROFILE
 // Employee Panel - General Profile
@@ -1357,21 +1215,13 @@ const getEmployeeProfile = async (req, res) => {
     const companyId = req.companyId;
 
     if (!companyId) {
-      return requiredmessage(
-        res,
-        "Unauthorized. Please login again."
-      );
+      return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    // employeeId comes from query:
-    // /hr/employee/profile?employeeId=123
     const employeeId = Number(req.query.employeeId);
 
     if (!employeeId || Number.isNaN(employeeId)) {
-      return errorResponse(
-        res,
-        "Valid Employee ID is required."
-      );
+      return errorResponse(res, "Valid Employee ID is required.");
     }
 
     const rows = await selectWithJoins(
@@ -1383,9 +1233,7 @@ const getEmployeeProfile = async (req, res) => {
         delete: 0,
       },
       [
-        // ------------------------------------------------------
         // Master Employee
-        // ------------------------------------------------------
         "employeeId",
         "companyId",
         "department",
@@ -1397,16 +1245,12 @@ const getEmployeeProfile = async (req, res) => {
         "email",
         "status",
 
-        // ------------------------------------------------------
         // Registration
-        // ------------------------------------------------------
         "financialYearId",
         "employeeCode",
         "isRegistered",
 
-        // ------------------------------------------------------
         // Personal Details
-        // ------------------------------------------------------
         "firstName",
         "lastName",
         "middleName",
@@ -1417,27 +1261,21 @@ const getEmployeeProfile = async (req, res) => {
         "personalMobileNo",
         "personalEmail",
 
-        // ------------------------------------------------------
         // KYC
-        // ------------------------------------------------------
         "employeePhoto",
         "aadharNumber",
         "drivingLicenceNumber",
         "panNumber",
         "voterIdNumber",
 
-        // ------------------------------------------------------
         // Current Address
-        // ------------------------------------------------------
         "address",
         "country",
         "state",
         "city",
         "pincode",
 
-        // ------------------------------------------------------
         // Permanent Address
-        // ------------------------------------------------------
         "sameAsPermanentAddress",
         "permanentAddress",
         "permanentCountry",
@@ -1445,9 +1283,7 @@ const getEmployeeProfile = async (req, res) => {
         "permanentCity",
         "permanentPincode",
 
-        // ------------------------------------------------------
         // Employee Details
-        // ------------------------------------------------------
         "joiningDate",
         "employeeType",
         "designation",
@@ -1455,61 +1291,43 @@ const getEmployeeProfile = async (req, res) => {
         "employeeStatus",
         "noticePeriod",
 
-        // ------------------------------------------------------
         // Work Information
-        // ------------------------------------------------------
         "workingDays",
         "weeklyOff",
         "workingHoursFrom",
         "workingHoursTo",
         "workingShift",
 
-        // ------------------------------------------------------
         // Audit
-        // ------------------------------------------------------
         "createdBy",
         "createdType",
         "created",
         "updated",
       ],
-      [["employeeId", "DESC"]]
+      [["employeeId", "DESC"]],
     );
 
     if (!rows || rows.length === 0) {
-      return requiredmessage(
-        res,
-        "Employee profile not found."
-      );
+      return requiredmessage(res, "Employee profile not found.");
     }
 
-    const employee = rows[0].toJSON
-      ? rows[0].toJSON()
-      : rows[0];
+    const employee = rows[0].toJSON ? rows[0].toJSON() : rows[0];
 
     return successResponse(
       res,
       employee,
-      "Employee profile fetched successfully"
+      "Employee profile fetched successfully",
     );
-
   } catch (error) {
-    console.error(
-      "getEmployeeProfile error:",
-      error
-    );
+    console.error("getEmployeeProfile error:", error);
 
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
 
-
-
-
-
+// ============================================================
+// CONTRACTOR MANAGERS
+// ============================================================
 
 const getContractorManagers = async (req, res) => {
   try {
@@ -1523,15 +1341,11 @@ const getContractorManagers = async (req, res) => {
         roleName: "Contractor Manager",
       },
       ["roleId"],
-      [["roleId", "ASC"]]
+      [["roleId", "ASC"]],
     );
 
     if (!role || role.length === 0) {
-      return successResponse(
-        res,
-        [],
-        "Contractor Manager role not found"
-      );
+      return successResponse(res, [], "Contractor Manager role not found");
     }
 
     const roleId = role[0].roleId;
@@ -1549,31 +1363,22 @@ const getContractorManagers = async (req, res) => {
       "employee",
       [],
       where,
-      [
-        "employeeId",
-        "employeeName",
-        "department",
-        "branch",
-        "roleId",
-      ],
-      [["employeeName", "ASC"]]
+      ["employeeId", "employeeName", "department", "branch", "roleId"],
+      [["employeeName", "ASC"]],
     );
 
     return successResponse(
       res,
       list,
-      "Contractor Manager list fetched successfully"
+      "Contractor Manager list fetched successfully",
     );
   } catch (error) {
     console.error("getContractorManagers error:", error);
 
-    return errorResponse(
-      res,
-      "Something Went Wrong",
-      error
-    );
+    return errorResponse(res, "Something Went Wrong", error);
   }
 };
+
 const getAssignableContractors = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -1610,14 +1415,14 @@ const getAssignableContractors = async (req, res) => {
         )
       : [];
 
- const subRows = subIds.length
-  ? await selectWithJoins(
-      "sub_process",
-      [],
-      { subProcessId: subIds, delete: 0 },
-      ["subProcessId", "subProcessName"],
-    )
-  : [];
+    const subRows = subIds.length
+      ? await selectWithJoins(
+          "sub_process",
+          [],
+          { subProcessId: subIds, delete: 0 },
+          ["subProcessId", "subProcessName"],
+        )
+      : [];
 
     const processName = new Map(
       processRows.map((p) => [Number(p.processId), p.processName]),
@@ -1642,7 +1447,6 @@ const getAssignableContractors = async (req, res) => {
   }
 };
 
-
 module.exports = {
   createEmployee,
   getEmployeeList,
@@ -1661,5 +1465,5 @@ module.exports = {
   getUnregisteredEmployeeList,
   registerEmployee,
   getContractorManagers,
-  getAssignableContractors
+  getAssignableContractors,
 };

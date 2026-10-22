@@ -12,6 +12,9 @@ const { getLeadMap, leadDetails } = require("../../../helper/leadDetails.js");
 const { getFinancialYearById } = require("../../../helper/financialYear.js");
 const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 
+// Ek baar me max kitne Sales Order create ho sakte hain (Qty = count)
+const MAX_SO_PER_QUOTATION = 50;
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -30,7 +33,7 @@ const normalizeId = (value) => {
   return Number.isInteger(id) && id > 0 ? id : null;
 };
 
-// NEW: "YYYY-MM-DD" string -> same string
+// "YYYY-MM-DD" string -> same string
 //   empty / null      -> null       (field not provided)
 //   invalid format    -> undefined  (caller should return an error)
 const normalizeDate = (value) => {
@@ -49,7 +52,7 @@ const normalizeDate = (value) => {
   return isNaN(d.getTime()) ? undefined : str;
 };
 
-// NEW: DB value (string or Date) -> "YYYY-MM-DD" for API response
+// DB value (string or Date) -> "YYYY-MM-DD" for API response
 const formatDateOnly = (value) => {
   if (!value) return "";
 
@@ -62,6 +65,37 @@ const formatDateOnly = (value) => {
   }
 
   return String(value).slice(0, 10);
+};
+
+// Ek unique SO number generate karo (collision pe retry)
+const generateUniqueSoNo = async (companyId, financialYearId) => {
+  let attempts = 0;
+  const maxAttempts = 5;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+
+    const { billNo } = await generateVoucherNo({
+      companyId,
+      financialYearId,
+      tableName: "salesorder",
+      idColumn: "salesOrderId",
+      prefixFor: "SALES ORDER",
+    });
+
+    const existing = await selectWithJoins(
+      "salesorder",
+      [],
+      { companyId, financialYearId, soNo: billNo, delete: 0 },
+      ["salesOrderId"],
+    );
+
+    if (existing.length === 0) return billNo;
+
+    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  return null;
 };
 
 // ============================================================
@@ -226,9 +260,13 @@ const getQuotationForSalesOrder = async (req, res) => {
 
 // ============================================================
 // CREATE SALES ORDER
+// Qty = kitne Sales Order banane hain. Har SO me qty 1 hogi
+// aur har ka apna alag SO number generate hoga.
 // ============================================================
 
 const createSalesOrder = async (req, res) => {
+  const created = []; // ab tak save hue orders (partial failure message ke liye)
+
   try {
     const companyId = req.companyId;
 
@@ -241,11 +279,10 @@ const createSalesOrder = async (req, res) => {
       quotationId,
       leadId,
       accountId,
-      expectedDate, // NEW
+      expectedDate,
 
       qty,
       unitPrice,
-      totalAmount,
 
       createdBy,
       createdType,
@@ -270,7 +307,7 @@ const createSalesOrder = async (req, res) => {
       return errorResponse(res, "Please select a lead.");
     }
 
-    // NEW: expected date (optional, but must be a valid date if sent)
+    // expected date (optional, but must be a valid date if sent)
     const finalExpectedDate = normalizeDate(expectedDate);
 
     if (finalExpectedDate === undefined) {
@@ -281,6 +318,28 @@ const createSalesOrder = async (req, res) => {
 
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
+    }
+
+    // ========================================================
+    // QUANTITY (= number of Sales Orders to create)
+    // ========================================================
+
+    const orderCount = Number(qty) || 0;
+    const finalUnitPrice = Number(unitPrice) || 0;
+
+    if (!Number.isInteger(orderCount) || orderCount <= 0) {
+      return errorResponse(res, "Quantity must be a whole number greater than 0.");
+    }
+
+    if (orderCount > MAX_SO_PER_QUOTATION) {
+      return errorResponse(
+        res,
+        `Quantity cannot be more than ${MAX_SO_PER_QUOTATION}.`,
+      );
+    }
+
+    if (finalUnitPrice < 0) {
+      return errorResponse(res, "Amount cannot be negative.");
     }
 
     // ========================================================
@@ -354,6 +413,7 @@ const createSalesOrder = async (req, res) => {
 
     // ========================================================
     // CHECK DUPLICATE SALES ORDER FOR QUOTATION
+    // (is quotation par pehle se SO bane hain to dobara nahi banenge)
     // ========================================================
 
     const duplicate = await selectWithJoins(
@@ -371,98 +431,105 @@ const createSalesOrder = async (req, res) => {
     }
 
     // ========================================================
-    // QUANTITY / AMOUNT
+    // CREATE N SALES ORDERS — har ek qty 1, alag SO number
     // ========================================================
 
-    const finalQty = Number(qty) || 0;
-    const finalUnitPrice = Number(unitPrice) || 0;
+    const perOrderQty = 1;
+    const perOrderTotal = round2(perOrderQty * finalUnitPrice);
 
-    if (finalQty <= 0) {
-      return errorResponse(res, "Quantity must be greater than 0.");
+    for (let i = 0; i < orderCount; i++) {
+      const soNo = await generateUniqueSoNo(companyId, fy.financialYearId);
+
+      if (!soNo) {
+        const doneMsg = created.length
+          ? ` ${created.length} order(s) already created (${created
+              .map((c) => c.soNo)
+              .join(", ")}).`
+          : "";
+        return errorResponse(
+          res,
+          `Could not generate a unique Sales Order number. Please try again.${doneMsg}`,
+        );
+      }
+
+      const salesOrder = await saveModel("salesorder", {
+        companyId,
+        financialYearId: fy.financialYearId,
+
+        soNo,
+
+        quotationId: quotation.quotationId,
+        leadId,
+        accountId: normalizedAccountId,
+        expectedDate: finalExpectedDate,
+
+        ...leadDetails(lead),
+
+        qty: perOrderQty,
+        unitPrice: finalUnitPrice,
+        totalAmount: perOrderTotal,
+
+        createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+        createdtype: req.employeeId ? "Sale Executive" : createdType || null,
+
+        delete: 0,
+      });
+
+      created.push({
+        salesOrderId: salesOrder.salesOrderId,
+        soNo,
+        qty: perOrderQty,
+        unitPrice: finalUnitPrice,
+        totalAmount: perOrderTotal,
+      });
     }
 
-    if (finalUnitPrice < 0) {
-      return errorResponse(res, "Amount cannot be negative.");
-    }
+    const first = created[0];
+    const last = created[created.length - 1];
 
-    const finalTotalAmount = round2(finalQty * finalUnitPrice);
-
-    // ========================================================
-    // GENERATE SALES ORDER NUMBER
-    // ========================================================
-
-    const { billNo } = await generateVoucherNo({
-      companyId,
-      financialYearId: fy.financialYearId,
-      tableName: "salesorder",
-      idColumn: "salesOrderId",
-      prefixFor: "SALES ORDER",
-    });
-
-    const soNo = billNo;
-
-    const duplicateSoNo = await selectWithJoins(
-      "salesorder",
-      [],
-      { companyId, financialYearId: fy.financialYearId, soNo, delete: 0 },
-      ["salesOrderId"],
-    );
-
-    if (duplicateSoNo.length > 0) {
-      return errorResponse(res, "This Sales Order No already exists.");
-    }
-
-    // ========================================================
-    // SAVE
-    // ========================================================
-
-    const salesOrder = await saveModel("salesorder", {
-      companyId,
-      financialYearId: fy.financialYearId,
-
-      soNo,
-
-      quotationId: quotation.quotationId,
-      leadId,
-      accountId: normalizedAccountId,
-      expectedDate: finalExpectedDate, // NEW
-
-      ...leadDetails(lead),
-
-      qty: finalQty,
-      unitPrice: finalUnitPrice,
-      totalAmount: finalTotalAmount,
-
-      createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-      createdtype: req.employeeId ? "Sale Executive" : createdType || null,
-
-      delete: 0,
-    });
+    const message =
+      created.length === 1
+        ? "Sales Order saved successfully"
+        : `${created.length} Sales Orders created (${first.soNo} to ${last.soNo})`;
 
     return successResponse(
       res,
       {
-        salesOrderId: salesOrder.salesOrderId,
-        soNo,
+        // pehle order ki details — purane frontend code ke liye
+        salesOrderId: first.salesOrderId,
+        soNo: first.soNo,
+
+        count: created.length,
+        salesOrders: created,
 
         quotationId: quotation.quotationId,
         qNo: quotation.qNo,
 
         leadId,
         accountId: normalizedAccountId,
-        expectedDate: finalExpectedDate || "", // NEW
+        expectedDate: finalExpectedDate || "",
 
-        qty: finalQty,
+        qty: perOrderQty,
         unitPrice: finalUnitPrice,
-        totalAmount: finalTotalAmount,
+        totalAmount: perOrderTotal,
       },
-      "Sales Order saved successfully",
+      message,
     );
   } catch (error) {
+    const doneMsg = created.length
+      ? ` (${created.length} order(s) were already created: ${created
+          .map((c) => c.soNo)
+          .join(", ")})`
+      : "";
+
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "This Sales Order already exists.");
+      return errorResponse(res, `This Sales Order already exists.${doneMsg}`);
     }
-    return errorResponse(res, error.message || "Something Went Wrong", error);
+    return errorResponse(
+      res,
+      `${error.message || "Something Went Wrong"}${doneMsg}`,
+      error,
+    );
   }
 };
 
@@ -478,7 +545,6 @@ const getSalesOrderList = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    // CHANGED: pendingOnly, includeSalesOrderId add
     const {
       financialYearId,
       role,
@@ -541,7 +607,7 @@ const getSalesOrderList = async (req, res) => {
         "quotationId",
         "leadId",
         "accountId",
-        "expectedDate", // NEW
+        "expectedDate",
 
         "qty",
         "unitPrice",
@@ -754,7 +820,7 @@ const getSalesOrderList = async (req, res) => {
 
         leadId: salesOrder.leadId,
         accountId: salesOrder.accountId || null,
-        expectedDate: formatDateOnly(salesOrder.expectedDate), // NEW
+        expectedDate: formatDateOnly(salesOrder.expectedDate),
 
         ...leadDetails(lead),
         modelName: modelMap[String(lead?.model)] || "",
@@ -827,7 +893,7 @@ const getSalesOrderById = async (req, res) => {
         "quotationId",
         "leadId",
         "accountId",
-        "expectedDate", // NEW
+        "expectedDate",
 
         "qty",
         "unitPrice",
@@ -936,7 +1002,7 @@ const getSalesOrderById = async (req, res) => {
 
         leadId: salesOrder.leadId,
         accountId: salesOrder.accountId || null,
-        expectedDate: formatDateOnly(salesOrder.expectedDate), // NEW
+        expectedDate: formatDateOnly(salesOrder.expectedDate),
 
         ...leadDetails(lead),
         modelName: modelName || "",
@@ -975,6 +1041,9 @@ const getSalesOrderById = async (req, res) => {
 
 // ============================================================
 // UPDATE SALES ORDER
+// Ek quotation ke multiple SO valid hain (create me Qty = count),
+// isliye "another SO exists for quotation" check hata diya gaya hai.
+// Qty edit me change nahi hoti — row ki existing qty hi rehti hai.
 // ============================================================
 
 const updateSalesOrder = async (req, res) => {
@@ -995,7 +1064,7 @@ const updateSalesOrder = async (req, res) => {
       "salesorder",
       [],
       { salesOrderId: id, companyId, delete: 0 },
-      ["salesOrderId", "financialYearId", "soNo", "quotationId"],
+      ["salesOrderId", "financialYearId", "soNo", "quotationId", "qty"],
     );
 
     if (!existingRows.length) {
@@ -1009,9 +1078,8 @@ const updateSalesOrder = async (req, res) => {
       quotationId,
       leadId,
       accountId,
-      expectedDate, // NEW
+      expectedDate,
 
-      qty,
       unitPrice,
 
       createdBy,
@@ -1037,7 +1105,7 @@ const updateSalesOrder = async (req, res) => {
       return errorResponse(res, "Please select a lead.");
     }
 
-    // NEW: expected date (optional, but must be a valid date if sent)
+    // expected date (optional, but must be a valid date if sent)
     const finalExpectedDate = normalizeDate(expectedDate);
 
     if (finalExpectedDate === undefined) {
@@ -1110,37 +1178,11 @@ const updateSalesOrder = async (req, res) => {
     const lead = leadRows[0];
 
     // ========================================================
-    // DUPLICATE QUOTATION
+    // AMOUNT — qty existing row ki hi rahegi
     // ========================================================
 
-    const duplicate = await selectWithJoins(
-      "salesorder",
-      [],
-      { companyId, quotationId, delete: 0 },
-      ["salesOrderId"],
-    );
-
-    const anotherSalesOrder = duplicate.find(
-      (item) => String(item.salesOrderId) !== String(id),
-    );
-
-    if (anotherSalesOrder) {
-      return errorResponse(
-        res,
-        "Another Sales Order already exists for this quotation.",
-      );
-    }
-
-    // ========================================================
-    // AMOUNT
-    // ========================================================
-
-    const finalQty = Number(qty) || 0;
+    const finalQty = Number(existing.qty) || 1;
     const finalUnitPrice = Number(unitPrice) || 0;
-
-    if (finalQty <= 0) {
-      return errorResponse(res, "Quantity must be greater than 0.");
-    }
 
     if (finalUnitPrice < 0) {
       return errorResponse(res, "Amount cannot be negative.");
@@ -1158,7 +1200,7 @@ const updateSalesOrder = async (req, res) => {
       quotationId: quotation.quotationId,
       leadId,
       accountId: normalizedAccountId,
-      expectedDate: finalExpectedDate, // NEW
+      expectedDate: finalExpectedDate,
 
       qty: finalQty,
       unitPrice: finalUnitPrice,
@@ -1187,7 +1229,7 @@ const updateSalesOrder = async (req, res) => {
 
         leadId,
         accountId: normalizedAccountId,
-        expectedDate: finalExpectedDate || "", // NEW
+        expectedDate: finalExpectedDate || "",
         ...leadDetails(lead),
 
         qty: finalQty,

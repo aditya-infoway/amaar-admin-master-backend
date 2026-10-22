@@ -154,15 +154,18 @@ const bulkAutoGenerateBarcode = Joi.object().keys({
   itemIds: Joi.array().items(Joi.number()).min(1).required(),
 });
 
+
+const textOrNumber = Joi.alternatives().try(Joi.string().trim(), Joi.number()).allow("", null);
+const optionalNumber = Joi.alternatives().try(Joi.number(), Joi.string().trim()).allow("", null);
+
 const bulkImportItemMaster = Joi.object().keys({
   items: Joi.array()
     .items(
+
+
       Joi.object().keys({
         itemCode: Joi.alternatives()
-          .try(
-            Joi.string().trim().min(1),   // reject empty string
-            Joi.number()
-          )
+          .try(Joi.string().trim().min(1), Joi.number())
           .required()
           .messages({
             "alternatives.match": "Item Code must be text or a number",
@@ -173,20 +176,22 @@ const bulkImportItemMaster = Joi.object().keys({
         itemName: Joi.string().trim().required(),
         categoryName: Joi.string().trim().required(),
         groupName: Joi.string().trim().required(),
-        shortName: Joi.string().trim().allow("", null),
-        hsnCode: Joi.string().trim().allow("", null),
-        unit: Joi.string().trim().allow("", null),
-        taxSlab: Joi.string().trim().allow("", null),
-        // purchasePrice: Joi.number().allow(null, ""),
-        // actualPurchasePrice: Joi.number().allow(null, ""),
-        // salesPrice: Joi.number().allow(null, ""),
-        // mrp: Joi.number().allow(null, ""),
-        barcode: Joi.alternatives()
-          .try(
-            Joi.string().trim(),
-            Joi.number()
-          )
-          .allow("", null),
+        shortName: textOrNumber,
+        hsnCode: textOrNumber,
+        itemLocation: textOrNumber,
+        unit: textOrNumber,
+        taxSlab: textOrNumber,
+        thickness: optionalNumber,
+        length: optionalNumber,
+        width: optionalNumber,
+        weight: optionalNumber,
+        openingStock: optionalNumber,
+        stockValue: optionalNumber,
+        minQty: optionalNumber,
+        maxQty: optionalNumber,
+        stockMapping: textOrNumber,
+        generateBarcode: textOrNumber,
+        barcode: textOrNumber,
       })
     )
     .min(1)
