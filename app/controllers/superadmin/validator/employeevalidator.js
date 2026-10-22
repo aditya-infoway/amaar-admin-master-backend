@@ -15,6 +15,7 @@ const createEmployee = Joi.object().keys({
     "string.empty": "Branch is required",
   }),
   // Production me role nahi hota (process use hota hai)
+   // Production me role YA process (dono me se ek) — controller check karta hai
   roleId: Joi.number()
     .when("department", {
       is: "production",
@@ -25,17 +26,9 @@ const createEmployee = Joi.object().keys({
       "number.base": "Please select a role",
       "any.required": "Please select a role",
     }),
-  // Production me process required
-  processId: Joi.number()
-    .when("department", {
-      is: "production",
-      then: Joi.required(),
-      otherwise: Joi.allow("", null).optional(),
-    })
-    .messages({
-      "number.base": "Please select a process",
-      "any.required": "Please select a process",
-    }),
+  processId: Joi.number().allow("", null).optional().messages({
+    "number.base": "Invalid process selected",
+  }),
   subProcessId: Joi.number().allow("", null).optional().messages({
     "number.base": "Invalid sub process selected",
   }),
@@ -91,6 +84,7 @@ const updateEmployee = Joi.object().keys({
   branch: Joi.string().trim().required().messages({
     "string.empty": "Branch is required",
   }),
+    // Production me role YA process (dono me se ek) — controller check karta hai
   roleId: Joi.number()
     .when("department", {
       is: "production",
@@ -101,16 +95,9 @@ const updateEmployee = Joi.object().keys({
       "number.base": "Please select a role",
       "any.required": "Please select a role",
     }),
-  processId: Joi.number()
-    .when("department", {
-      is: "production",
-      then: Joi.required(),
-      otherwise: Joi.allow("", null).optional(),
-    })
-    .messages({
-      "number.base": "Please select a process",
-      "any.required": "Please select a process",
-    }),
+  processId: Joi.number().allow("", null).optional().messages({
+    "number.base": "Invalid process selected",
+  }),
   subProcessId: Joi.number().allow("", null).optional().messages({
     "number.base": "Invalid sub process selected",
   }),
