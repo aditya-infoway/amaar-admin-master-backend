@@ -33,6 +33,7 @@ const resolveRoleAndProcess = async ({
   accountId,
   companyId,
 }) => {
+  
   const isProduction = isProductionDept(department);
 
   if (isProduction) {
@@ -42,9 +43,9 @@ const resolveRoleAndProcess = async ({
     if (!hasProcess && !hasRole) {
       return { error: "Please select a role" };
     }
-    if (!accountId) {
-      return { error: "Please select a party (Sundry Creditor account)" };
-    }
+  if (hasProcess && !accountId) {
+  return { error: "Please select a party (Sundry Creditor account)" };
+}
 
     // Process select hua
     if (hasProcess) {
@@ -176,8 +177,10 @@ const createEmployee = async (req, res) => {
       password: hashedPassword,
       token,
       status: "ACTIVE",
-      accountId:
-        isProduction || isContractorManager ? toIdOrNull(accountId) : null,
+   accountId:
+  finalProcessId || (!isProduction && isContractorManager)
+    ? toIdOrNull(accountId)
+    : null,
       createdBy,
       createdType,
       delete: 0,
@@ -417,8 +420,10 @@ const updateEmployee = async (req, res) => {
       mobileNumber: mobileNumber.trim(),
       alternateNumber: alternateNumber ? alternateNumber.trim() : null,
       email: email.trim().toLowerCase(),
-      accountId:
-        isProduction || isContractorManager ? toIdOrNull(accountId) : null,
+  accountId:
+  finalProcessId || (!isProduction && isContractorManager)
+    ? toIdOrNull(accountId)
+    : null,
       updated: new Date(),
     };
 

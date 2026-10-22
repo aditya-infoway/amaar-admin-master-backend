@@ -16,16 +16,14 @@ const createEmployee = Joi.object().keys({
   }),
   // Production me role nahi hota (process use hota hai)
    // Production me role YA process (dono me se ek) — controller check karta hai
-  roleId: Joi.number()
-    .when("department", {
-      is: "production",
-      then: Joi.allow("", null).optional(),
-      otherwise: Joi.required(),
-    })
-    .messages({
-      "number.base": "Please select a role",
-      "any.required": "Please select a role",
-    }),
+roleId: Joi.when("department", {
+  is: "production",
+  then: Joi.number().allow("", null).optional(),
+  otherwise: Joi.number().required(),
+}).messages({
+  "number.base": "Please select a role",
+  "any.required": "Please select a role",
+}),
   processId: Joi.number().allow("", null).optional().messages({
     "number.base": "Invalid process selected",
   }),
@@ -85,16 +83,14 @@ const updateEmployee = Joi.object().keys({
     "string.empty": "Branch is required",
   }),
     // Production me role YA process (dono me se ek) — controller check karta hai
-  roleId: Joi.number()
-    .when("department", {
-      is: "production",
-      then: Joi.allow("", null).optional(),
-      otherwise: Joi.required(),
-    })
-    .messages({
-      "number.base": "Please select a role",
-      "any.required": "Please select a role",
-    }),
+roleId: Joi.when("department", {
+  is: "production",
+  then: Joi.number().allow("", null).optional(),
+  otherwise: Joi.number().required(),
+}).messages({
+  "number.base": "Please select a role",
+  "any.required": "Please select a role",
+}),
   processId: Joi.number().allow("", null).optional().messages({
     "number.base": "Invalid process selected",
   }),
