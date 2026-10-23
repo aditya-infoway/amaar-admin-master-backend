@@ -81,6 +81,7 @@ const employeeLogin = async (req, res) => {
   try {
     const email = (req.body.email || "").trim().toLowerCase();
     const password = req.body.password || "";
+   
 
     if (!email || !password) {
       return requiredmessage(res, "Email and Password are required.");
@@ -112,7 +113,6 @@ const employeeLogin = async (req, res) => {
     }
 
     const employee = employeeRows[0];
-
     if (employee.status !== "ACTIVE") {
       return requiredmessage(res, "Your account is inactive. Please contact admin.");
     }
@@ -302,6 +302,7 @@ const employeeLogin = async (req, res) => {
     }
 
     const responseData = {
+      role: "Employee",
       employeeId: employee.employeeId,
       employeeName: employee.employeeName,
       email: employee.email,
