@@ -263,10 +263,7 @@ const getQuotationForSalesOrder = async (req, res) => {
 // Qty = kitne Sales Order banane hain. Har SO me qty 1 hogi
 // aur har ka apna alag SO number generate hoga.
 // ============================================================
-
 const createSalesOrder = async (req, res) => {
-  const created = []; // ab tak save hue orders (partial failure message ke liye)
-
   try {
     const companyId = req.companyId;
 
@@ -280,17 +277,11 @@ const createSalesOrder = async (req, res) => {
       leadId,
       accountId,
       expectedDate,
-
       qty,
       unitPrice,
-
       createdBy,
       createdType,
     } = req.body;
-
-    // ========================================================
-    // BASIC VALIDATION
-    // ========================================================
 
     if (!financialYearId) {
       return errorResponse(
@@ -307,47 +298,30 @@ const createSalesOrder = async (req, res) => {
       return errorResponse(res, "Please select a lead.");
     }
 
-    // expected date (optional, but must be a valid date if sent)
     const finalExpectedDate = normalizeDate(expectedDate);
-
     if (finalExpectedDate === undefined) {
       return errorResponse(res, "Invalid expected date.");
     }
 
     const fy = await getFinancialYearById(financialYearId, companyId);
-
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
     }
 
-    // ========================================================
-    // QUANTITY (= number of Sales Orders to create)
-    // ========================================================
-
-    const orderCount = Number(qty) || 0;
+    // One SO — qty is actual quantity
+    const finalQty = Number(qty) || 0;
     const finalUnitPrice = Number(unitPrice) || 0;
 
-    if (!Number.isInteger(orderCount) || orderCount <= 0) {
+    if (!Number.isInteger(finalQty) || finalQty <= 0) {
       return errorResponse(res, "Quantity must be a whole number greater than 0.");
     }
-
-    if (orderCount > MAX_SO_PER_QUOTATION) {
-      return errorResponse(
-        res,
-        `Quantity cannot be more than ${MAX_SO_PER_QUOTATION}.`,
-      );
-    }
-
     if (finalUnitPrice < 0) {
       return errorResponse(res, "Amount cannot be negative.");
     }
 
-    // ========================================================
-    // CHECK ACCOUNT (agar party select ki gayi ho)
-    // ========================================================
+    const finalTotalAmount = round2(finalQty * finalUnitPrice);
 
     let normalizedAccountId = normalizeId(accountId);
-
     if (normalizedAccountId) {
       const accountRows = await selectWithJoins(
         "account",
@@ -355,15 +329,10 @@ const createSalesOrder = async (req, res) => {
         { id: normalizedAccountId, companyId, delete: 0 },
         ["id"],
       );
-
       if (!accountRows.length) {
         return errorResponse(res, "Selected party (account) was not found.");
       }
     }
-
-    // ========================================================
-    // CHECK QUOTATION
-    // ========================================================
 
     const quotationRows = await selectWithJoins(
       "quotation",
@@ -376,11 +345,9 @@ const createSalesOrder = async (req, res) => {
       },
       ["quotationId", "qNo", "leadId", "finalPrice"],
     );
-
     if (!quotationRows.length) {
       return errorResponse(res, "Selected quotation was not found.");
     }
-
     const quotation = quotationRows[0];
 
     if (normalizeId(leadId) !== normalizeId(quotation.leadId)) {
@@ -411,18 +378,12 @@ const createSalesOrder = async (req, res) => {
     }
     const lead = leadRows[0];
 
-    // ========================================================
-    // CHECK DUPLICATE SALES ORDER FOR QUOTATION
-    // (is quotation par pehle se SO bane hain to dobara nahi banenge)
-    // ========================================================
-
     const duplicate = await selectWithJoins(
       "salesorder",
       [],
       { companyId, quotationId, delete: 0 },
       ["salesOrderId", "soNo"],
     );
-
     if (duplicate.length > 0) {
       return errorResponse(
         res,
@@ -430,106 +391,52 @@ const createSalesOrder = async (req, res) => {
       );
     }
 
-    // ========================================================
-    // CREATE N SALES ORDERS — har ek qty 1, alag SO number
-    // ========================================================
-
-    const perOrderQty = 1;
-    const perOrderTotal = round2(perOrderQty * finalUnitPrice);
-
-    for (let i = 0; i < orderCount; i++) {
-      const soNo = await generateUniqueSoNo(companyId, fy.financialYearId);
-
-      if (!soNo) {
-        const doneMsg = created.length
-          ? ` ${created.length} order(s) already created (${created
-              .map((c) => c.soNo)
-              .join(", ")}).`
-          : "";
-        return errorResponse(
-          res,
-          `Could not generate a unique Sales Order number. Please try again.${doneMsg}`,
-        );
-      }
-
-      const salesOrder = await saveModel("salesorder", {
-        companyId,
-        financialYearId: fy.financialYearId,
-
-        soNo,
-
-        quotationId: quotation.quotationId,
-        leadId,
-        accountId: normalizedAccountId,
-        expectedDate: finalExpectedDate,
-
-        ...leadDetails(lead),
-
-        qty: perOrderQty,
-        unitPrice: finalUnitPrice,
-        totalAmount: perOrderTotal,
-
-        createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-        createdtype: req.employeeId ? "Sale Executive" : createdType || null,
-
-        delete: 0,
-      });
-
-      created.push({
-        salesOrderId: salesOrder.salesOrderId,
-        soNo,
-        qty: perOrderQty,
-        unitPrice: finalUnitPrice,
-        totalAmount: perOrderTotal,
-      });
+    const soNo = await generateUniqueSoNo(companyId, fy.financialYearId);
+    if (!soNo) {
+      return errorResponse(
+        res,
+        "Could not generate a unique Sales Order number. Please try again.",
+      );
     }
 
-    const first = created[0];
-    const last = created[created.length - 1];
-
-    const message =
-      created.length === 1
-        ? "Sales Order saved successfully"
-        : `${created.length} Sales Orders created (${first.soNo} to ${last.soNo})`;
+    const salesOrder = await saveModel("salesorder", {
+      companyId,
+      financialYearId: fy.financialYearId,
+      soNo,
+      quotationId: quotation.quotationId,
+      leadId,
+      accountId: normalizedAccountId,
+      expectedDate: finalExpectedDate,
+      ...leadDetails(lead),
+      qty: finalQty,
+      unitPrice: finalUnitPrice,
+      totalAmount: finalTotalAmount,
+      createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+      createdtype: req.employeeId ? "Sale Executive" : createdType || null,
+      delete: 0,
+    });
 
     return successResponse(
       res,
       {
-        // pehle order ki details — purane frontend code ke liye
-        salesOrderId: first.salesOrderId,
-        soNo: first.soNo,
-
-        count: created.length,
-        salesOrders: created,
-
+        salesOrderId: salesOrder.salesOrderId,
+        soNo,
         quotationId: quotation.quotationId,
         qNo: quotation.qNo,
-
         leadId,
         accountId: normalizedAccountId,
         expectedDate: finalExpectedDate || "",
-
-        qty: perOrderQty,
+        qty: finalQty,
         unitPrice: finalUnitPrice,
-        totalAmount: perOrderTotal,
+        totalAmount: finalTotalAmount,
       },
-      message,
+      "Sales Order saved successfully",
     );
   } catch (error) {
-    const doneMsg = created.length
-      ? ` (${created.length} order(s) were already created: ${created
-          .map((c) => c.soNo)
-          .join(", ")})`
-      : "";
-
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, `This Sales Order already exists.${doneMsg}`);
+      return errorResponse(res, "This Sales Order already exists.");
     }
-    return errorResponse(
-      res,
-      `${error.message || "Something Went Wrong"}${doneMsg}`,
-      error,
-    );
+    return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
 
