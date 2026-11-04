@@ -23,7 +23,7 @@ const {
   getMaterialStatusMap,
 } = require("../../../helper/workOrderMaterialStatus.js");
 const { getStageItems } = require("../../../helper/workOrderStageItems.js");
-   const { getProcessStageMap } = require("./processStageMap.js");
+const { getProcessStageMap } = require("./processStageMap.js");
 
 // ============================================================
 // HELPERS
@@ -329,20 +329,13 @@ const createWorkOrder = async (req, res) => {
       financialYearId,
       workOrderNo,
       salesOrderId,
-
       qty,
       totalPrice,
       gst,
       grandTotal,
-
-      stages,
       createdBy,
       createdType,
     } = req.body;
-
-    // ========================================================
-    // VALIDATION
-    // ========================================================
 
     if (!financialYearId) {
       return errorResponse(
@@ -356,14 +349,9 @@ const createWorkOrder = async (req, res) => {
     }
 
     const fy = await getFinancialYearById(financialYearId, companyId);
-
     if (!fy) {
       return errorResponse(res, "Invalid Financial Year.");
     }
-
-    // ========================================================
-    // CHECK SALES ORDER EXISTS
-    // ========================================================
 
     const salesOrderRows = await selectWithJoins(
       "salesorder",
@@ -371,7 +359,6 @@ const createWorkOrder = async (req, res) => {
       { salesOrderId, companyId, delete: 0 },
       ["salesOrderId", "soNo", "leadId"],
     );
-
     if (!salesOrderRows.length) {
       return errorResponse(res, "Selected Sales Order was not found.");
     }
@@ -385,75 +372,15 @@ const createWorkOrder = async (req, res) => {
       );
     }
 
-    // ========================================================
-    // CHECK DUPLICATE WORK ORDER FOR SALES ORDER
-    // ========================================================
-
-    const duplicate = await selectWithJoins(
-      "workorder",
-      [],
-      { companyId, salesOrderId, delete: 0 },
-      ["workOrderId", "workOrderNo"],
-    );
-
-    if (duplicate.length > 0) {
-      return errorResponse(
-        res,
-        `Work Order already exists for this Sales Order (${duplicate[0].workOrderNo}).`,
-      );
-    }
-
-    // ========================================================
-    // QTY / AMOUNTS
-    // ========================================================
-
-    const finalQty = Number(qty) || 0;
-
-    if (finalQty <= 0) {
-      return errorResponse(res, "Quantity must be greater than 0.");
+    // qty = how many Work Orders to create (each qty 1)
+    const orderCount = Number(qty) || 0;
+    if (!Number.isInteger(orderCount) || orderCount <= 0) {
+      return errorResponse(res, "Quantity must be a whole number greater than 0.");
     }
 
     const finalTotalPrice = round2(totalPrice);
     const finalGst = round2(gst);
     const finalGrandTotal = round2(grandTotal);
-
-    // ========================================================
-    // WORK ORDER NUMBER
-    // ========================================================
-
-    let finalWorkOrderNo = workOrderNo;
-
-    if (!finalWorkOrderNo) {
-      const { billNo } = await generateVoucherNo({
-        companyId,
-        financialYearId: fy.financialYearId,
-        tableName: "workorder",
-        idColumn: "workOrderId",
-        prefixFor: "WORK ORDER",
-      });
-
-      finalWorkOrderNo = billNo;
-    }
-
-    const duplicateNo = await selectWithJoins(
-      "workorder",
-      [],
-      {
-        companyId,
-        financialYearId: fy.financialYearId,
-        workOrderNo: finalWorkOrderNo,
-        delete: 0,
-      },
-      ["workOrderId"],
-    );
-
-    if (duplicateNo.length > 0) {
-      return errorResponse(res, "This Work Order No already exists.");
-    }
-
-    // ========================================================
-    // CHECK MODEL (PRODUCT) BELONGS TO THIS COMPANY
-    // ========================================================
 
     if (lead.model) {
       const modelRows = await selectWithJoins(
@@ -462,7 +389,6 @@ const createWorkOrder = async (req, res) => {
         { itemId: normalizeId(lead.model), companyId, delete: 0 },
         ["itemId"],
       );
-
       if (!modelRows.length) {
         return errorResponse(
           res,
@@ -471,83 +397,94 @@ const createWorkOrder = async (req, res) => {
       }
     }
 
-    // const stageCheck = await validateStageAssignments(stages, companyId);
-    // if (stageCheck.error) {
-    //   return errorResponse(res, stageCheck.error);
-    // }
+    const created = [];
+    const perOrderQty = 1;
+    const perOrderTotalPrice = round2(finalTotalPrice / orderCount);
+    const perOrderGst = round2(finalGst / orderCount);
+    const perOrderGrandTotal = round2(finalGrandTotal / orderCount);
 
-    // ========================================================
-    // SAVE
-    // ========================================================
+    for (let i = 0; i < orderCount; i++) {
+      let finalWorkOrderNo = i === 0 ? workOrderNo : null;
 
-    const workOrder = await saveModel("workorder", {
-      companyId,
-      financialYearId: fy.financialYearId,
+      if (!finalWorkOrderNo) {
+        const { billNo } = await generateVoucherNo({
+          companyId,
+          financialYearId: fy.financialYearId,
+          tableName: "workorder",
+          idColumn: "workOrderId",
+          prefixFor: "WORK ORDER",
+        });
+        finalWorkOrderNo = billNo;
+      }
 
-      workOrderNo: finalWorkOrderNo,
+      const duplicateNo = await selectWithJoins(
+        "workorder",
+        [],
+        {
+          companyId,
+          financialYearId: fy.financialYearId,
+          workOrderNo: finalWorkOrderNo,
+          delete: 0,
+        },
+        ["workOrderId"],
+      );
+      if (duplicateNo.length > 0) {
+        return errorResponse(res, "This Work Order No already exists.");
+      }
 
-      salesOrderId,
+      const workOrder = await saveModel("workorder", {
+        companyId,
+        financialYearId: fy.financialYearId,
+        workOrderNo: finalWorkOrderNo,                     
+        salesOrderId,
+        customerName: lead.name,
+        mobile: lead.number,
+        email: lead.email || null,
+        address: lead.address || null,
+        city: lead.city || null,
+        model: lead.model ? String(lead.model) : null,
+        qty: perOrderQty,
+        totalPrice: perOrderTotalPrice,
+        gst: perOrderGst,
+        grandTotal: perOrderGrandTotal,
+        createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
+        createdtype: req.employeeId ? "Sale Executive" : createdType || null,
+        delete: 0,
+      });
 
-      customerName: lead.name,
-      mobile: lead.number,
-      email: lead.email || null,
-      address: lead.address || null,
-      city: lead.city || null,
-      model: lead.model ? String(lead.model) : null,
+      created.push({
+        workOrderId: workOrder.workOrderId,
+        workOrderNo: finalWorkOrderNo,
+      });
+    }
 
-      qty: finalQty,
-      totalPrice: finalTotalPrice,
-      gst: finalGst,
-      grandTotal: finalGrandTotal,
-
-      createdBy: req.employeeId ? String(req.employeeId) : createdBy || null,
-      createdtype: req.employeeId ? "Sale Executive" : createdType || null,
-
-      delete: 0,
-    });
-
-    // try {
-    //   await db.workorderstage.bulkCreate(
-    //     stageCheck.rows.map((r) => ({
-    //       companyId,
-    //       workOrderId: workOrder.workOrderId,
-    //       stage: r.stage,
-    //       stageOrder: r.stageOrder,
-    //       employeeId: r.employeeId,
-    //       status: "Pending",
-    //       delete: 0,
-    //     })),
-    //   );
-    // } catch (stageError) {
-    //   await updateModelHelper(
-    //     "workorder",
-    //     { delete: 1, updated: new Date() },
-    //     { workOrderId: workOrder.workOrderId, companyId },
-    //   );
-    //   throw stageError;
-    // }
+    const first = created[0];
+    const last = created[created.length - 1];
+    const message =
+      created.length === 1
+        ? "Work Order generated successfully"
+        : `${created.length} Work Orders created (${first.workOrderNo} to ${last.workOrderNo})`;
 
     return successResponse(
       res,
       {
-        workOrderId: workOrder.workOrderId,
-        workOrderNo: finalWorkOrderNo,
+        workOrderId: first.workOrderId,
+        workOrderNo: first.workOrderNo,
         salesOrderId,
-
+        count: created.length,
+        workOrders: created,
         ...leadDetails(lead),
-
-        qty: finalQty,
-        totalPrice: finalTotalPrice,
-        gst: finalGst,
-        grandTotal: finalGrandTotal,
+        qty: perOrderQty,
+        totalPrice: perOrderTotalPrice,
+        gst: perOrderGst,
+        grandTotal: perOrderGrandTotal,
       },
-      "Work Order generated successfully",
+      message,
     );
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
       return errorResponse(res, "This Work Order already exists.");
     }
-
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
@@ -755,15 +692,11 @@ const getWorkOrderList = async (req, res) => {
       }
     }
 
-
-
-
-
     const stageMap = await getStageMap(workOrders.map((w) => w.workOrderId));
-const processStageMap = await getProcessStageMap(
-  workOrders.map((w) => w.workOrderId),
-  companyId,
-);
+    const processStageMap = await getProcessStageMap(
+      workOrders.map((w) => w.workOrderId),
+      companyId,
+    );
     const data = workOrders.map((workOrder) => {
       const live = liveDetails(
         workOrder,
@@ -1393,19 +1326,19 @@ const getMyWorkOrderTasks = async (req, res) => {
       ),
       subIds.length
         ? selectWithJoins(
-            "sub_process",
-            [],
-            { subProcessId: subIds, delete: 0 },
-            ["subProcessId", "subProcessName"],
-          )
+          "sub_process",
+          [],
+          { subProcessId: subIds, delete: 0 },
+          ["subProcessId", "subProcessName"],
+        )
         : [],
       contractorIds.length
         ? selectWithJoins(
-            "employee",
-            [],
-            { employeeId: contractorIds },
-            ["employeeId", "employeeName"],
-          )
+          "employee",
+          [],
+          { employeeId: contractorIds },
+          ["employeeId", "employeeName"],
+        )
         : [],
     ]);
 
@@ -1490,7 +1423,7 @@ const getMyWorkOrderTasks = async (req, res) => {
         const isUnlocked = prevPid === null || prevAllDone;
 
         // Drawer ke liye: pichhle process ki sub-processes (na ho to apna process)
-   const referencePid = ownPid;
+        const referencePid = ownPid;
         const referenceRows = groups.get(referencePid) || [];
         const referenceProcessName = labelOfProcess(referencePid);
 
@@ -1877,10 +1810,10 @@ const getMyStageItems = async (req, res) => {
 
 
 
-const stageKey = await resolveStageKeyByProcess(
-  companyId,
-  task.processId
-);
+    const stageKey = await resolveStageKeyByProcess(
+      companyId,
+      task.processId
+    );
 
 
 
@@ -1904,13 +1837,13 @@ const stageKey = await resolveStageKeyByProcess(
       );
     }
 
- const result = await getStageItems({
-  companyId,
-  workOrderId: task.workOrderId,
-  processId: task.processId,
-  subProcessId: task.subProcessId,
-  stageKey,
-});
+    const result = await getStageItems({
+      companyId,
+      workOrderId: task.workOrderId,
+      processId: task.processId,
+      subProcessId: task.subProcessId,
+      stageKey,
+    });
     if (result.error) return errorResponse(res, result.error);
 
     return successResponse(
@@ -1972,7 +1905,7 @@ const saveStageItemVerification = async (req, res) => {
     const result = await getStageItems({
       companyId,
       workOrderId: task.workOrderId,
-         processId: task.processId,
+      processId: task.processId,
       subProcessId: task.subProcessId,
       stageKey,
     });

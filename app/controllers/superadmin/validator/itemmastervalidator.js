@@ -190,7 +190,7 @@ const bulkImportItemMaster = Joi.object().keys({
         minQty: optionalNumber,
         maxQty: optionalNumber,
         stockMapping: textOrNumber,
-        generateBarcode: textOrNumber,
+        generateBarcode: Joi.alternatives().try(Joi.boolean(), Joi.number(), Joi.string()).allow("", null),
         barcode: textOrNumber,
       })
     )
@@ -201,7 +201,7 @@ const bulkImportItemMaster = Joi.object().keys({
       "any.required": "Items array is required.",
     }),
 });
-
+  
 module.exports = {
   createItemMaster,
   updateItemMaster,
