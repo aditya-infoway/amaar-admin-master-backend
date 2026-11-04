@@ -693,7 +693,7 @@ const getPurchaseItemList = async (req, res) => {
   }
 };
 
-
+ 
 
 // ---------------- BULK IMPORT (from Excel) — validate ALL rows first, reject whole file if any error ----------------
 const bulkImportItemMaster = async (req, res) => {
@@ -802,8 +802,8 @@ const bulkImportItemMaster = async (req, res) => {
         length: clean(row.length) || null,
         width: clean(row.width) || null,
         weight: clean(row.weight) || null,
-        openingStock: clean(row.openingStock) || null,
-        stockValue: clean(row.stockValue) || null,
+        openingStock: clean(row.openingStock) !== "" ? clean(row.openingStock) : 0,
+        stockValue: clean(row.stockValue) !== "" ? clean(row.stockValue) : 0,
         stockMapping,
         minQty: stockMapping ? clean(row.minQty) || null : null,
         maxQty: stockMapping ? clean(row.maxQty) || null : null,
@@ -844,8 +844,8 @@ const bulkImportItemMaster = async (req, res) => {
         width: row.width,
         weight: row.weight,
         openingStock: row.openingStock,
-        stockValue: row.stockValue,
-        stockMapping: row.stockMapping,
+        openingStock: row.openingStock || 0,
+        stockValue: row.stockValue || 0,
         minQty: row.minQty,
         maxQty: row.maxQty,
         barcodeType: row.autoGenerate ? "generate" : "manual",

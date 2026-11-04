@@ -24,12 +24,15 @@ const validate = (schema) => (req, res, next) => {
   }
 };
 
-// 👇 YE LINE ZARURI HAI — logoUpload yahan define hona chahiye, module.exports se PEHLE
 const logoUpload = createUploader("company_logo");
 
 module.exports = (app) => {
-  routes.use(checktoken);
+
+  // 👇 1. Login route MUST be OUTSIDE/ABOVE the checktoken middleware
   routes.post("/login", validate(companyvalidation.companyLogin), company.companyLogin);
+
+  // 👇 2. Apply token check to everything AFTER login
+  routes.use(checktoken);
 
   routes.post("/company-details/create", validate(companyDetailsSchema), companyDetails.createCompanyDetails);
 
@@ -45,8 +48,6 @@ module.exports = (app) => {
 
   routes.get("/financial-years", companyDetails.getFinancialYears);
   routes.get("/company-details", companyDetails.getCompanyDetails);
-
-
 
   routes.post("/prefix/create", validate(prefixCreateSchema), prefix.createPrefix);
   routes.post("/prefix/update", validate(prefixUpdateSchema), prefix.updatePrefix);
