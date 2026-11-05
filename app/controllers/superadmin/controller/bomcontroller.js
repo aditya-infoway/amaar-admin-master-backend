@@ -158,7 +158,90 @@ const getItemMasterMap = async (companyId) => {
   );
   return new Map(rows.map((r) => [Number(r.itemId), r]));
 };
+// ===========================================================================
+// BULK IMPORT HELPERS
+// ===========================================================================
 
+// true  => Excel ka Item Name Item Master ke naam se match hona chahiye
+// false => sirf Item Code check hoga (name bas required rahega)
+const STRICT_NAME_MATCH = true;
+
+const cleanStr = (v) => String(v ?? "").trim();
+const normName = (v) => cleanStr(v).replace(/\s+/g, " ").toLowerCase();
+
+// TODO: Yahan wahi formula paste karo jo frontend me Weight (kg) nikalta hai.
+// dims = { thickness, length, width } (numbers), qty = number
+// Jab tak paste nahi hota, null return hoga (weight save nahi hoga).
+const calculateWeight = (dims, qty) => {
+  return null;
+};
+
+const toStr = (v) =>
+  v === undefined || v === null || v === "" || Number(v) === 0
+    ? null
+    : String(v);
+
+// Excel me L/W/T hain to wahi lo, nahi hain to Item Master ke values lo
+// true  => qty parent chain se multiply hogi (axle 1 > item kp 4 > item last 3 => 1x4x3 = 12)
+// false => sirf us row ki apni qty (item last = 3)
+const MULTIPLY_PARENT_QTY = false;
+
+const round3 = (n) => String(Number(n.toFixed(3)));
+
+// Excel me L/W/T hain to wahi lo, nahi hain to Item Master ke values lo.
+// Weight = unit weight x total qty
+const resolveDims = (r, master, totalQty) => {
+  const masterUnitWt = Number(master && master.weight) || 0;
+  const masterWeightTotal =
+    masterUnitWt > 0 ? round3(masterUnitWt * totalQty) : null;
+
+  const hasManual = r.length > 0 || r.width > 0 || r.thickness > 0;
+
+  if (hasManual) {
+    const dims = {
+      thickness: r.thickness,
+      length: r.length,
+      width: r.width,
+    };
+    const w = calculateWeight(dims, totalQty);
+    return {
+      thickness: toStr(dims.thickness),
+      length: toStr(dims.length),
+      width: toStr(dims.width),
+      // formula paste nahi hua to Item Master weight x qty
+      weight:
+        w === null || w === undefined ? masterWeightTotal : String(w),
+    };
+  }
+
+  // Excel me L/W/T khali => Item Master se
+  return {
+    thickness: toStr(master && master.thickness),
+    length: toStr(master && master.length),
+    width: toStr(master && master.width),
+    weight: masterWeightTotal,
+  };
+};
+
+// Company ke itemmaster rows ka Map(itemCode -> row)
+const getItemMasterByCode = async (companyId) => {
+  const rows = await selectWithJoins(
+    "itemmaster",
+    [],
+    { companyId, delete: 0 },
+    [
+      "itemId",
+      "itemCode",
+      "itemName",
+      "unit",
+      "thickness",
+      "length",
+      "width",
+      "weight",
+    ],
+  );
+  return new Map(rows.map((r) => [cleanStr(r.itemCode), r]));
+};
 // ---------------- CREATE ----------------
 const createBom = async (req, res) => {
   const t = await sequelize.transaction();
@@ -220,6 +303,225 @@ const createBom = async (req, res) => {
       res,
       { bomId: header.bomId },
       "BOM created successfully",
+    );
+  } catch (error) {
+    await t.rollback();
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+const bulkImportBom = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      await t.rollback();
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { boms } = req.body;
+
+    const codeMap = await getItemMasterByCode(companyId);
+    const errors = [];
+
+    // ---- Item check (code + name required, DB me hona chahiye) ----
+    // Same (code, name) jodi ek hi baar check hoti hai taaki error repeat na ho.
+     const cache = new Map();
+    const checkItem = (code, name, label, strict = STRICT_NAME_MATCH) => {
+      const key = `${code}||${normName(name)}||${strict}`;
+      if (cache.has(key)) return cache.get(key);
+
+      let result = null;
+      if (!code) {
+        errors.push({ row: label, reason: "Item Code is required" });
+      } else if (!name) {
+        errors.push({
+          row: label,
+          reason: `Item Name is required for item code "${code}"`,
+        });
+      } else {
+        const master = codeMap.get(code);
+        if (!master) {
+          errors.push({
+            row: label,
+            reason: `Item "${code}" not found in Item Master`,
+          });
+        } else if (strict && normName(master.itemName) !== normName(name)) {
+          errors.push({
+            row: label,
+            reason: `Item Name "${name}" does not match Item Master name "${master.itemName}" for code "${code}"`,
+          });
+        } else {
+          result = master;
+        }
+      }
+      cache.set(key, result);
+      return result;
+    };
+
+    // ---- Flat rows -> nested children (cycle safe) ----
+       const buildChildren = (parentCode, childrenMap, path, parentQty = 1) => {
+      const rows = childrenMap.get(parentCode) || [];
+      const nextPath = new Set(path);
+      nextPath.add(parentCode);
+      const out = [];
+
+      for (const r of rows) {
+        if (nextPath.has(r.childCode)) {
+          errors.push({
+            row: r.label,
+            reason: `Circular reference: "${r.childCode}" is already a parent above it`,
+          });
+          continue;
+        }
+
+        const master = codeMap.get(r.childCode);
+        const totalQty = MULTIPLY_PARENT_QTY ? parentQty * r.qty : r.qty;
+        const dims = resolveDims(r, master, totalQty);
+
+        out.push({
+          refItemId: master ? master.itemId : null,
+          quantity: String(r.qty),
+          unit: r.uom || (master && master.unit) || null,
+          serialNo: r.serialNo ? String(r.serialNo) : null,
+          thickness: dims.thickness,
+          length: dims.length,
+          width: dims.width,
+          weight: dims.weight,
+          status: "active",
+          children: buildChildren(r.childCode, childrenMap, nextPath, totalQty),
+        });
+      }
+      return out;
+    };
+    // ---- Har BOM ko validate karke tree banao ----
+    const prepared = [];
+    const seenBomCodes = new Set();
+
+    for (const bom of boms) {
+      const bomCode = cleanStr(bom.bomCode);
+      const rootCode = cleanStr(bom.itemCode);
+
+      if (seenBomCodes.has(bomCode)) {
+        errors.push({
+          row: bomCode,
+          reason: `BOM Code "${bomCode}" is repeated in the file`,
+        });
+        continue;
+      }
+      seenBomCodes.add(bomCode);
+
+      const rows = (bom.components || []).map((c) => {
+        const parentCode = cleanStr(c.parentCode);
+        const childCode = cleanStr(c.childCode);
+        return {
+          parentCode,
+          parentName: cleanStr(c.parentName),
+          childCode,
+          childName: cleanStr(c.childName),
+          serialNo: Number(c.serialNo) || 0,
+          uom: cleanStr(c.uom),
+          qty: Number(c.qty) || 1,
+          length: Number(c.length) || 0,
+          width: Number(c.width) || 0,
+          thickness: Number(c.thickness) || 0,
+          label: `${parentCode} > ${childCode}`,
+        };
+      });
+
+      // Parent aur Child dono ka code + name DB se check
+          for (const r of rows) {
+        checkItem(r.parentCode, r.parentName, r.label, false); // parent: code DB me ho, naam bas diya ho
+        checkItem(r.childCode, r.childName, r.label); // child: naam bhi match hona chahiye
+      }
+
+      // Root item (Excel me jo kisi ka child nahi hai)
+      const rootRow = rows.find((r) => r.parentCode === rootCode);
+      const rootName = rootRow ? rootRow.parentName : "";
+      const rootMaster = checkItem(rootCode, rootName, bomCode, false);
+
+      // Parent -> children map (serialNo ke order me)
+      const childrenMap = new Map();
+      rows.forEach((r) => {
+        if (!childrenMap.has(r.parentCode)) childrenMap.set(r.parentCode, []);
+        childrenMap.get(r.parentCode).push(r);
+      });
+      childrenMap.forEach((list) =>
+        list.sort((a, b) => a.serialNo - b.serialNo),
+      );
+
+      const children = buildChildren(rootCode, childrenMap, new Set());
+
+      if (rootMaster) {
+        prepared.push({
+          bomCode,
+          bomName: cleanStr(bom.bomName) || rootName || bomCode,
+          status:
+            String(bom.status || "active").toLowerCase() === "inactive"
+              ? "inactive"
+              : "active",
+          finishedGoodsItemId: rootMaster.itemId,
+          items: [
+            {
+              refItemId: rootMaster.itemId,
+              quantity: "1",
+              unit: rootMaster.unit || null,
+              serialNo: null,
+              status: "active",
+              children,
+            },
+          ],
+        });
+      }
+    }
+
+    // ---- Duplicate bomCode (DB me pehle se) ----
+    if (seenBomCodes.size > 0) {
+      const existing = await Bom.findAll({
+        where: { companyId, bomCode: Array.from(seenBomCodes), delete: 0 },
+        attributes: ["bomCode"],
+        raw: true,
+        transaction: t,
+      });
+      existing.forEach((b) =>
+        errors.push({
+          row: b.bomCode,
+          reason: `BOM Code "${b.bomCode}" already exists`,
+        }),
+      );
+    }
+
+    // ---- Koi bhi error => poora import reject ----
+    if (errors.length > 0) {
+      await t.rollback();
+      return errorResponse(
+        res,
+        `Import rejected: ${errors.length} problem(s) found.`,
+        errors,
+      );
+    }
+
+    // ---- Sab sahi: insert ----
+    for (const p of prepared) {
+      const header = await Bom.create(
+        {
+          companyId,
+          finishedGoodsItemId: p.finishedGoodsItemId,
+          bomName: p.bomName,
+          bomCode: p.bomCode,
+          status: p.status,
+          createdBy: req.employeeId || null,
+          delete: 0,
+        },
+        { transaction: t },
+      );
+      await insertTree(p.items, header.bomId, null, t);
+    }
+
+    await t.commit();
+    return successResponse(
+      res,
+      { imported: prepared.length },
+      `${prepared.length} BOM(s) imported successfully.`,
     );
   } catch (error) {
     await t.rollback();
@@ -643,6 +945,7 @@ const getSubBomList = async (req, res) => {
 
 module.exports = {
   createBom,
+    bulkImportBom,
   getBomList,
   getBomById,
   updateBom,

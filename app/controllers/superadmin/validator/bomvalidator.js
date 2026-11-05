@@ -73,5 +73,54 @@ const deleteBom = Joi.object().keys({
     "number.base": "BOM id is required",
   }),
 });
+// ---------------------------------------------------------------------------
+// BULK IMPORT (Excel)
+// Yahan sirf structure/type check hota hai. Item Code / Item Name ka
+// required check aur DB check controller me row-wise hota hai, taaki error
+// me exact row (parent > child) dikhe.
+// ---------------------------------------------------------------------------
+const importComponent = Joi.object({
+  parentCode: Joi.string().trim().allow("", null),
+  parentName: Joi.string().trim().allow("", null),
+  childCode: Joi.string().trim().allow("", null),
+  childName: Joi.string().trim().allow("", null),
+  serialNo: Joi.number().allow(null, ""),
+  uom: Joi.string().trim().allow("", null),
+  qty: Joi.number().min(0).allow(null, ""),
+  length: Joi.number().min(0).allow(null, ""),
+  width: Joi.number().min(0).allow(null, ""),
+  thickness: Joi.number().min(0).allow(null, ""),
+}).unknown(true);
 
-module.exports = { createBom, updateBom, deleteBom };
+const bulkImportBom = Joi.object().keys({
+  boms: Joi.array()
+    .items(
+      Joi.object({
+        bomCode: Joi.string().trim().required().messages({
+          "string.empty": "BOM Code is required",
+          "any.required": "BOM Code is required",
+        }),
+        bomName: Joi.string().trim().allow("", null),
+        itemCode: Joi.string().trim().required().messages({
+          "string.empty": "Root Item Code is required",
+          "any.required": "Root Item Code is required",
+        }),
+        quantity: Joi.number().allow(null, ""),
+        unit: Joi.string().trim().allow("", null),
+        status: Joi.string().trim().allow("", null),
+        components: Joi.array()
+          .items(importComponent)
+          .min(1)
+          .required()
+          .messages({
+            "array.min": "Each BOM needs at least one component row",
+          }),
+      }).unknown(true),
+    )
+    .min(1)
+    .required()
+    .messages({
+      "array.min": "No BOM data found in the file",
+    }),
+});
+module.exports = { createBom, updateBom, deleteBom,bulkImportBom  };

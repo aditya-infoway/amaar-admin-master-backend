@@ -21,17 +21,24 @@ module.exports = (app) => {
   routes.get("/list", bom.getBomList);
   routes.get("/check-item/:code", bom.checkItemCodeExists);
 
-
   routes.get("/sub-bom/list", bom.getSubBomList);
-    // ---------------------------------------------------------
+  // ---------------------------------------------------------
   // GET SUB BOM BY BOM CODE
   // IMPORTANT: Keep this BEFORE /:id
   // ---------------------------------------------------------
- routes.get("/sub-bom/:id", bom.getSubBomById);
+  routes.get("/sub-bom/:id", bom.getSubBomById);
 
   routes.get("/:id", bom.getBomById);
 
   routes.post("/create", validate(bomValidation.createBom), bom.createBom);
+
+  // Excel se bulk import
+  routes.post(
+    "/bulk-import",
+    validate(bomValidation.bulkImportBom),
+    bom.bulkImportBom,
+  );
+
   routes.put("/update", validate(bomValidation.updateBom), bom.updateBom);
   routes.delete("/delete", validate(bomValidation.deleteBom), bom.deleteBom);
 
