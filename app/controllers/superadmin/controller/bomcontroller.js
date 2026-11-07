@@ -172,8 +172,26 @@ const normName = (v) => cleanStr(v).replace(/\s+/g, " ").toLowerCase();
 // TODO: Yahan wahi formula paste karo jo frontend me Weight (kg) nikalta hai.
 // dims = { thickness, length, width } (numbers), qty = number
 // Jab tak paste nahi hota, null return hoga (weight save nahi hoga).
+// const calculateWeight = (dims, qty) => {
+//   return null;
+// };
+
+
+
+// Steel density 7.85 g/cm3 = 7.85e-6 kg per mm3
+const STEEL_DENSITY_KG_PER_MM3 = 7.85e-6;
+
+// dims = { thickness, length, width } in mm, qty = number
+// Returns total weight (unit weight x qty), or null if any of T/L/W is missing
 const calculateWeight = (dims, qty) => {
-  return null;
+  const t = Number(dims.thickness) || 0;
+  const l = Number(dims.length) || 0;
+  const w = Number(dims.width) || 0;
+
+  if (t <= 0 || l <= 0 || w <= 0) return null;
+
+  const unitWeight = t * l * w * STEEL_DENSITY_KG_PER_MM3;
+  return Number((unitWeight * (Number(qty) || 1)).toFixed(3));
 };
 
 const toStr = (v) =>
@@ -324,8 +342,7 @@ const bulkImportBom = async (req, res) => {
     const errors = [];
 
     // ---- Item check (code + name required, DB me hona chahiye) ----
-    // Same (code, name) jodi ek hi baar check hoti hai taaki error repeat na ho.
-     const cache = new Map();
+    const cache = new Map();
     const checkItem = (code, name, label, strict = STRICT_NAME_MATCH) => {
       const key = `${code}||${normName(name)}||${strict}`;
       if (cache.has(key)) return cache.get(key);
@@ -359,7 +376,7 @@ const bulkImportBom = async (req, res) => {
     };
 
     // ---- Flat rows -> nested children (cycle safe) ----
-       const buildChildren = (parentCode, childrenMap, path, parentQty = 1) => {
+    const buildChildren = (parentCode, childrenMap, path, parentQty = 1) => {
       const rows = childrenMap.get(parentCode) || [];
       const nextPath = new Set(path);
       nextPath.add(parentCode);
@@ -393,22 +410,24 @@ const bulkImportBom = async (req, res) => {
       }
       return out;
     };
-    // ---- Har BOM ko validate karke tree banao ----
+
+    // ---- Har root ko validate karke tree banao ----
+    // NOTE: bomCode / bomName yahan se set nahi hote. Wo Edit me
+    // Finished Goods chunne par aate hain.
     const prepared = [];
-    const seenBomCodes = new Set();
+    const seenRoots = new Set();
 
     for (const bom of boms) {
-      const bomCode = cleanStr(bom.bomCode);
       const rootCode = cleanStr(bom.itemCode);
 
-      if (seenBomCodes.has(bomCode)) {
+      if (seenRoots.has(rootCode)) {
         errors.push({
-          row: bomCode,
-          reason: `BOM Code "${bomCode}" is repeated in the file`,
+          row: rootCode,
+          reason: `Root item "${rootCode}" is repeated in the file`,
         });
         continue;
       }
-      seenBomCodes.add(bomCode);
+      seenRoots.add(rootCode);
 
       const rows = (bom.components || []).map((c) => {
         const parentCode = cleanStr(c.parentCode);
@@ -428,16 +447,16 @@ const bulkImportBom = async (req, res) => {
         };
       });
 
-      // Parent aur Child dono ka code + name DB se check
-          for (const r of rows) {
-        checkItem(r.parentCode, r.parentName, r.label, false); // parent: code DB me ho, naam bas diya ho
-        checkItem(r.childCode, r.childName, r.label); // child: naam bhi match hona chahiye
+      // Parent: code DB me ho, naam bas diya ho | Child: naam bhi match ho
+      for (const r of rows) {
+        checkItem(r.parentCode, r.parentName, r.label, false);
+        checkItem(r.childCode, r.childName, r.label);
       }
 
       // Root item (Excel me jo kisi ka child nahi hai)
       const rootRow = rows.find((r) => r.parentCode === rootCode);
       const rootName = rootRow ? rootRow.parentName : "";
-      const rootMaster = checkItem(rootCode, rootName, bomCode, false);
+      const rootMaster = checkItem(rootCode, rootName, rootCode, false);
 
       // Parent -> children map (serialNo ke order me)
       const childrenMap = new Map();
@@ -453,13 +472,8 @@ const bulkImportBom = async (req, res) => {
 
       if (rootMaster) {
         prepared.push({
-          bomCode,
-          bomName: cleanStr(bom.bomName) || rootName || bomCode,
-          status:
-            String(bom.status || "active").toLowerCase() === "inactive"
-              ? "inactive"
-              : "active",
-          finishedGoodsItemId: rootMaster.itemId,
+          rootCode,
+          rootItemId: rootMaster.itemId,
           items: [
             {
               refItemId: rootMaster.itemId,
@@ -474,41 +488,66 @@ const bulkImportBom = async (req, res) => {
       }
     }
 
-    // ---- Duplicate bomCode (DB me pehle se) ----
-    if (seenBomCodes.size > 0) {
-      const existing = await Bom.findAll({
-        where: { companyId, bomCode: Array.from(seenBomCodes), delete: 0 },
-        attributes: ["bomCode"],
+    // ---- Duplicate guard: same root pehle se import ho chuka aur edit baaki ----
+    if (prepared.length > 0) {
+      const pendingBoms = await Bom.findAll({
+        where: { companyId, finishedGoodsItemId: null, delete: 0 },
+        attributes: ["bomId"],
         raw: true,
         transaction: t,
       });
-      existing.forEach((b) =>
-        errors.push({
-          row: b.bomCode,
-          reason: `BOM Code "${b.bomCode}" already exists`,
-        }),
-      );
+
+      if (pendingBoms.length > 0) {
+        const pendingRoots = await BomItem.findAll({
+          where: {
+            bomId: pendingBoms.map((b) => b.bomId),
+            parentId: null,
+            itemId: prepared.map((p) => p.rootItemId),
+            delete: 0,
+          },
+          attributes: ["itemId"],
+          raw: true,
+          transaction: t,
+        });
+
+        const dupIds = new Set(pendingRoots.map((r) => Number(r.itemId)));
+        prepared.forEach((p) => {
+          if (dupIds.has(Number(p.rootItemId))) {
+            errors.push({
+              row: p.rootCode,
+              reason: `Root item "${p.rootCode}" is already imported and waiting for BOM Name. Edit that BOM (or delete it) first.`,
+            });
+          }
+        });
+      }
     }
+
 
     // ---- Koi bhi error => poora import reject ----
     if (errors.length > 0) {
       await t.rollback();
+
+      const details = errors
+        .slice(0, 3)
+        .map((e) => `${e.row}: ${e.reason}`)
+        .join(" | ");
+
       return errorResponse(
         res,
-        `Import rejected: ${errors.length} problem(s) found.`,
+        `Import rejected (${errors.length} problem${errors.length > 1 ? "s" : ""}). ${details}${errors.length > 3 ? " ..." : ""}`,
         errors,
       );
     }
 
-    // ---- Sab sahi: insert ----
+    // ---- Sab sahi: insert (bomCode / bomName / finishedGoods khali) ----
     for (const p of prepared) {
       const header = await Bom.create(
         {
           companyId,
-          finishedGoodsItemId: p.finishedGoodsItemId,
-          bomName: p.bomName,
-          bomCode: p.bomCode,
-          status: p.status,
+          finishedGoodsItemId: null,
+          bomName: "",
+          bomCode: "",
+          status: "inactive",
           createdBy: req.employeeId || null,
           delete: 0,
         },
@@ -945,7 +984,7 @@ const getSubBomList = async (req, res) => {
 
 module.exports = {
   createBom,
-    bulkImportBom,
+  bulkImportBom,
   getBomList,
   getBomById,
   updateBom,
