@@ -19,7 +19,12 @@ module.exports = sequelize => {
     bomName: { type: DataTypes.STRING(150), allowNull: false, field: "bomName" },
     bomCode: { type: DataTypes.STRING(50), allowNull: false, field: "bomCode" },
     status: { type: DataTypes.STRING(20), allowNull: false, defaultValue: "active", field: "status" },
-
+    setupStatus: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "complete",
+      field: "setupStatus"
+    },
     createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },
 
     created: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
