@@ -158,6 +158,7 @@ const getItemMasterMap = async (companyId) => {
   );
   return new Map(rows.map((r) => [Number(r.itemId), r]));
 };
+
 // ===========================================================================
 // BULK IMPORT HELPERS
 // ===========================================================================
@@ -168,15 +169,6 @@ const STRICT_NAME_MATCH = true;
 
 const cleanStr = (v) => String(v ?? "").trim();
 const normName = (v) => cleanStr(v).replace(/\s+/g, " ").toLowerCase();
-
-// TODO: Yahan wahi formula paste karo jo frontend me Weight (kg) nikalta hai.
-// dims = { thickness, length, width } (numbers), qty = number
-// Jab tak paste nahi hota, null return hoga (weight save nahi hoga).
-// const calculateWeight = (dims, qty) => {
-//   return null;
-// };
-
-
 
 // Steel density 7.85 g/cm3 = 7.85e-6 kg per mm3
 const STEEL_DENSITY_KG_PER_MM3 = 7.85e-6;
@@ -199,7 +191,6 @@ const toStr = (v) =>
     ? null
     : String(v);
 
-// Excel me L/W/T hain to wahi lo, nahi hain to Item Master ke values lo
 // true  => qty parent chain se multiply hogi (axle 1 > item kp 4 > item last 3 => 1x4x3 = 12)
 // false => sirf us row ki apni qty (item last = 3)
 const MULTIPLY_PARENT_QTY = false;
@@ -226,9 +217,8 @@ const resolveDims = (r, master, totalQty) => {
       thickness: toStr(dims.thickness),
       length: toStr(dims.length),
       width: toStr(dims.width),
-      // formula paste nahi hua to Item Master weight x qty
-      weight:
-        w === null || w === undefined ? masterWeightTotal : String(w),
+      // T/L/W teeno nahi hain to Item Master weight x qty
+      weight: w === null || w === undefined ? masterWeightTotal : String(w),
     };
   }
 
@@ -260,6 +250,7 @@ const getItemMasterByCode = async (companyId) => {
   );
   return new Map(rows.map((r) => [cleanStr(r.itemCode), r]));
 };
+
 // ---------------- CREATE ----------------
 const createBom = async (req, res) => {
   const t = await sequelize.transaction();
@@ -308,6 +299,7 @@ const createBom = async (req, res) => {
         bomName,
         bomCode,
         status: status || "active",
+        setupStatus: "complete", // 👈 normally created BOM = complete
         createdBy: req.employeeId || null,
         delete: 0,
       },
@@ -327,6 +319,8 @@ const createBom = async (req, res) => {
     return errorResponse(res, error.message || "Something Went Wrong", error);
   }
 };
+
+// ---------------- BULK IMPORT (Excel) ----------------
 const bulkImportBom = async (req, res) => {
   const t = await sequelize.transaction();
   try {
@@ -488,10 +482,10 @@ const bulkImportBom = async (req, res) => {
       }
     }
 
-    // ---- Duplicate guard: same root pehle se import ho chuka aur edit baaki ----
+    // ---- Duplicate guard: same root pehle se import ho chuka aur setup baaki ----
     if (prepared.length > 0) {
       const pendingBoms = await Bom.findAll({
-        where: { companyId, finishedGoodsItemId: null, delete: 0 },
+        where: { companyId, setupStatus: "pending", delete: 0 },
         attributes: ["bomId"],
         raw: true,
         transaction: t,
@@ -522,7 +516,6 @@ const bulkImportBom = async (req, res) => {
       }
     }
 
-
     // ---- Koi bhi error => poora import reject ----
     if (errors.length > 0) {
       await t.rollback();
@@ -539,7 +532,9 @@ const bulkImportBom = async (req, res) => {
       );
     }
 
-    // ---- Sab sahi: insert (bomCode / bomName / finishedGoods khali) ----
+    // ---- Sab sahi: insert ----
+    // bomCode / bomName / finishedGoods khali, setupStatus = pending,
+    // Active/Inactive = inactive (user Edit me BOM Name chunke baad me badlega)
     for (const p of prepared) {
       const header = await Bom.create(
         {
@@ -548,6 +543,7 @@ const bulkImportBom = async (req, res) => {
           bomName: "",
           bomCode: "",
           status: "inactive",
+          setupStatus: "pending",
           createdBy: req.employeeId || null,
           delete: 0,
         },
@@ -560,7 +556,7 @@ const bulkImportBom = async (req, res) => {
     return successResponse(
       res,
       { imported: prepared.length },
-      `${prepared.length} BOM(s) imported successfully.`,
+      `${prepared.length} BOM(s) imported as Pending. Open each BOM, click Edit, select the BOM Name (Finished Goods) and click Update.`,
     );
   } catch (error) {
     await t.rollback();
@@ -612,6 +608,7 @@ const getBomList = async (req, res) => {
         quantity: it.quantity,
         unit: it.unit || master.unit,
         status: h.status,
+        setupStatus: h.setupStatus || "complete", // 👈 Pending / Complete
         created: h.created,
       };
     });
@@ -652,6 +649,7 @@ const getBomById = async (req, res) => {
         bomName: header.bomName,
         bomCode: header.bomCode,
         status: header.status,
+        setupStatus: header.setupStatus || "complete", // 👈 Pending / Complete
         items: tree,
       },
       "BOM fetched successfully",
@@ -707,6 +705,8 @@ const updateBom = async (req, res) => {
         bomName,
         bomCode,
         status: status || "active",
+        // BOM Name + BOM Code (validator me required) set ho gaye => complete
+        setupStatus: "complete",
         // finishedGoodsItemId: finishedGoodsItemId ?? header.finishedGoodsItemId,
         finishedGoodsItemId: finishedGoodsItemId,
         updated: new Date(),
@@ -796,10 +796,9 @@ const checkItemCodeExists = async (req, res) => {
 
 // ---------------- GET SUB BOM CHILDREN BY ITEM CODE (full nested tree) ----------------
 // Finds the given item code as a NODE anywhere inside any of this
-// company's BOM trees (it doesn't need to be a root/Finished-Goods
-// item with its own separate bomCode) and returns that node's FULL
-// nested subtree (all descendants, not just direct children) so the
-// drawer can render it exactly like the main BOM Structure panel.
+// company's COMPLETE BOM trees (pending/imported BOMs are skipped) and
+// returns that node's FULL nested subtree so the drawer can render it
+// exactly like the main BOM Structure panel.
 const getSubBomById = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -831,9 +830,9 @@ const getSubBomById = async (req, res) => {
 
     const targetItem = itemRows[0];
 
-    // Step 2: all BOMs belonging to this company (scope search)
+    // Step 2: all COMPLETE BOMs belonging to this company (scope search)
     const companyBoms = await Bom.findAll({
-      where: { companyId, delete: 0 },
+      where: { companyId, delete: 0, setupStatus: "complete" },
       attributes: ["bomId"],
       raw: true,
     });
@@ -929,9 +928,9 @@ const getSubBomList = async (req, res) => {
     if (!companyId)
       return requiredmessage(res, "Unauthorized. Please login again.");
 
-    // All company BOMs
+    // All COMPLETE company BOMs (pending/imported BOMs are skipped)
     const headers = await Bom.findAll({
-      where: { companyId, delete: 0 },
+      where: { companyId, delete: 0, setupStatus: "complete" },
       attributes: ["bomId", "bomCode", "bomName", "status", "created"],
       raw: true,
     });

@@ -8,7 +8,8 @@ const {
   selectWithJoinsV2,
 } = require("../../../helper/index.js");
 
-
+const db = require("../../../modelses");
+const Bom = db.bom;
 
 const clean = (v) => (v === undefined || v === null ? "" : String(v).trim());
 const isYes = (v) => ["yes", "y", "true", "1"].includes(clean(v).toLowerCase());
@@ -693,7 +694,7 @@ const getPurchaseItemList = async (req, res) => {
   }
 };
 
- 
+
 
 // ---------------- BULK IMPORT (from Excel) — validate ALL rows first, reject whole file if any error ----------------
 const bulkImportItemMaster = async (req, res) => {
@@ -895,64 +896,72 @@ const getFinishedGoodsItemList = async (req, res) => {
       return errorResponse(res, "Company not found.", 401);
     }
 
-    // First find Finished Goods category
     const categoryRows = await selectWithJoins(
       "itemcategory",
       [],
-      {
-        companyId,
-        categoryName: "Finished Goods",
-        delete: 0,
-      },
-      [
-        "itemCategoryId",
-        "categoryName",
-      ]
+      { companyId, categoryName: "Finished Goods", delete: 0 },
+      ["itemCategoryId", "categoryName"]
     );
 
     if (!categoryRows || categoryRows.length === 0) {
-      return successResponse(
-        res,
-        [],
-        "Finished Goods category not found."
-      );
+      return successResponse(res, [], "Finished Goods category not found.");
     }
 
     const itemCategoryId = categoryRows[0].itemCategoryId;
 
-    // Get Finished Goods items
     const items = await selectWithJoins(
       "itemmaster",
       [],
-      {
-        companyId,
-        itemCategoryId,
-        delete: 0,
-      },
-      [
-        "itemId",
-        "itemCode",
-        "itemName",
-        "shortName",
-        "unit",
-        "status",
-      ]
+      { companyId, itemCategoryId, delete: 0 },
+      ["itemId", "itemCode", "itemName", "shortName", "unit", "status"]
     );
 
-    return successResponse(
-      res,
-      items || [],
-      "Finished Goods items fetched successfully."
-    );
+    // Enquiry ke liye: sirf wahi items jinka BOM bana ho aur Active ho
+    if (req.query.withBom === "1") {
+      const { Op, fn, col, where } = db.Sequelize;
 
+      const activeBoms = await Bom.findAll({
+        where: {
+          companyId,
+          delete: 0,
+          [Op.and]: [where(fn("LOWER", col("status")), "active")],
+        },
+        attributes: ["finishedGoodsItemId", "bomCode"],
+        raw: true,
+      });
+
+      // 1) jin BOM mein item ka link bhara hai
+      const activeIds = new Set(
+        activeBoms
+          .map((b) => Number(b.finishedGoodsItemId))
+          .filter(Boolean)
+      );
+
+      // 2) jin BOM mein link NULL hai, unhe bomCode == itemCode se pakdo
+      const activeCodes = new Set(
+        activeBoms
+          .filter((b) => !b.finishedGoodsItemId && b.bomCode)
+          .map((b) => String(b.bomCode).trim().toLowerCase())
+      );
+
+      const filtered = (items || []).filter(
+        (it) =>
+          activeIds.has(Number(it.itemId)) ||
+          activeCodes.has(String(it.itemCode || "").trim().toLowerCase())
+      );
+
+      return successResponse(
+        res,
+        filtered,
+        "Finished Goods items with active BOM fetched successfully."
+      );
+    }
+
+    // BOM form ka "Select Finished Goods" dropdown: saare Finished Goods
+    return successResponse(res, items || [], "Finished Goods items fetched successfully.");
   } catch (error) {
     console.error("getFinishedGoodsItemList error:", error);
-
-    return errorResponse(
-      res,
-      error.message || "Failed to fetch Finished Goods items.",
-      500
-    );
+    return errorResponse(res, error.message || "Failed to fetch Finished Goods items.", 500);
   }
 };
 
