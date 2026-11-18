@@ -16,6 +16,7 @@ module.exports = sequelize => {
     itemLocation: { type: DataTypes.STRING(150), allowNull: true, field: "itemLocation" },
     itemCategoryId: { type: DataTypes.INTEGER, allowNull: false, field: "itemCategoryId" },
     groupId: { type: DataTypes.INTEGER, allowNull: false, field: "groupId" },
+        subGroupId: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null, field: "subGroupId" },
     unit: { type: DataTypes.STRING(50), allowNull: false, field: "unit" },
     thickness: { type: DataTypes.DECIMAL(12, 3), allowNull: true, defaultValue: 0, field: "thickness" },
     length: { type: DataTypes.DECIMAL(12, 3), allowNull: true, defaultValue: 0, field: "length" },

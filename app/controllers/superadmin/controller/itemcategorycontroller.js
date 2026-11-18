@@ -18,6 +18,64 @@ const normalizeCategoryName = (name) =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
+// ---- helper: poora item code (prefix + suffix + serialNo), sirf auto me ----
+const buildItemCode = (row) => {
+  if (row.itemCodeType !== "auto") return "";
+  return `${row.prefix || ""}${row.suffix || ""}${row.serialNo || ""}`;
+};
+
+// ---- helper: request se item code fields saaf karke deta hai ----
+// manual => teeno NULL (chahe frontend kuch bheje), auto => trimmed values
+const resolveItemCodeFields = ({ itemCodeType, prefix, suffix, serialNo }) => {
+  const type = itemCodeType === "auto" ? "auto" : "manual";
+  if (type === "manual") {
+    return { itemCodeType: "manual", prefix: null, suffix: null, serialNo: null };
+  }
+  return {
+    itemCodeType: "auto",
+    prefix: String(prefix || "").trim(),
+    suffix: String(suffix || "").trim() || null,
+    serialNo: String(serialNo || "").trim(),
+  };
+};
+
+// ---- helper: auto item code company-wise unique hai ya nahi ----
+// excludeId: update me apna record ignore karne ke liye
+const isItemCodeTaken = async (companyId, code, excludeId = null) => {
+  const normalized = String(code || "").trim().toLowerCase();
+  if (!normalized) return false;
+
+  const rows = await selectWithJoins(
+    "itemcategory",
+    [],
+    { companyId, delete: 0 },
+    ["itemCategoryId", "itemCodeType", "prefix", "suffix", "serialNo"]
+  );
+
+  return rows.some((row) => {
+    const plain = row.toJSON ? row.toJSON() : row;
+    if (excludeId && String(plain.itemCategoryId) === String(excludeId)) {
+      return false;
+    }
+    return buildItemCode(plain).trim().toLowerCase() === normalized;
+  });
+};
+
+const ITEM_CATEGORY_FIELDS = [
+  "itemCategoryId",
+  "companyId",
+  "categoryName",
+  "status",
+  "categoryType",
+  "itemCodeType",
+  "prefix",
+  "suffix",
+  "serialNo",
+  "createdBy",
+  "createdType",
+  "created",
+];
+
 // ---------------- CREATE ----------------
 const createItemCategory = async (req, res) => {
   try {
@@ -29,6 +87,7 @@ const createItemCategory = async (req, res) => {
 
     const { categoryName, status, createdBy, createdType } = req.body;
     const cleanName = categoryName.trim().replace(/\s+/g, " ");
+    const codeFields = resolveItemCodeFields(req.body);
 
     // categoryName company-wise unique honi chahiye (case & spacing insensitive)
     const existingRows = await selectWithJoins(
@@ -46,12 +105,22 @@ const createItemCategory = async (req, res) => {
       return errorResponse(res, "Item category already exists. Please enter a different name.");
     }
 
+    // item code uniqueness (sirf auto)
+    const newItemCode = buildItemCode(codeFields);
+    if (await isItemCodeTaken(companyId, newItemCode)) {
+      return errorResponse(
+        res,
+        `Item code "${newItemCode}" already exists. Please use a different prefix/suffix/serial no.`
+      );
+    }
+
     const payload = {
       companyId,
       categoryName: cleanName,
       createdBy,
       createdType,
       status,
+      ...codeFields,
       delete: 0,
     };
 
@@ -85,16 +154,7 @@ const getItemCategoryList = async (req, res) => {
       "itemcategory",
       [],
       { companyId, delete: 0 },
-      [
-        "itemCategoryId",
-        "companyId",
-        "categoryName",
-        "status",
-        "categoryType",
-        "createdBy",    
-        "createdType",  
-        "created",
-      ],
+      ITEM_CATEGORY_FIELDS,
       [["itemCategoryId", "DESC"]]
     );
 
@@ -131,10 +191,17 @@ const getItemCategoryList = async (req, res) => {
       }, {});
     }
 
-    const data = (list || []).map((row) => ({
-      ...(row.toJSON ? row.toJSON() : row),
-      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
-    }));
+    const data = (list || []).map((row) => {
+      const plain = row.toJSON ? row.toJSON() : row;
+      return {
+        ...plain,
+        itemCode: buildItemCode(plain),
+        createdBy:
+          companyMap[String(row.createdBy)] ||
+          employeeMap[String(row.createdBy)] ||
+          row.createdBy,
+      };
+    });
 
     return successResponse(res, data, "Item category list fetched successfully");
   } catch (error) {
@@ -157,7 +224,7 @@ const getItemCategoryById = async (req, res) => {
       "itemcategory",
       [],
       { itemCategoryId: id, companyId, delete: 0 },
-      ["itemCategoryId", "companyId", "categoryName", "status", "createdBy", "createdType", "created"] // 👈 add
+      ITEM_CATEGORY_FIELDS
     );
 
     if (rows.length === 0) {
@@ -165,6 +232,7 @@ const getItemCategoryById = async (req, res) => {
     }
 
     const categoryRow = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+    categoryRow.itemCode = buildItemCode(categoryRow);
 
     if (categoryRow.createdBy) {
       const companyRows = await selectWithJoins(
@@ -205,6 +273,7 @@ const updateItemCategory = async (req, res) => {
 
     const { itemCategoryId, categoryName, status } = req.body;
     const cleanName = categoryName.trim().replace(/\s+/g, " ");
+    const codeFields = resolveItemCodeFields(req.body);
 
     const existing = await selectWithJoins(
       "itemcategory",
@@ -236,11 +305,21 @@ const updateItemCategory = async (req, res) => {
       return errorResponse(res, "Item category already exists. Please enter a different name.");
     }
 
+    // item code uniqueness (sirf auto, apna record ignore)
+    const newItemCode = buildItemCode(codeFields);
+    if (await isItemCodeTaken(companyId, newItemCode, itemCategoryId)) {
+      return errorResponse(
+        res,
+        `Item code "${newItemCode}" already exists. Please use a different prefix/suffix/serial no.`
+      );
+    }
+
     await updateModelHelper(
       "itemcategory",
       {
         categoryName: cleanName,
         status,
+        ...codeFields,
         updated: new Date(),
       },
       { itemCategoryId, companyId }

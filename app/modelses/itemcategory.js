@@ -24,13 +24,23 @@ module.exports = sequelize => {
       defaultValue: "active",
       field: "status"
     },
-     categoryType: {
+    categoryType: {
       type: DataTypes.STRING(10),
       allowNull: false,
       defaultValue: "manual",
       field: "categoryType"
     },
-     createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },    
+    itemCodeType: {
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      defaultValue: "manual",
+      field: "itemCodeType"
+    },
+    prefix: { type: DataTypes.STRING(20), allowNull: true, field: "prefix" },
+    suffix: { type: DataTypes.STRING(20), allowNull: true, field: "suffix" },
+    serialNo: { type: DataTypes.STRING(20), allowNull: true, field: "serialNo" },
+
+    createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },
     createdType: { type: DataTypes.STRING(20), allowNull: true, field: "createdType" },
     created: {
       type: DataTypes.DATE,
@@ -53,8 +63,13 @@ module.exports = sequelize => {
     tableName: "itemcategory",
     comment: "",
     indexes: [
-      { unique: true, fields: ["companyId", "categoryName"] },
-    ]
+      {
+        name: "itemcategory_company_category_active_uq",
+        unique: true,
+        fields: ["companyId", "categoryName"],
+        where: { delete: 0 }, // sirf active rows par unique
+      },
+    ],
   };
   const ItemCategoryModel = sequelize.define("itemcategory", attributes, options);
   return ItemCategoryModel;

@@ -45,39 +45,260 @@ const getNextBarcode = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
+// ---------------- Barcode company me already kisi aur item pe hai ya nahi ----------------
+// excludeItemId: update/generate me apna item ignore karne ke liye
+const isBarcodeTaken = async (companyId, barcode, excludeItemId = null) => {
+  const value = String(barcode || "").trim();
+  if (!value) return false;
 
+  const rows = await selectWithJoins(
+    "itemmaster",
+    [],
+    { companyId, barcode: value },
+    ["itemId"]
+  );
+
+  return rows.some((row) => String(row.itemId) !== String(excludeItemId));
+};
+// ---------------- Item code: category ke hisaab se next code ----------------
+// Category me jo serialNo hai wo start number hai. Us category ke items
+// (deleted bhi) me se sabse bada number dhoondh kar +1 karte hain.
+const generateNextItemCode = async (companyId, category) => {
+  const prefix = category.prefix || "";
+  const suffix = category.suffix || "";
+  const head = `${prefix}${suffix}`;
+  const startStr = String(category.serialNo || "");
+  const width = startStr.length || 1;
+  const start = parseInt(startStr, 10) || 1;
+
+  // delete filter nahi lagaya, kyunki unique index me deleted rows bhi count hoti hain
+  const rows = await selectWithJoins(
+    "itemmaster",
+    [],
+    { companyId, itemCategoryId: category.itemCategoryId },
+    ["itemCode"]
+  );
+
+  let maxNum = null;
+  rows.forEach((row) => {
+    const code = String(row.itemCode || "");
+    if (!code.startsWith(head)) return;
+    const rest = code.slice(head.length);
+    if (!/^\d+$/.test(rest)) return;
+    const num = parseInt(rest, 10);
+    if (maxNum === null || num > maxNum) maxNum = num;
+  });
+
+  let next = maxNum === null ? start : Math.max(start, maxNum + 1);
+
+  // Dusri category ya manual code se clash ho to aage badho
+  for (let i = 0; i < 50; i++) {
+    const candidate = `${head}${String(next).padStart(width, "0")}`;
+    const clash = await selectWithJoins(
+      "itemmaster",
+      [],
+      { companyId, itemCode: candidate },
+      ["itemId"]
+    );
+    if (clash.length === 0) return candidate;
+    next++;
+  }
+  throw new Error("Could not generate a unique item code");
+};
+
+// ---------------- GET NEXT ITEM CODE (category select hone par) ----------------
+const getNextItemCode = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+    const { categoryId } = req.params;
+
+    const rows = await selectWithJoins(
+      "itemcategory",
+      [],
+      { itemCategoryId: categoryId, companyId, delete: 0 },
+      ["itemCategoryId", "itemCodeType", "prefix", "suffix", "serialNo"]
+    );
+    if (rows.length === 0) {
+      return errorResponse(res, "Selected item category is invalid.");
+    }
+
+    const category = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+
+    if (category.itemCodeType !== "auto") {
+      return successResponse(res, { itemCodeType: "manual", itemCode: "" }, "Manual item code");
+    }
+
+    const itemCode = await generateNextItemCode(companyId, category);
+    return successResponse(res, { itemCodeType: "auto", itemCode }, "Next item code generated");
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+// ---------------- CREATE ----------------
+// ---------------- CREATE ----------------
+// const createItemMaster = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+//     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+//     const {
+//       itemCode, itemName, shortName, hsnCode, itemLocation,
+//       itemCategoryId, groupId, unit, taxSlab,
+//       openingStock, stockValue,
+//       thickness, length, width, weight,
+//       stockMapping, minQty, maxQty,
+//       // purchasePrice, actualPurchasePrice, salesPrice, mrp,
+//       barcodeType, barcode, status,
+//       createdBy, createdType,
+//     } = req.body;
+
+//     // itemCategory company ka hi ho (code settings bhi yahin se lete hain)
+//     const categoryRows = await selectWithJoins(
+//       "itemcategory",
+//       [],
+//       { itemCategoryId, companyId, delete: 0 },
+//       ["itemCategoryId", "itemCodeType", "prefix", "suffix", "serialNo"]
+//     );
+//     if (categoryRows.length === 0) {
+//       return errorResponse(res, "Selected item category is invalid.");
+//     }
+//     const category = categoryRows[0].toJSON ? categoryRows[0].toJSON() : categoryRows[0];
+
+//     // Auto category: code server banayega (frontend ka bheja code ignore).
+//     // Manual category: user ka code.
+//     let finalItemCode = itemCode.trim();
+//     if (category.itemCodeType === "auto") {
+//       finalItemCode = await generateNextItemCode(companyId, category);
+//     }
+
+//     // itemCode company-wise unique
+//     const codeExists = await selectWithJoins(
+//       "itemmaster", [], { itemCode: finalItemCode, companyId, delete: 0 }, ["itemId"]
+//     );
+//     if (codeExists.length > 0) {
+//       return errorResponse(res, "Item code already exists. Please enter a different code.");
+//     }
+
+//     // group company ka hi ho
+//     const groupValid = await selectWithJoins(
+//       "itemgroup", [], { itemGroupId: groupId, companyId, delete: 0 }, ["itemGroupId"]
+//     );
+//     if (groupValid.length === 0) {
+//       return errorResponse(res, "Selected group is invalid.");
+//     }
+
+//     // ---- Barcode resolve karo — manual value ya server-generated ----
+//     let finalBarcode = "";
+//     if (barcodeType === "generate") {
+//       let attempts = 0;
+//       do {
+//         finalBarcode = await generateBarcodeForCompany(companyId);
+//         const clash = await selectWithJoins(
+//           "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+//         );
+//         if (clash.length === 0) break;
+//         attempts++;
+//       } while (attempts < 5);
+//     } else {
+//       finalBarcode = (barcode || "").trim();
+//     }
+
+//     if (finalBarcode) {
+//       const barcodeExists = await selectWithJoins(
+//         "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+//       );
+//       if (barcodeExists.length > 0) {
+//         return errorResponse(res, "This barcode is already in use. Please choose a different one.");
+//       }
+//     }
+
+//     const payload = {
+//       companyId,
+//       itemCode: finalItemCode,
+//       itemName: itemName.trim(),
+//       shortName: shortName.trim(),
+//       hsnCode: hsnCode.trim(),
+//       itemLocation: itemLocation || "",
+//       itemCategoryId,
+//       groupId,
+//       unit,
+//       taxSlab,
+//       openingStock,
+//       stockValue,
+//       thickness,
+//       length,
+//       width,
+//       weight,
+//       stockMapping: Boolean(stockMapping),
+//       minQty: stockMapping ? minQty : null,
+//       maxQty: stockMapping ? maxQty : null,
+//       // purchasePrice,
+//       // actualPurchasePrice,
+//       // salesPrice,
+//       // mrp,
+//       barcodeType,
+//       barcode: finalBarcode || null,
+//       status: status || "active",
+//       createdBy,
+//       createdType,
+//       delete: 0,
+//     };
+
+//     const item = await saveModel("itemmaster", payload);
+
+//     return successResponse(res, item, "Item created successfully");
+//   } catch (error) {
+//     if (error?.name === "SequelizeUniqueConstraintError") {
+//       return errorResponse(res, "This barcode or item code is already in use.");
+//     }
+//     return errorResponse(res, "Something Went Wrong", error);
+//   }
+// };
+// ---------------- CREATE ----------------
 // ---------------- CREATE ----------------
 const createItemMaster = async (req, res) => {
-
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
     const {
       itemCode, itemName, shortName, hsnCode, itemLocation,
-      itemCategoryId, groupId, unit, taxSlab,
+      itemCategoryId, groupId, subGroupId, unit, taxSlab, // 👈 subGroupId add
       openingStock, stockValue,
       thickness, length, width, weight,
       stockMapping, minQty, maxQty,
       // purchasePrice, actualPurchasePrice, salesPrice, mrp,
-      barcodeType, barcode, status,
+      status,
       createdBy, createdType,
     } = req.body;
 
+    // itemCategory company ka hi ho (code settings bhi yahin se lete hain)
+    const categoryRows = await selectWithJoins(
+      "itemcategory",
+      [],
+      { itemCategoryId, companyId, delete: 0 },
+      ["itemCategoryId", "itemCodeType", "prefix", "suffix", "serialNo"]
+    );
+    if (categoryRows.length === 0) {
+      return errorResponse(res, "Selected item category is invalid.");
+    }
+    const category = categoryRows[0].toJSON ? categoryRows[0].toJSON() : categoryRows[0];
+
+    // Auto category: code server banayega (frontend ka bheja code ignore).
+    // Manual category: user ka code.
+    let finalItemCode = itemCode.trim();
+    if (category.itemCodeType === "auto") {
+      finalItemCode = await generateNextItemCode(companyId, category);
+    }
+
     // itemCode company-wise unique
     const codeExists = await selectWithJoins(
-      "itemmaster", [], { itemCode: itemCode.trim(), companyId, delete: 0 }, ["itemId"]
+      "itemmaster", [], { itemCode: finalItemCode, companyId, delete: 0 }, ["itemId"]
     );
     if (codeExists.length > 0) {
       return errorResponse(res, "Item code already exists. Please enter a different code.");
-    }
-
-    // itemCategory company ka hi ho
-    const categoryValid = await selectWithJoins(
-      "itemcategory", [], { itemCategoryId, companyId, delete: 0 }, ["itemCategoryId"]
-    );
-    if (categoryValid.length === 0) {
-      return errorResponse(res, "Selected item category is invalid.");
     }
 
     // group company ka hi ho
@@ -88,42 +309,35 @@ const createItemMaster = async (req, res) => {
       return errorResponse(res, "Selected group is invalid.");
     }
 
-    // ---- Barcode resolve karo — manual value ya server-generated ----
-    let finalBarcode = "";
-    if (barcodeType === "generate") {
-      let attempts = 0;
-      do {
-        finalBarcode = await generateBarcodeForCompany(companyId);
-        const clash = await selectWithJoins(
-          "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
-        );
-        if (clash.length === 0) break;
-        attempts++;
-      } while (attempts < 5);
-    } else {
-      finalBarcode = (barcode || "").trim();
+    // 👇 sub group (agar select kiya ho) company ka ho aur isi group ke under ho
+    if (subGroupId) {
+      const subValid = await selectWithJoins(
+        "subgroup", [], { subGroupId, groupId, companyId, delete: 0 }, ["subGroupId"]
+      );
+      if (subValid.length === 0) {
+        return errorResponse(res, "Selected sub group is invalid.");
+      }
     }
 
-    // barcode uniqueness — sirf tab check karo jab barcode non-empty ho
-    // (Manually mode mein barcode optional/blank ho sakta hai, isliye blank ko skip karte hain)
-    if (finalBarcode) {
-      const barcodeExists = await selectWithJoins(
-        "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+    // ---- Barcode = Item Code ----
+    const finalBarcode = finalItemCode;
+    if (await isBarcodeTaken(companyId, finalBarcode)) {
+      return errorResponse(
+        res,
+        `Barcode "${finalBarcode}" is already used by another item. Please use a different item code.`
       );
-      if (barcodeExists.length > 0) {
-        return errorResponse(res, "This barcode is already in use. Please choose a different one.");
-      }
     }
 
     const payload = {
       companyId,
-      itemCode: itemCode.trim(),
+      itemCode: finalItemCode,
       itemName: itemName.trim(),
       shortName: shortName.trim(),
       hsnCode: hsnCode.trim(),
       itemLocation: itemLocation || "",
       itemCategoryId,
       groupId,
+      subGroupId: subGroupId || null, // 👈 add
       unit,
       taxSlab,
       openingStock,
@@ -139,10 +353,10 @@ const createItemMaster = async (req, res) => {
       // actualPurchasePrice,
       // salesPrice,
       // mrp,
-      barcodeType,
-      barcode: finalBarcode || null, // 👈 blank barcode ko NULL store karo (unique constraint safe)
+      barcodeType: "generate",
+      barcode: finalBarcode,
       status: status || "active",
-      createdBy,        // 👈 add
+      createdBy,
       createdType,
       delete: 0,
     };
@@ -152,12 +366,11 @@ const createItemMaster = async (req, res) => {
     return successResponse(res, item, "Item created successfully");
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "This barcode or item code is already in use.");
+      return errorResponse(res, "Item code is already in use.");
     }
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
-
 // ---------------- LIST (Category + Group name join) ----------------
 const getItemMasterList = async (req, res) => {
   try {
@@ -191,6 +404,7 @@ const getItemMasterList = async (req, res) => {
         'itemmaster."itemLocation"',
         'ic."categoryName" AS "categoryName"',
         'ig."groupName" AS "groupName"',
+        'itemmaster."subGroupId"',
         'itemmaster."unit"',
         'itemmaster."taxSlab"',
         'itemmaster."openingStock"',
@@ -217,7 +431,17 @@ const getItemMasterList = async (req, res) => {
       0,
       0
     );
-
+    // sub group ka naam (join ki jagah alag map, taaki bina sub group wale items na jaayein)
+    const subGroupRows = await selectWithJoins(
+      "subgroup",
+      [],
+      { companyId, delete: 0 },
+      ["subGroupId", "subGroupName"]
+    );
+    const subGroupMap = (subGroupRows || []).reduce((acc, s) => {
+      acc[String(s.subGroupId)] = s.subGroupName;
+      return acc;
+    }, {});
     // createdBy me companyId ya employeeId store hota hai — name resolve karo
     const createdByIds = [
       ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
@@ -251,11 +475,24 @@ const getItemMasterList = async (req, res) => {
       }, {});
     }
 
-    const data = (list || []).map((row) => ({
-      ...row,
-      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
-    }));
+    const data = (list || []).map((row) => {
+      const subGroupName = subGroupMap[String(row.subGroupId)] || "";
 
+      return {
+        ...row,
+
+        // Sub Group selected hai to uska naam show hoga,
+        // otherwise main Group ka naam.
+        groupName: subGroupName || row.groupName,
+
+        subGroupName,
+
+        createdBy:
+          companyMap[String(row.createdBy)] ||
+          employeeMap[String(row.createdBy)] ||
+          row.createdBy,
+      };
+    });
     return successResponse(res, data, "Item list fetched successfully");
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
@@ -308,6 +545,124 @@ const getItemMasterById = async (req, res) => {
 };
 
 // ---------------- UPDATE ----------------
+// const updateItemMaster = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+//     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+//     const {
+//       itemId, itemCode, itemName, shortName, hsnCode, itemLocation,
+//       itemCategoryId, groupId, unit, taxSlab,
+//       openingStock, stockValue,
+//       thickness, length, width, weight,
+//       stockMapping, minQty, maxQty,
+//       // purchasePrice, actualPurchasePrice, salesPrice, mrp,
+//       barcodeType, barcode, status,
+//     } = req.body;
+
+//     const existing = await selectWithJoins(
+//       "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId", "barcode", "barcodeType"]
+//     );
+//     if (existing.length === 0) {
+//       return requiredmessage(res, "Item not found");
+//     }
+
+//     const codeExists = await selectWithJoins(
+//       "itemmaster", [], { itemCode: itemCode.trim(), companyId, delete: 0 }, ["itemId"]
+//     );
+//     const codeTakenByOther = codeExists.some((row) => String(row.itemId) !== String(itemId));
+//     if (codeTakenByOther) {
+//       return errorResponse(res, "Item code already exists. Please enter a different code.");
+//     }
+
+//     const categoryValid = await selectWithJoins(
+//       "itemcategory", [], { itemCategoryId, companyId, delete: 0 }, ["itemCategoryId"]
+//     );
+//     if (categoryValid.length === 0) {
+//       return errorResponse(res, "Selected item category is invalid.");
+//     }
+
+//     const groupValid = await selectWithJoins(
+//       "itemgroup", [], { itemGroupId: groupId, companyId, delete: 0 }, ["itemGroupId"]
+//     );
+//     if (groupValid.length === 0) {
+//       return errorResponse(res, "Selected group is invalid.");
+//     }
+
+//     let finalBarcode = "";
+//     if (barcodeType === "generate") {
+//       // Agar pehle se generate tha aur value already hai, to same rakho — dobara generate mat karo
+//       if (existing[0].barcodeType === "generate" && existing[0].barcode) {
+//         finalBarcode = existing[0].barcode;
+//       } else {
+//         let attempts = 0;
+//         do {
+//           finalBarcode = await generateBarcodeForCompany(companyId);
+//           const clash = await selectWithJoins(
+//             "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+//           );
+//           const clashOther = clash.some((row) => String(row.itemId) !== String(itemId));
+//           if (!clashOther) break;
+//           attempts++;
+//         } while (attempts < 5);
+//       }
+//     } else {
+//       finalBarcode = (barcode || "").trim();
+//     }
+
+//     // barcode uniqueness — sirf tab check karo jab barcode non-empty ho
+//     if (finalBarcode) {
+//       const barcodeExists = await selectWithJoins(
+//         "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+//       );
+//       const clashOther = barcodeExists.some((row) => String(row.itemId) !== String(itemId));
+//       if (clashOther) {
+//         return errorResponse(res, "This barcode is already in use. Please choose a different one.");
+//       }
+//     }
+
+//     await updateModelHelper(
+//       "itemmaster",
+//       {
+//         itemCode: itemCode.trim(),
+//         itemName: itemName.trim(),
+//         shortName: shortName.trim(),
+//         hsnCode: hsnCode.trim(),
+//         itemLocation: itemLocation || "",
+//         itemCategoryId,
+//         groupId,
+//         unit,
+//         taxSlab,
+//         openingStock,
+//         stockValue,
+//         thickness,
+//         length,
+//         width,
+//         weight,
+//         stockMapping: Boolean(stockMapping),
+//         minQty: stockMapping ? minQty : null,
+//         maxQty: stockMapping ? maxQty : null,
+//         // purchasePrice,
+//         // actualPurchasePrice,
+//         // salesPrice,
+//         // mrp,
+//         barcodeType,
+//         barcode: finalBarcode || null, // 👈 blank barcode ko NULL store karo
+//         status: status || "active",
+//         updated: new Date(),
+//       },
+//       { itemId, companyId }
+//     );
+
+//     return successResponse(res, {}, "Item updated successfully");
+//   } catch (error) {
+//     if (error?.name === "SequelizeUniqueConstraintError") {
+//       return errorResponse(res, "This barcode or item code is already in use.");
+//     }
+//     return errorResponse(res, "Something Went Wrong", error);
+//   }
+// };
+// ---------------- UPDATE ----------------
 const updateItemMaster = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -315,16 +670,17 @@ const updateItemMaster = async (req, res) => {
 
     const {
       itemId, itemCode, itemName, shortName, hsnCode, itemLocation,
-      itemCategoryId, groupId, unit, taxSlab,
+      itemCategoryId, groupId, subGroupId, unit, taxSlab,
       openingStock, stockValue,
       thickness, length, width, weight,
       stockMapping, minQty, maxQty,
       // purchasePrice, actualPurchasePrice, salesPrice, mrp,
-      barcodeType, barcode, status,
+      // barcodeType, barcode,   // 👈 barcode temporarily disabled
+      status,
     } = req.body;
 
     const existing = await selectWithJoins(
-      "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId", "barcode", "barcodeType"]
+      "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId"]
     );
     if (existing.length === 0) {
       return requiredmessage(res, "Item not found");
@@ -352,37 +708,36 @@ const updateItemMaster = async (req, res) => {
       return errorResponse(res, "Selected group is invalid.");
     }
 
-    let finalBarcode = "";
-    if (barcodeType === "generate") {
-      // Agar pehle se generate tha aur value already hai, to same rakho — dobara generate mat karo
-      if (existing[0].barcodeType === "generate" && existing[0].barcode) {
-        finalBarcode = existing[0].barcode;
-      } else {
-        let attempts = 0;
-        do {
-          finalBarcode = await generateBarcodeForCompany(companyId);
-          const clash = await selectWithJoins(
-            "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
-          );
-          const clashOther = clash.some((row) => String(row.itemId) !== String(itemId));
-          if (!clashOther) break;
-          attempts++;
-        } while (attempts < 5);
-      }
-    } else {
-      finalBarcode = (barcode || "").trim();
-    }
-
-    // barcode uniqueness — sirf tab check karo jab barcode non-empty ho
-    if (finalBarcode) {
-      const barcodeExists = await selectWithJoins(
-        "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
-      );
-      const clashOther = barcodeExists.some((row) => String(row.itemId) !== String(itemId));
-      if (clashOther) {
-        return errorResponse(res, "This barcode is already in use. Please choose a different one.");
-      }
-    }
+    // ---- Barcode (temporarily disabled) ----
+    // let finalBarcode = "";
+    // if (barcodeType === "generate") {
+    //   if (existing[0].barcodeType === "generate" && existing[0].barcode) {
+    //     finalBarcode = existing[0].barcode;
+    //   } else {
+    //     let attempts = 0;
+    //     do {
+    //       finalBarcode = await generateBarcodeForCompany(companyId);
+    //       const clash = await selectWithJoins(
+    //         "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+    //       );
+    //       const clashOther = clash.some((row) => String(row.itemId) !== String(itemId));
+    //       if (!clashOther) break;
+    //       attempts++;
+    //     } while (attempts < 5);
+    //   }
+    // } else {
+    //   finalBarcode = (barcode || "").trim();
+    // }
+    //
+    // if (finalBarcode) {
+    //   const barcodeExists = await selectWithJoins(
+    //     "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+    //   );
+    //   const clashOther = barcodeExists.some((row) => String(row.itemId) !== String(itemId));
+    //   if (clashOther) {
+    //     return errorResponse(res, "This barcode is already in use. Please choose a different one.");
+    //   }
+    // }
 
     await updateModelHelper(
       "itemmaster",
@@ -394,6 +749,7 @@ const updateItemMaster = async (req, res) => {
         itemLocation: itemLocation || "",
         itemCategoryId,
         groupId,
+        subGroupId,
         unit,
         taxSlab,
         openingStock,
@@ -409,8 +765,8 @@ const updateItemMaster = async (req, res) => {
         // actualPurchasePrice,
         // salesPrice,
         // mrp,
-        barcodeType,
-        barcode: finalBarcode || null, // 👈 blank barcode ko NULL store karo
+        // barcodeType,                       // 👈 comment: purana barcode safe rahega
+        // barcode: finalBarcode || null,
         status: status || "active",
         updated: new Date(),
       },
@@ -420,12 +776,11 @@ const updateItemMaster = async (req, res) => {
     return successResponse(res, {}, "Item updated successfully");
   } catch (error) {
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "This barcode or item code is already in use.");
+      return errorResponse(res, "Item code is already in use.");
     }
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
-
 // ---------------- DELETE (soft delete) ----------------
 const deleteItemMaster = async (req, res) => {
   try {
@@ -491,6 +846,86 @@ const setItemBarcode = async (req, res) => {
 };
 
 // ---------------- AUTO GENERATE BARCODE for a single item ----------------
+// const autoGenerateItemBarcode = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+//     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+//     const { itemId } = req.body;
+
+//     const existing = await selectWithJoins(
+//       "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId"]
+//     );
+//     if (existing.length === 0) return requiredmessage(res, "Item not found");
+
+//     let finalBarcode = "";
+//     let attempts = 0;
+//     do {
+//       finalBarcode = await generateBarcodeForCompany(companyId);
+//       const clash = await selectWithJoins(
+//         "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+//       );
+//       if (clash.length === 0) break;
+//       attempts++;
+//     } while (attempts < 5);
+
+//     await updateModelHelper(
+//       "itemmaster",
+//       { barcode: finalBarcode, barcodeType: "generate", updated: new Date() },
+//       { itemId, companyId }
+//     );
+
+//     return successResponse(res, { barcode: finalBarcode }, "Barcode generated successfully");
+//   } catch (error) {
+//     return errorResponse(res, "Something Went Wrong", error);
+//   }
+// };
+
+// ---------------- BULK AUTO GENERATE (selected rows) ----------------
+// const bulkAutoGenerateBarcode = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+//     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+//     const { itemIds } = req.body; // array of numbers
+//     if (!Array.isArray(itemIds) || itemIds.length === 0) {
+//       return errorResponse(res, "No items selected.");
+//     }
+
+//     const results = [];
+//     for (const itemId of itemIds) {
+//       const existing = await selectWithJoins(
+//         "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId"]
+//       );
+//       if (existing.length === 0) continue;
+
+//       let finalBarcode = "";
+//       let attempts = 0;
+//       do {
+//         finalBarcode = await generateBarcodeForCompany(companyId);
+//         const clash = await selectWithJoins(
+//           "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+//         );
+//         if (clash.length === 0) break;
+//         attempts++;
+//       } while (attempts < 5);
+
+//       await updateModelHelper(
+//         "itemmaster",
+//         { barcode: finalBarcode, barcodeType: "generate", updated: new Date() },
+//         { itemId, companyId }
+//       );
+
+//       results.push({ itemId, barcode: finalBarcode });
+//     }
+
+//     return successResponse(res, results, "Barcodes generated successfully");
+//   } catch (error) {
+//     return errorResponse(res, "Something Went Wrong", error);
+//   }
+// };
+
+// ---------------- AUTO GENERATE BARCODE for a single item (barcode = item code) ----------------
 const autoGenerateItemBarcode = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -499,20 +934,19 @@ const autoGenerateItemBarcode = async (req, res) => {
     const { itemId } = req.body;
 
     const existing = await selectWithJoins(
-      "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId"]
+      "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId", "itemCode"]
     );
     if (existing.length === 0) return requiredmessage(res, "Item not found");
 
-    let finalBarcode = "";
-    let attempts = 0;
-    do {
-      finalBarcode = await generateBarcodeForCompany(companyId);
-      const clash = await selectWithJoins(
-        "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
+    const finalBarcode = String(existing[0].itemCode || "").trim();
+    if (!finalBarcode) return errorResponse(res, "Item code is missing for this item.");
+
+    if (await isBarcodeTaken(companyId, finalBarcode, itemId)) {
+      return errorResponse(
+        res,
+        `Barcode "${finalBarcode}" is already used by another item.`
       );
-      if (clash.length === 0) break;
-      attempts++;
-    } while (attempts < 5);
+    }
 
     await updateModelHelper(
       "itemmaster",
@@ -522,11 +956,14 @@ const autoGenerateItemBarcode = async (req, res) => {
 
     return successResponse(res, { barcode: finalBarcode }, "Barcode generated successfully");
   } catch (error) {
+    if (error?.name === "SequelizeUniqueConstraintError") {
+      return errorResponse(res, "This barcode is already in use.");
+    }
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
 
-// ---------------- BULK AUTO GENERATE (selected rows) ----------------
+// ---------------- BULK AUTO GENERATE (selected rows, barcode = item code) ----------------
 const bulkAutoGenerateBarcode = async (req, res) => {
   try {
     const companyId = req.companyId;
@@ -538,22 +975,24 @@ const bulkAutoGenerateBarcode = async (req, res) => {
     }
 
     const results = [];
+    const skipped = [];
+
     for (const itemId of itemIds) {
       const existing = await selectWithJoins(
-        "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId"]
+        "itemmaster", [], { itemId, companyId, delete: 0 }, ["itemId", "itemCode"]
       );
       if (existing.length === 0) continue;
 
-      let finalBarcode = "";
-      let attempts = 0;
-      do {
-        finalBarcode = await generateBarcodeForCompany(companyId);
-        const clash = await selectWithJoins(
-          "itemmaster", [], { barcode: finalBarcode, companyId, delete: 0 }, ["itemId"]
-        );
-        if (clash.length === 0) break;
-        attempts++;
-      } while (attempts < 5);
+      const finalBarcode = String(existing[0].itemCode || "").trim();
+      if (!finalBarcode) {
+        skipped.push({ itemId, reason: "Item code is missing" });
+        continue;
+      }
+
+      if (await isBarcodeTaken(companyId, finalBarcode, itemId)) {
+        skipped.push({ itemId, reason: `Barcode "${finalBarcode}" already used by another item` });
+        continue;
+      }
 
       await updateModelHelper(
         "itemmaster",
@@ -564,11 +1003,22 @@ const bulkAutoGenerateBarcode = async (req, res) => {
       results.push({ itemId, barcode: finalBarcode });
     }
 
-    return successResponse(res, results, "Barcodes generated successfully");
+    if (results.length === 0 && skipped.length > 0) {
+      return errorResponse(res, `No barcode generated. ${skipped[0].reason}.`);
+    }
+
+    return successResponse(
+      res,
+      { generated: results, skipped },
+      skipped.length > 0
+        ? `${results.length} barcode(s) generated, ${skipped.length} skipped.`
+        : "Barcodes generated successfully"
+    );
   } catch (error) {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
+
 
 // ---------------- VEHICLE ITEMS LIST (for Vehicle Purchase Bill drawer) ----------------
 const getVehicleItemList = async (req, res) => {
@@ -601,6 +1051,7 @@ const getVehicleItemList = async (req, res) => {
         'itemmaster."hsnCode"',
         'ic."categoryName" AS "categoryName"',
         'ig."groupName" AS "groupName"',
+
         'itemmaster."unit"',
         'itemmaster."taxSlab"',
         // 'itemmaster."salesPrice"',
@@ -967,6 +1418,7 @@ const getFinishedGoodsItemList = async (req, res) => {
 
 module.exports = {
   getNextBarcode,
+  getNextItemCode,
   createItemMaster,
   getItemMasterList,
   getItemMasterById,

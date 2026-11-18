@@ -26,6 +26,7 @@ module.exports = (app) => {
 );
   routes.get("/vehicle-list", itemmaster.getVehicleItemList);
   routes.get("/generate-barcode", itemmaster.getNextBarcode);
+    routes.get("/next-code/:categoryId", itemmaster.getNextItemCode);
   routes.get("/barcode/:barcode", itemmaster.getItemByBarcode);
   routes.get("/purchase-list", itemmaster.getPurchaseItemList);
 

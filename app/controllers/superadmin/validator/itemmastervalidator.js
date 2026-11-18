@@ -28,6 +28,7 @@ const baseSchema = {
     "any.required": "Group is required",
     "number.base": "Group is required",
   }),
+    subGroupId: Joi.number().allow(null, ""),
   unit: Joi.string().trim().required().messages({
     "string.empty": "Unit is required",
   }),
@@ -101,20 +102,20 @@ const baseSchema = {
   //   "number.base": "MRP is required",
   // }),
 
-  barcodeType: Joi.string().valid("manual", "generate").required().messages({
-    "any.only": "Barcode Type must be either manual or generate",
-    "string.empty": "Barcode Type is required",
-  }),
-  barcode: Joi.when("barcodeType", {
-    is: "manual",
-    then: Joi.string().trim().allow("", null).max(30)
-      .pattern(/^[A-Za-z0-9-]*$/)
-      .messages({
-        "string.max": "Barcode must not exceed 30 characters",
-        "string.pattern.base": "Barcode can only contain letters, numbers, and hyphens",
-      }),
-    otherwise: Joi.string().trim().allow("", null),
-  }),
+  // barcodeType: Joi.string().valid("manual", "generate").required().messages({
+  //   "any.only": "Barcode Type must be either manual or generate",
+  //   "string.empty": "Barcode Type is required",
+  // }),
+  // barcode: Joi.when("barcodeType", {
+  //   is: "manual",
+  //   then: Joi.string().trim().allow("", null).max(30)
+  //     .pattern(/^[A-Za-z0-9-]*$/)
+  //     .messages({
+  //       "string.max": "Barcode must not exceed 30 characters",
+  //       "string.pattern.base": "Barcode can only contain letters, numbers, and hyphens",
+  //     }),
+  //   otherwise: Joi.string().trim().allow("", null),
+  // }),
 
   status: Joi.string().valid("active", "inactive").default("active"),
   createdBy: Joi.number().allow(null, ""),
