@@ -48,4 +48,5 @@ module.exports = (app) => {
     require("./bodyregister.routes")(app);
     require("./mainprocess.routes")(app);  
     require("./subprocess.routes")(app);
+    require("./subgroup.routes")(app);
 };
