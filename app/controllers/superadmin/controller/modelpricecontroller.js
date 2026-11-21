@@ -58,6 +58,80 @@ const calcBomTreeTotalWeight = async (bomId) => {
     return Number(total.toFixed(3));
 };
 
+
+// Weight of the selected Group / Sub Group.
+// Selected node + ALL sub groups below it (any depth) -> sum of weight of
+// every BOM item that belongs to them.
+const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
+    const nodes = (
+        (await selectWithJoins("bomItem", [], { bomId, delete: 0 }, [])) || []
+    ).map(plain);
+    if (nodes.length === 0) return 0;
+
+    const subs = (
+        (await selectWithJoins(
+            "subgroup",
+            [],
+            { companyId, delete: 0 },
+            ["subGroupId", "groupId", "parentSubGroupId"],
+        )) || []
+    ).map(plain);
+
+    // selected sub group + every descendant sub group
+    const subSet = new Set();
+    const addWithChildren = (id) => {
+        if (!id || subSet.has(id)) return;
+        subSet.add(id);
+        subs
+            .filter((s) => Number(s.parentSubGroupId) === id)
+            .forEach((s) => addWithChildren(Number(s.subGroupId)));
+    };
+
+    if (subGroupId) {
+        addWithChildren(Number(subGroupId));
+    } else {
+        // main group: all its sub groups (any depth)
+        subs
+            .filter((s) => Number(s.groupId) === Number(groupId))
+            .forEach((s) => addWithChildren(Number(s.subGroupId)));
+    }
+
+    const items = (
+        (await selectWithJoins("itemmaster", [], { companyId, delete: 0 }, [
+            "itemId",
+            "groupId",
+            "subGroupId",
+        ])) || []
+    ).map(plain);
+    const itemMap = new Map(items.map((i) => [Number(i.itemId), i]));
+
+    const matched = nodes.filter((n) => {
+        const it = itemMap.get(Number(n.itemId));
+        if (!it) return false;
+        const g = Number(it.groupId || 0);
+        const sg = Number(it.subGroupId || 0);
+        if (subGroupId) return subSet.has(sg);
+        return g === Number(groupId) || subSet.has(sg);
+    });
+
+    console.log(
+        "GROUP WEIGHT MATCHED:",
+        { bomId, groupId, subGroupId },
+        matched.map((n) => ({
+            bomItemId: n.bomItemId,
+            itemId: n.itemId,
+            weight: n.weight,
+        })),
+    );
+
+    const total = matched.reduce((sum, n) => {
+        const w = parseFloat(n.weight);
+        return sum + (Number.isNaN(w) ? 0 : w);
+    }, 0);
+
+    return Number(total.toFixed(3));
+};
+
 // ---------------------------------------------------------------------------
 // DROPDOWNS
 // ---------------------------------------------------------------------------
@@ -295,11 +369,18 @@ const getAutoFetchValues = async (req, res) => {
         }
 
         // BOM
+        const groupId = Number(req.query.groupId || req.body.groupId) || null;
+        const subGroupId =
+            Number(req.query.subGroupId || req.body.subGroupId) || null;
+
         if (!finishedGoodsItemId) {
             return errorResponse(
                 res,
                 "finishedGoodsItemId is required when type is BOM",
             );
+        }
+        if (!groupId) {
+            return errorResponse(res, "Group is required when type is BOM");
         }
 
         const boms = await selectWithJoins(
@@ -318,26 +399,31 @@ const getAutoFetchValues = async (req, res) => {
         }
 
         const bom = plain(boms[0]);
-        const totalWeight = await calcBomTreeTotalWeight(bom.bomId);
+        const groupWeight = await calcBomGroupWeight(
+            bom.bomId,
+            companyId,
+            groupId,
+            subGroupId,
+        );
 
         return successResponse(
             res,
             {
-                weight: totalWeight > 0 ? String(totalWeight) : null,
+                weight: groupWeight > 0 ? String(groupWeight) : null,
                 rate: null,
                 source: "bom",
                 bomId: bom.bomId,
                 bomCode: bom.bomCode,
-                bomName: bom.bomName,
             },
-            totalWeight > 0
-                ? "BOM total weight fetched"
-                : `BOM ${bom.bomCode} found but total weight is 0 (check bomitem.weight)`,
+            groupWeight > 0
+                ? "BOM group weight fetched"
+                : `No item of this group found in BOM ${bom.bomCode}`,
         );
     } catch (error) {
         return errorResponse(res, error.message || "Something Went Wrong", error);
     }
 };
+
 
 // ---------------------------------------------------------------------------
 // CRUD
