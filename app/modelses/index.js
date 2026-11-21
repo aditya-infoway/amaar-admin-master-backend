@@ -90,6 +90,8 @@ db.sub_process = require("./subprocess.js")(sequelize);
 db.workorderassignment = require("./workorderassignment.js")(sequelize, Sequelize);
 db.itemreturn = require("./itemreturn.js")(sequelize, Sequelize);
 db.subgroup = require("./subgroup.js")(sequelize, Sequelize);
+db.modelprice = require("./modelprice.js")(sequelize);
+db.modelpriceitem = require("./modelpriceitem.js")(sequelize);
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;
 

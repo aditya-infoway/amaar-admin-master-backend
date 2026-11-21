@@ -49,4 +49,5 @@ module.exports = (app) => {
     require("./mainprocess.routes")(app);  
     require("./subprocess.routes")(app);
     require("./subgroup.routes")(app);
+    require("./modelprice.routes")(app);
 };

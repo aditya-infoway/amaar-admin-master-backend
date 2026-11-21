@@ -1,0 +1,820 @@
+const {
+    successResponse,
+    errorResponse,
+    requiredmessage,
+    saveModel,
+    updateModel: updateModelHelper,
+    selectWithJoins,
+} = require("../../../helper/index.js");
+
+const plain = (r) => (r && r.toJSON ? r.toJSON() : r);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const getItemMasterMap = async (companyId) => {
+    const rows = await selectWithJoins(
+        "itemmaster",
+        [],
+        { companyId, delete: 0 },
+        ["itemId", "itemCode", "itemName", "unit", "weight"],
+    );
+    return new Map((rows || []).map((r) => [Number(r.itemId), plain(r)]));
+};
+
+const getCreateMasterMap = async (companyId) => {
+    const rows = await selectWithJoins(
+        "createmaster",
+        [],
+        { companyId, delete: 0 },
+        [
+            "createMasterId",
+            "type",
+            "description",
+            "actualItem",
+            "code",
+            "totalWeight",
+            "status",
+        ],
+    );
+    return new Map(
+        (rows || []).map((r) => [Number(r.createMasterId), plain(r)]),
+    );
+};
+
+const calcBomTreeTotalWeight = async (bomId) => {
+    const rows = await selectWithJoins(
+        "bomItem",
+        [],
+        { bomId, delete: 0 },
+        ["weight"],
+    );
+    let total = 0;
+    for (const r of rows || []) {
+        const w = parseFloat(r.weight);
+        if (!Number.isNaN(w) && w > 0) total += w;
+    }
+    return Number(total.toFixed(3));
+};
+
+// ---------------------------------------------------------------------------
+// DROPDOWNS
+// ---------------------------------------------------------------------------
+
+const getFinishedGoodsOptions = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const completeBoms = await selectWithJoins(
+            "bom",
+            [],
+            { companyId, delete: 0, setupStatus: "complete" },
+            ["finishedGoodsItemId"],
+        );
+
+        const fgIds = [
+            ...new Set(
+                (completeBoms || [])
+                    .map((b) => b.finishedGoodsItemId)
+                    .filter((id) => id != null),
+            ),
+        ];
+
+        if (fgIds.length === 0) {
+            return successResponse(
+                res,
+                [],
+                "No finished goods with complete BOM found",
+            );
+        }
+
+        const itemMap = await getItemMasterMap(companyId);
+        const list = fgIds
+            .map((id) => {
+                const m = itemMap.get(Number(id));
+                if (!m) return null;
+                return {
+                    itemId: m.itemId,
+                    itemCode: m.itemCode,
+                    itemName: m.itemName,
+                    label: `${m.itemCode} - ${m.itemName}`,
+                };
+            })
+            .filter(Boolean);
+
+        return successResponse(
+            res,
+            list,
+            "Finished goods options fetched successfully",
+        );
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const getCreateMasterOptions = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const rows = await selectWithJoins(
+            "createmaster",
+            [],
+            { companyId, delete: 0, status: "active" },
+            [
+                "createMasterId",
+                "type",
+                "description",
+                "actualItem",
+                "code",
+                "totalWeight",
+                "status",
+            ],
+            [["createMasterId", "DESC"]],
+        );
+
+        const list = (rows || []).map((r) => {
+            const row = plain(r);
+            return {
+                createMasterId: row.createMasterId,
+                type: row.type,
+                description: row.description,
+                code: row.code,
+                totalWeight: row.totalWeight,
+                actualItem: row.actualItem,
+                label: row.description || row.code || `CM-${row.createMasterId}`,
+            };
+        });
+
+        return successResponse(
+            res,
+            list,
+            "Create Master items fetched successfully",
+        );
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const getGroupOptions = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const mains = (
+            (await selectWithJoins(
+                "itemgroup",
+                [],
+                { companyId, delete: 0 },
+                ["itemGroupId", "groupName", "itemCategoryId"],
+            )) || []
+        ).map(plain);
+
+        const subs = (
+            (await selectWithJoins(
+                "subgroup",
+                [],
+                { companyId, delete: 0 },
+                [
+                    "subGroupId",
+                    "subGroupName",
+                    "groupId",
+                    "parentSubGroupId",
+                    "itemCategoryId",
+                ],
+            )) || []
+        ).map(plain);
+
+        const data = [
+            ...mains.map((g) => ({
+                id: `G-${g.itemGroupId}`,
+                label: g.groupName,
+                groupId: g.itemGroupId,
+                subGroupId: null,
+                itemCategoryId: g.itemCategoryId,
+            })),
+            ...subs.map((s) => ({
+                id: `S-${s.subGroupId}`,
+                label: s.subGroupName,
+                groupId: s.groupId,
+                subGroupId: s.subGroupId,
+                itemCategoryId: s.itemCategoryId,
+            })),
+        ];
+
+        return successResponse(res, data, "Group options fetched successfully");
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const getAutoFetchValues = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const type = String(req.query.type || req.body.type || "").trim();
+        const createMasterId = Number(
+            req.query.createMasterId || req.body.createMasterId,
+        );
+        const finishedGoodsItemId = Number(
+            req.query.finishedGoodsItemId || req.body.finishedGoodsItemId,
+        );
+
+        if (!type || !["BOM", "Manual", "Quotation"].includes(type)) {
+            return errorResponse(
+                res,
+                "Valid type (BOM / Manual / Quotation) is required",
+            );
+        }
+        if (!createMasterId) {
+            return errorResponse(res, "createMasterId is required");
+        }
+
+        const cmRows = await selectWithJoins(
+            "createmaster",
+            [],
+            { createMasterId, companyId, delete: 0 },
+            ["createMasterId", "code", "description", "totalWeight"],
+        );
+        if (!cmRows || cmRows.length === 0) {
+            return errorResponse(res, "Selected item not found in Create Master");
+        }
+        const cm = plain(cmRows[0]);
+
+        // Manual
+        if (type === "Manual") {
+            return successResponse(
+                res,
+                { weight: null, rate: null, source: "manual" },
+                "Manual entry – weight & rate to be filled by user",
+            );
+        }
+
+        // Quotation
+        if (type === "Quotation") {
+            const weight =
+                cm.totalWeight != null && cm.totalWeight !== ""
+                    ? String(cm.totalWeight)
+                    : null;
+
+            let rate = null;
+            if (cm.code) {
+                const pricingRows = await selectWithJoins(
+                    "createpricing",
+                    [],
+                    { code: String(cm.code).trim(), companyId, delete: 0 },
+                    ["exShowroomPrice", "code", "description", "effectiveDate"],
+                    [["effectiveDate", "DESC"]],
+                );
+                if (pricingRows && pricingRows.length > 0) {
+                    const p = plain(pricingRows[0]);
+                    if (p.exShowroomPrice != null && p.exShowroomPrice !== "") {
+                        rate = String(p.exShowroomPrice);
+                    }
+                }
+            }
+
+            const notes = [];
+            if (weight == null) notes.push("Total weight not set in Create Master");
+            if (!cm.code) notes.push("Create Master code is empty");
+            else if (rate == null)
+                notes.push(`No Create Pricing found for code ${cm.code}`);
+
+            return successResponse(
+                res,
+                { weight, rate, source: "quotation", createMasterCode: cm.code },
+                notes.length ? notes.join(". ") : "Quotation values fetched",
+            );
+        }
+
+        // BOM
+        if (!finishedGoodsItemId) {
+            return errorResponse(
+                res,
+                "finishedGoodsItemId is required when type is BOM",
+            );
+        }
+
+        const boms = await selectWithJoins(
+            "bom",
+            [],
+            { companyId, finishedGoodsItemId, setupStatus: "complete", delete: 0 },
+            ["bomId", "bomCode", "bomName"],
+            [["bomId", "DESC"]],
+        );
+
+        if (!boms || boms.length === 0) {
+            return errorResponse(
+                res,
+                "No complete BOM found for the selected Finished Goods",
+            );
+        }
+
+        const bom = plain(boms[0]);
+        const totalWeight = await calcBomTreeTotalWeight(bom.bomId);
+
+        return successResponse(
+            res,
+            {
+                weight: totalWeight > 0 ? String(totalWeight) : null,
+                rate: null,
+                source: "bom",
+                bomId: bom.bomId,
+                bomCode: bom.bomCode,
+                bomName: bom.bomName,
+            },
+            totalWeight > 0
+                ? "BOM total weight fetched"
+                : `BOM ${bom.bomCode} found but total weight is 0 (check bomitem.weight)`,
+        );
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// CRUD
+// ---------------------------------------------------------------------------
+
+const createModelPrice = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const {
+            finishedGoodsItemId,
+            modelName,
+            currentDate,
+            status,
+            items,
+        } = req.body;
+
+        if (!finishedGoodsItemId) {
+            return errorResponse(res, "Finished Goods is required");
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+            return errorResponse(res, "Please add at least one component");
+        }
+
+        // finished goods must have complete BOM
+        const hasBom = await selectWithJoins(
+            "bom",
+            [],
+            {
+                companyId,
+                finishedGoodsItemId,
+                setupStatus: "complete",
+                delete: 0,
+            },
+            ["bomId"],
+        );
+        if (!hasBom || hasBom.length === 0) {
+            return errorResponse(
+                res,
+                "Selected Finished Goods does not have a complete BOM",
+            );
+        }
+
+        const cmMap = await getCreateMasterMap(companyId);
+        const errors = [];
+        items.forEach((row, idx) => {
+            if (!cmMap.has(Number(row.itemId))) {
+                errors.push({
+                    row: idx + 1,
+                    reason: `Item (createMasterId=${row.itemId}) not found in Create Master`,
+                });
+            }
+            if (!["BOM", "Manual", "Quotation"].includes(row.type)) {
+                errors.push({ row: idx + 1, reason: `Invalid type "${row.type}"` });
+            }
+            if (row.type === "BOM" && !row.groupId) {
+                errors.push({
+                    row: idx + 1,
+                    reason: "Group is required when type is BOM",
+                });
+            }
+        });
+        if (errors.length > 0) {
+            return errorResponse(
+                res,
+                `Validation failed (${errors.length} error(s))`,
+                errors,
+            );
+        }
+
+        const totalValue = items.reduce((sum, row) => {
+            const v = parseFloat(row.value);
+            return sum + (Number.isNaN(v) ? 0 : v);
+        }, 0);
+
+        const header = await saveModel("modelprice", {
+            companyId,
+            finishedGoodsItemId,
+            modelName: modelName || null,
+            currentDate: currentDate || new Date(),
+            totalValue: Number(totalValue.toFixed(2)),
+            status: status || "active",
+            createdBy: req.employeeId || null,
+            delete: 0,
+        });
+
+        let order = 0;
+        for (const row of items) {
+            await saveModel("modelpriceitem", {
+                modelPriceId: header.modelPriceId,
+                itemId: Number(row.itemId),
+                type: row.type,
+                groupId: row.type === "BOM" ? row.groupId || null : null,
+                subGroupId: row.type === "BOM" ? row.subGroupId || null : null,
+                weight: row.weight != null ? String(row.weight) : null,
+                rate: row.rate != null ? String(row.rate) : null,
+                value: row.value != null ? String(row.value) : null,
+                sortOrder: order++,
+                delete: 0,
+            });
+        }
+
+        return successResponse(
+            res,
+            { modelPriceId: header.modelPriceId },
+            "Model Price created successfully",
+        );
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const getModelPriceList = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const headers = await selectWithJoins(
+            "modelprice",
+            [],
+            { companyId, delete: 0 },
+            [
+                "modelPriceId",
+                "finishedGoodsItemId",
+                "modelName",
+                "currentDate",
+                "totalValue",
+                "status",
+                "created",
+            ],
+            [["modelPriceId", "DESC"]],
+        );
+
+        if (!headers || headers.length === 0) {
+            return successResponse(res, [], "Model Price list fetched successfully");
+        }
+
+        const itemMap = await getItemMasterMap(companyId);
+
+        // all lines of all listed models in ONE query
+        const modelPriceIds = headers.map((h) => plain(h).modelPriceId);
+        const lines = await selectWithJoins(
+            "modelpriceitem",
+            [],
+            { modelPriceId: modelPriceIds, delete: 0 },
+            ["modelPriceId", "type"],
+            [["sortOrder", "ASC"]],
+        );
+
+        // group lines by modelPriceId
+        const linesByModel = {};
+        for (const l of lines || []) {
+            const key = String(l.modelPriceId);
+            if (!linesByModel[key]) linesByModel[key] = [];
+            linesByModel[key].push(l.type);
+        }
+
+        const list = headers.map((h) => {
+            const row = plain(h);
+            const master = itemMap.get(Number(row.finishedGoodsItemId)) || {};
+            const types = linesByModel[String(row.modelPriceId)] || [];
+            return {
+                modelPriceId: row.modelPriceId,
+                finishedGoodsItemId: row.finishedGoodsItemId,
+                modelName: row.modelName || master.itemName || "",
+                itemCode: master.itemCode || "",
+                itemName: master.itemName || "",
+                currentDate: row.currentDate,
+                totalValue: row.totalValue,
+                status: row.status,
+                created: row.created,
+                componentCount: types.length,
+                types: [...new Set(types)], // unique, e.g. ["BOM", "Quotation"]
+            };
+        });
+
+        return successResponse(res, list, "Model Price list fetched successfully");
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const getModelPriceById = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const { id } = req.params;
+
+        const headers = await selectWithJoins(
+            "modelprice",
+            [],
+            { modelPriceId: id, companyId, delete: 0 },
+            [
+                "modelPriceId",
+                "finishedGoodsItemId",
+                "modelName",
+                "currentDate",
+                "totalValue",
+                "status",
+            ],
+        );
+        if (!headers || headers.length === 0) {
+            return requiredmessage(res, "Model Price not found");
+        }
+        const header = plain(headers[0]);
+
+        const lines = await selectWithJoins(
+            "modelpriceitem",
+            [],
+            { modelPriceId: id, delete: 0 },
+            [
+                "modelPriceItemId",
+                "itemId",
+                "type",
+                "groupId",
+                "subGroupId",
+                "weight",
+                "rate",
+                "value",
+                "sortOrder",
+            ],
+            [["sortOrder", "ASC"]],
+        );
+
+        const cmMap = await getCreateMasterMap(companyId);
+        const itemMap = await getItemMasterMap(companyId);
+        const fgMaster = itemMap.get(Number(header.finishedGoodsItemId)) || {};
+
+        const groupIds = [
+            ...new Set((lines || []).map((l) => l.groupId).filter(Boolean)),
+        ];
+        const subGroupIds = [
+            ...new Set((lines || []).map((l) => l.subGroupId).filter(Boolean)),
+        ];
+
+        let groupMap = {};
+        if (groupIds.length) {
+            const gs = await selectWithJoins(
+                "itemgroup",
+                [],
+                { itemGroupId: groupIds, companyId, delete: 0 },
+                ["itemGroupId", "groupName"],
+            );
+            groupMap = (gs || []).reduce((a, g) => {
+                a[String(g.itemGroupId)] = plain(g).groupName;
+                return a;
+            }, {});
+        }
+
+        let subGroupMap = {};
+        if (subGroupIds.length) {
+            const ss = await selectWithJoins(
+                "subgroup",
+                [],
+                { subGroupId: subGroupIds, companyId, delete: 0 },
+                ["subGroupId", "subGroupName"],
+            );
+            subGroupMap = (ss || []).reduce((a, s) => {
+                a[String(s.subGroupId)] = plain(s).subGroupName;
+                return a;
+            }, {});
+        }
+
+        const components = (lines || []).map((l) => {
+            const row = plain(l);
+            const cm = cmMap.get(Number(row.itemId)) || {};
+            return {
+                modelPriceItemId: row.modelPriceItemId,
+                itemId: row.itemId,
+                itemDescription: cm.description || "",
+                itemCode: cm.code || "",
+                type: row.type,
+                groupId: row.groupId,
+                groupName: row.groupId ? groupMap[String(row.groupId)] || "" : "",
+                subGroupId: row.subGroupId,
+                subGroupName: row.subGroupId
+                    ? subGroupMap[String(row.subGroupId)] || ""
+                    : "",
+                weight: row.weight,
+                rate: row.rate,
+                value: row.value,
+                sortOrder: row.sortOrder,
+            };
+        });
+
+        return successResponse(
+            res,
+            {
+                modelPriceId: header.modelPriceId,
+                finishedGoodsItemId: header.finishedGoodsItemId,
+                finishedGoodsCode: fgMaster.itemCode || "",
+                finishedGoodsName: fgMaster.itemName || "",
+                modelName: header.modelName,
+                currentDate: header.currentDate,
+                totalValue: header.totalValue,
+                status: header.status,
+                components,
+            },
+            "Model Price fetched successfully",
+        );
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const updateModelPrice = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const {
+            modelPriceId,
+            finishedGoodsItemId,
+            modelName,
+            currentDate,
+            status,
+            items,
+        } = req.body;
+
+        if (!modelPriceId) return errorResponse(res, "modelPriceId is required");
+        if (!finishedGoodsItemId)
+            return errorResponse(res, "Finished Goods is required");
+        if (!Array.isArray(items) || items.length === 0) {
+            return errorResponse(res, "Please add at least one component");
+        }
+
+        const existing = await selectWithJoins(
+            "modelprice",
+            [],
+            { modelPriceId, companyId, delete: 0 },
+            ["modelPriceId"],
+        );
+        if (!existing || existing.length === 0) {
+            return requiredmessage(res, "Model Price not found");
+        }
+
+        const hasBom = await selectWithJoins(
+            "bom",
+            [],
+            {
+                companyId,
+                finishedGoodsItemId,
+                setupStatus: "complete",
+                delete: 0,
+            },
+            ["bomId"],
+        );
+        if (!hasBom || hasBom.length === 0) {
+            return errorResponse(
+                res,
+                "Selected Finished Goods does not have a complete BOM",
+            );
+        }
+
+        const cmMap = await getCreateMasterMap(companyId);
+        const errors = [];
+        items.forEach((row, idx) => {
+            if (!cmMap.has(Number(row.itemId))) {
+                errors.push({
+                    row: idx + 1,
+                    reason: `Item (createMasterId=${row.itemId}) not found in Create Master`,
+                });
+            }
+            if (!["BOM", "Manual", "Quotation"].includes(row.type)) {
+                errors.push({ row: idx + 1, reason: `Invalid type "${row.type}"` });
+            }
+            if (row.type === "BOM" && !row.groupId) {
+                errors.push({
+                    row: idx + 1,
+                    reason: "Group is required when type is BOM",
+                });
+            }
+        });
+        if (errors.length > 0) {
+            return errorResponse(
+                res,
+                `Validation failed (${errors.length} error(s))`,
+                errors,
+            );
+        }
+
+        const totalValue = items.reduce((sum, row) => {
+            const v = parseFloat(row.value);
+            return sum + (Number.isNaN(v) ? 0 : v);
+        }, 0);
+
+        await updateModelHelper(
+            "modelprice",
+            {
+                finishedGoodsItemId,
+                modelName: modelName || null,
+                currentDate: currentDate || null,
+                totalValue: Number(totalValue.toFixed(2)),
+                status: status || "active",
+                updated: new Date(),
+            },
+            { modelPriceId, companyId },
+        );
+
+        // soft-delete old lines
+        await updateModelHelper(
+            "modelpriceitem",
+            { delete: 1, updated: new Date() },
+            { modelPriceId },
+        );
+
+        let order = 0;
+        for (const row of items) {
+            await saveModel("modelpriceitem", {
+                modelPriceId,
+                itemId: Number(row.itemId),
+                type: row.type,
+                groupId: row.type === "BOM" ? row.groupId || null : null,
+                subGroupId: row.type === "BOM" ? row.subGroupId || null : null,
+                weight: row.weight != null ? String(row.weight) : null,
+                rate: row.rate != null ? String(row.rate) : null,
+                value: row.value != null ? String(row.value) : null,
+                sortOrder: order++,
+                delete: 0,
+            });
+        }
+
+        return successResponse(res, {}, "Model Price updated successfully");
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const deleteModelPrice = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+
+        const { modelPriceId } = req.body;
+
+        const existing = await selectWithJoins(
+            "modelprice",
+            [],
+            { modelPriceId, companyId, delete: 0 },
+            ["modelPriceId"],
+        );
+        if (!existing || existing.length === 0) {
+            return requiredmessage(res, "Model Price not found");
+        }
+
+        await updateModelHelper(
+            "modelprice",
+            { delete: 1, updated: new Date() },
+            { modelPriceId, companyId },
+        );
+        await updateModelHelper(
+            "modelpriceitem",
+            { delete: 1, updated: new Date() },
+            { modelPriceId },
+        );
+
+        return successResponse(res, {}, "Model Price deleted successfully");
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+module.exports = {
+    getFinishedGoodsOptions,
+    getCreateMasterOptions,
+    getGroupOptions,
+    getAutoFetchValues,
+    createModelPrice,
+    getModelPriceList,
+    getModelPriceById,
+    updateModelPrice,
+    deleteModelPrice,
+};
