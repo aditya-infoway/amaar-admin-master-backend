@@ -66,7 +66,7 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
     const nodes = (
         (await selectWithJoins("bomItem", [], { bomId, delete: 0 }, [])) || []
     ).map(plain);
-    if (nodes.length === 0) return 0;
+    if (nodes.length === 0) return { total: 0, matchedCount: 0 };
 
     const subs = (
         (await selectWithJoins(
@@ -77,7 +77,6 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
         )) || []
     ).map(plain);
 
-    // selected sub group + every descendant sub group
     const subSet = new Set();
     const addWithChildren = (id) => {
         if (!id || subSet.has(id)) return;
@@ -90,7 +89,6 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
     if (subGroupId) {
         addWithChildren(Number(subGroupId));
     } else {
-        // main group: all its sub groups (any depth)
         subs
             .filter((s) => Number(s.groupId) === Number(groupId))
             .forEach((s) => addWithChildren(Number(s.subGroupId)));
@@ -114,22 +112,15 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
         return g === Number(groupId) || subSet.has(sg);
     });
 
-    // console.log(
-    //     "GROUP WEIGHT MATCHED:",
-    //     { bomId, groupId, subGroupId },
-    //     matched.map((n) => ({
-    //         bomItemId: n.bomItemId,
-    //         itemId: n.itemId,
-    //         weight: n.weight,
-    //     })),
-    // );
-
     const total = matched.reduce((sum, n) => {
         const w = parseFloat(n.weight);
         return sum + (Number.isNaN(w) ? 0 : w);
     }, 0);
 
-    return Number(total.toFixed(3));
+    return {
+        total: Number(total.toFixed(3)),
+        matchedCount: matched.length,
+    };
 };
 
 // ---------------------------------------------------------------------------
@@ -305,7 +296,7 @@ const getGroupOptions = async (req, res) => {
 
         const subById = new Map(subs.map((s) => [Number(s.subGroupId), s]));
 
-              const usedGroupIds = new Set(); // items with NO sub group -> main group
+        const usedGroupIds = new Set(); // items with NO sub group -> main group
         const usedSubIds = new Set(); // items with a sub group -> that sub group only
 
         for (const it of items) {
@@ -461,12 +452,20 @@ const getAutoFetchValues = async (req, res) => {
         }
 
         const bom = plain(boms[0]);
-        const groupWeight = await calcBomGroupWeight(
+        const { total: groupWeight, matchedCount } = await calcBomGroupWeight(
             bom.bomId,
             companyId,
             groupId,
             subGroupId,
         );
+
+        let message = "BOM group weight fetched";
+        if (groupWeight <= 0) {
+            message =
+                matchedCount === 0
+                    ? `No item of this group found in BOM ${bom.bomCode}`
+                    : `Items of this group found in BOM ${bom.bomCode}, but their weight is not set (0). Please set the item weight/dimensions and update the BOM.`;
+        }
 
         return successResponse(
             res,
@@ -477,9 +476,7 @@ const getAutoFetchValues = async (req, res) => {
                 bomId: bom.bomId,
                 bomCode: bom.bomCode,
             },
-            groupWeight > 0
-                ? "BOM group weight fetched"
-                : `No item of this group found in BOM ${bom.bomCode}`,
+            message,
         );
     } catch (error) {
         return errorResponse(res, error.message || "Something Went Wrong", error);
