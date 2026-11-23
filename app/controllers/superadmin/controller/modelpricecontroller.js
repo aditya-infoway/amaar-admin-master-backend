@@ -112,10 +112,47 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
         return g === Number(groupId) || subSet.has(sg);
     });
 
-    const total = matched.reduce((sum, n) => {
-        const w = parseFloat(n.weight);
-        return sum + (Number.isNaN(w) ? 0 : w);
-    }, 0);
+    // ---- tree helpers ----
+    const nodeById = new Map(nodes.map((n) => [Number(n.bomItemId), n]));
+    const childrenByParent = new Map();
+    nodes.forEach((n) => {
+        const p = n.parentId == null ? null : Number(n.parentId);
+        if (!childrenByParent.has(p)) childrenByParent.set(p, []);
+        childrenByParent.get(p).push(n);
+    });
+
+    // apna weight > 0 to wahi, warna children ka effective weight
+    const effectiveWeight = (n, seen = new Set()) => {
+        const id = Number(n.bomItemId);
+        if (seen.has(id)) return 0;
+        seen.add(id);
+
+        const own = parseFloat(n.weight);
+        if (!Number.isNaN(own) && own > 0) return own;
+
+        return (childrenByParent.get(id) || []).reduce(
+            (sum, c) => sum + effectiveWeight(c, seen),
+            0,
+        );
+    };
+
+    // matched item ka koi ancestor bhi matched ho to usse skip (double count na ho)
+    const matchedIds = new Set(matched.map((n) => Number(n.bomItemId)));
+    const hasMatchedAncestor = (n) => {
+        let p = n.parentId == null ? null : Number(n.parentId);
+        const guard = new Set();
+        while (p != null && !guard.has(p)) {
+            if (matchedIds.has(p)) return true;
+            guard.add(p);
+            const parent = nodeById.get(p);
+            p = parent && parent.parentId != null ? Number(parent.parentId) : null;
+        }
+        return false;
+    };
+
+    const total = matched
+        .filter((n) => !hasMatchedAncestor(n))
+        .reduce((sum, n) => sum + effectiveWeight(n), 0);
 
     return {
         total: Number(total.toFixed(3)),
@@ -464,7 +501,7 @@ const getAutoFetchValues = async (req, res) => {
             message =
                 matchedCount === 0
                     ? `No item of this group found in BOM ${bom.bomCode}`
-                    : `Items of this group found in BOM ${bom.bomCode}, but their weight is not set (0). Please set the item weight/dimensions and update the BOM.`;
+                    : `Items of this group found in BOM ${bom.bomCode}, but none of them has a weight yet. You can enter the weight manually.`;
         }
 
         return successResponse(

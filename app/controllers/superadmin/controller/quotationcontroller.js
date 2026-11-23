@@ -63,11 +63,17 @@ const getVehicleGroupId = async (companyId, vehicleType) => {
   const groups = await selectWithJoins(
     "itemgroup",
     [],
-    { companyId, delete: 0, groupName, groupType: "default" },
-    ["itemGroupId"],
+    { companyId, delete: 0, groupType: "default" },
+    ["itemGroupId", "groupName"],
   );
 
-  return groups.length ? groups[0].itemGroupId : null;
+  const match = groups.find(
+    (g) =>
+      String(g.groupName || "").trim().toLowerCase() ===
+      groupName.toLowerCase(),
+  );
+
+  return match ? match.itemGroupId : null;
 };
 
 // Us group ki lines ka modelPriceId-wise total value
@@ -175,7 +181,7 @@ const getVehicleModelById = async (companyId, vehicleType, modelPriceId) => {
 
   return {
     modelPriceId: row.modelPriceId,
-   label: fg.itemName || row.modelName || `Model ${row.modelPriceId}`,
+    label: fg.itemName || row.modelName || `Model ${row.modelPriceId}`,
     totalValue: total,
   };
 };
