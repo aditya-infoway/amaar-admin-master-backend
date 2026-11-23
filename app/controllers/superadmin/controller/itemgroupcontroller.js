@@ -7,6 +7,53 @@ const {
   selectWithJoins,
 } = require("../../../helper/index.js");
 
+const { syncDefaultItemGroups } = require("./companydetailscontroller.js");
+
+const ITEM_GROUP_FIELDS = [
+  "itemGroupId",
+  "companyId",
+  "groupName",
+  "itemCategoryId",
+  "groupType",
+  "status",
+  "createdBy",
+  "createdType",
+  "created",
+];
+
+
+// ---- helper: createdBy (company ya employee) ka naam resolve ----
+const resolveCreatedByName = async (createdByIds) => {
+  let companyMap = {};
+  let employeeMap = {};
+
+  if (createdByIds.length > 0) {
+    const companies = await selectWithJoins(
+      "company",
+      [],
+      { companyId: createdByIds, delete: 0 },
+      ["companyId", "companyName"]
+    );
+    companyMap = (companies || []).reduce((acc, item) => {
+      acc[String(item.companyId)] = item.companyName;
+      return acc;
+    }, {});
+
+    const employees = await selectWithJoins(
+      "employee",
+      [],
+      { employeeId: createdByIds, delete: 0 },
+      ["employeeId", "employeeName"]
+    );
+    employeeMap = (employees || []).reduce((acc, item) => {
+      acc[String(item.employeeId)] = item.employeeName;
+      return acc;
+    }, {});
+  }
+
+  return { companyMap, employeeMap };
+};
+
 // ---------------- CREATE ----------------
 const createItemGroup = async (req, res) => {
   try {
@@ -16,7 +63,7 @@ const createItemGroup = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
-    const { groupName, itemCategoryId, status,createdBy, createdType } = req.body;
+    const { groupName, itemCategoryId, status, createdBy, createdType } = req.body;
 
     const nameExists = await selectWithJoins(
       "itemgroup",
@@ -33,8 +80,9 @@ const createItemGroup = async (req, res) => {
       companyId,
       groupName: groupName.trim(),
       itemCategoryId,
-       createdBy,    
-  createdType, 
+      groupType: "manual",
+      createdBy,
+      createdType,
       status,
       delete: 0,
     };
@@ -59,59 +107,32 @@ const getItemGroupList = async (req, res) => {
       return requiredmessage(res, "Unauthorized. Please login again.");
     }
 
+    // default groups (Tipper, Trailer) ensure karo — fail ho to bhi list chale
+    try {
+      await syncDefaultItemGroups(companyId);
+    } catch (syncError) {
+      console.log("syncDefaultItemGroups failed:", syncError?.message);
+    }
+
     const list = await selectWithJoins(
       "itemgroup",
       [],
       { companyId, delete: 0 },
-      [
-        "itemGroupId",
-        "companyId",
-        "groupName",
-        "itemCategoryId",
-        "status",
-        "createdBy",     // 👈 add
-        "createdType",   // 👈 add
-        "created",
-      ],
+      ITEM_GROUP_FIELDS,
       [["itemGroupId", "DESC"]]
     );
 
-    // createdBy resolve — company ho ya employee
     const createdByIds = [
       ...new Set((list || []).map((row) => row.createdBy).filter(Boolean)),
     ];
-
-    let companyMap = {};
-    if (createdByIds.length > 0) {
-      const companies = await selectWithJoins(
-        "company",
-        [],
-        { companyId: createdByIds, delete: 0 },
-        ["companyId", "companyName"]
-      );
-      companyMap = (companies || []).reduce((acc, item) => {
-        acc[String(item.companyId)] = item.companyName;
-        return acc;
-      }, {});
-    }
-
-    let employeeMap = {};
-    if (createdByIds.length > 0) {
-      const employees = await selectWithJoins(
-        "employee",
-        [],
-        { employeeId: createdByIds, delete: 0 },
-        ["employeeId", "employeeName"]
-      );
-      employeeMap = (employees || []).reduce((acc, item) => {
-        acc[String(item.employeeId)] = item.employeeName;
-        return acc;
-      }, {});
-    }
+    const { companyMap, employeeMap } = await resolveCreatedByName(createdByIds);
 
     const data = (list || []).map((row) => ({
       ...(row.toJSON ? row.toJSON() : row),
-      createdBy: companyMap[String(row.createdBy)] || employeeMap[String(row.createdBy)] || row.createdBy,
+      createdBy:
+        companyMap[String(row.createdBy)] ||
+        employeeMap[String(row.createdBy)] ||
+        row.createdBy,
     }));
 
     return successResponse(res, data, "Item group list fetched successfully");
@@ -135,7 +156,7 @@ const getItemGroupById = async (req, res) => {
       "itemgroup",
       [],
       { itemGroupId: id, companyId, delete: 0 },
-      ["itemGroupId", "companyId", "groupName", "itemCategoryId", "status", "createdBy", "createdType", "created"] // 👈 add
+      ITEM_GROUP_FIELDS
     );
 
     if (rows.length === 0) {
@@ -187,11 +208,26 @@ const updateItemGroup = async (req, res) => {
       "itemgroup",
       [],
       { itemGroupId, companyId, delete: 0 },
-      ["itemGroupId"]
+      ["itemGroupId", "groupName", "groupType", "itemCategoryId"]
     );
 
     if (existing.length === 0) {
       return requiredmessage(res, "Item group not found");
+    }
+
+    // default group ka naam change nahi hoga (warna sync dobara bana dega)
+    const isDefault = String(existing[0].groupType || "").toLowerCase() === "default";
+
+    if (isDefault) {
+      if (
+        String(existing[0].groupName).trim().toLowerCase() !==
+        String(groupName || "").trim().toLowerCase()
+      ) {
+        return errorResponse(res, "Default item group name cannot be changed.");
+      }
+      if (String(existing[0].itemCategoryId) !== String(itemCategoryId)) {
+        return errorResponse(res, "Default item group category cannot be changed.");
+      }
     }
 
     const nameExists = await selectWithJoins(
@@ -244,11 +280,15 @@ const deleteItemGroup = async (req, res) => {
       "itemgroup",
       [],
       { itemGroupId, companyId, delete: 0 },
-      ["itemGroupId"]
+      ["itemGroupId", "groupType"]
     );
 
     if (existing.length === 0) {
       return requiredmessage(res, "Item group not found");
+    }
+
+    if (String(existing[0].groupType || "").toLowerCase() === "default") {
+      return errorResponse(res, "Default item group cannot be deleted.");
     }
 
     await updateModelHelper(

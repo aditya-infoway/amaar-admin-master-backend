@@ -43,6 +43,143 @@ const normalizeId = (value) => {
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
+
+
+// ============================================================
+// TIPPER / TRAILER = Finished Goods (default group) + Model Price
+// ============================================================
+
+// ============================================================
+// TIPPER / TRAILER = Model Price lines ke group se
+// ============================================================
+
+const VEHICLE_GROUP_NAME = { tipper: "Tipper", trailer: "Trailer" };
+
+// Default group (Tipper / Trailer) ka itemGroupId
+const getVehicleGroupId = async (companyId, vehicleType) => {
+  const groupName = VEHICLE_GROUP_NAME[vehicleType];
+  if (!groupName) return null;
+
+  const groups = await selectWithJoins(
+    "itemgroup",
+    [],
+    { companyId, delete: 0, groupName, groupType: "default" },
+    ["itemGroupId"],
+  );
+
+  return groups.length ? groups[0].itemGroupId : null;
+};
+
+// Us group ki lines ka modelPriceId-wise total value
+const getGroupLineTotals = async (groupId, modelPriceIds = null) => {
+  const where = { groupId, delete: 0 };
+  if (modelPriceIds) where.modelPriceId = modelPriceIds;
+
+  const lines = await selectWithJoins("modelpriceitem", [], where, [
+    "modelPriceId",
+    "value",
+  ]);
+
+  const totals = new Map();
+  for (const l of lines) {
+    const v = parseFloat(l.value);
+    if (Number.isNaN(v)) continue;
+    const key = Number(l.modelPriceId);
+    totals.set(key, (totals.get(key) || 0) + v);
+  }
+  return totals;
+};
+
+const getFinishedGoodsMap = async (companyId, itemIds) => {
+  if (!itemIds.length) return new Map();
+  const items = await selectWithJoins(
+    "itemmaster",
+    [],
+    { companyId, delete: 0, itemId: itemIds },
+    ["itemId", "itemCode", "itemName"],
+  );
+  return new Map(
+    items.map((i) => {
+      const p = i.toJSON ? i.toJSON() : i;
+      return [Number(p.itemId), p];
+    }),
+  );
+};
+
+// Dropdown list
+const getVehicleModelOptions = async (companyId, vehicleType) => {
+  const groupId = await getVehicleGroupId(companyId, vehicleType);
+  if (!groupId) return [];
+
+  const totals = await getGroupLineTotals(groupId);
+  const modelPriceIds = [...totals.keys()];
+  if (!modelPriceIds.length) return [];
+
+  const headers = await selectWithJoins(
+    "modelprice",
+    [],
+    { companyId, delete: 0, status: "active", modelPriceId: modelPriceIds },
+    ["modelPriceId", "finishedGoodsItemId", "modelName"],
+    [["modelPriceId", "DESC"]],
+  );
+
+  const fgMap = await getFinishedGoodsMap(
+    companyId,
+    headers.map((h) => h.finishedGoodsItemId),
+  );
+
+  const seen = new Set();
+  const options = [];
+
+  for (const h of headers) {
+    const row = h.toJSON ? h.toJSON() : h;
+    const fgId = Number(row.finishedGoodsItemId);
+    if (seen.has(fgId)) continue; // ek finished good ka latest hi
+    seen.add(fgId);
+
+    const total = Number((totals.get(Number(row.modelPriceId)) || 0).toFixed(2));
+    if (total <= 0) continue;
+
+    const fg = fgMap.get(fgId) || {};
+    options.push({
+      modelPriceId: row.modelPriceId,
+      finishedGoodsItemId: fgId,
+      label: fg.itemName || row.modelName || `Model ${row.modelPriceId}`,
+      totalValue: total,
+    });
+  }
+
+  return options;
+};
+
+// Save/update validation
+const getVehicleModelById = async (companyId, vehicleType, modelPriceId) => {
+  const groupId = await getVehicleGroupId(companyId, vehicleType);
+  if (!groupId) return null;
+
+  const rows = await selectWithJoins(
+    "modelprice",
+    [],
+    { modelPriceId, companyId, delete: 0, status: "active" },
+    ["modelPriceId", "finishedGoodsItemId", "modelName"],
+  );
+  if (!rows.length) return null;
+  const row = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+
+  const totals = await getGroupLineTotals(groupId, [Number(modelPriceId)]);
+  const total = Number((totals.get(Number(modelPriceId)) || 0).toFixed(2));
+  if (total <= 0) return null; // is model me is group ki line hi nahi
+
+  const fgMap = await getFinishedGoodsMap(companyId, [row.finishedGoodsItemId]);
+  const fg = fgMap.get(Number(row.finishedGoodsItemId)) || {};
+
+  return {
+    modelPriceId: row.modelPriceId,
+   label: fg.itemName || row.modelName || `Model ${row.modelPriceId}`,
+    totalValue: total,
+  };
+};
+
 // Lead details are never copied into the quotation. Always read them live from the lead.
 const getLeadMap = async (leadIds, companyId) => {
   const ids = [
@@ -108,6 +245,40 @@ const getQuotationMasterPrices = async ({
     // These fields are optional for Tipper
     if (vehicleType === "tipper" && TIPPER_OPTIONAL_FIELDS.includes(field)) {
       result[field] = null;
+      continue;
+    }
+
+    // Tipper / Trailer: Create Master nahi, Model Price se aata hai
+    if (field === "trailer") {
+      const label = vehicleType === "tipper" ? "Tipper" : "Trailer";
+      const modelPriceId = normalizeId(selections.trailer);
+
+      if (!modelPriceId) {
+        throw new Error(`${label} selection is required.`);
+      }
+
+      const model = await getVehicleModelById(
+        companyId,
+        vehicleType,
+        modelPriceId,
+      );
+
+      if (!model) {
+        throw new Error(
+          `Invalid ${label} selected. Please select a valid ${label} model price.`,
+        );
+      }
+
+      if (!Number.isFinite(model.totalValue) || model.totalValue <= 0) {
+        throw new Error(
+          "Price not set. Please set the price in Model Price first.",
+        );
+      }
+
+      result.trailer = model.modelPriceId;
+      result.trailerDescription = model.label;
+      result.trailerPrice = model.totalValue;
+      basicCost += model.totalValue;
       continue;
     }
 
@@ -239,6 +410,49 @@ const calculateQuotationAmount = ({
     finalPrice: round2(finalPrice),
   };
 };
+
+
+
+
+
+
+
+
+// ============================================================
+// GET VEHICLE MODELS (Tipper / Trailer dropdown)
+// ============================================================
+
+const getQuotationVehicleModels = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const vehicleType = String(req.query.vehicleType || "").toLowerCase();
+
+    if (!["tipper", "trailer"].includes(vehicleType)) {
+      return errorResponse(res, "Vehicle type must be tipper or trailer.");
+    }
+
+    const options = await getVehicleModelOptions(companyId, vehicleType);
+
+    return successResponse(res, options, "Vehicle models fetched successfully");
+  } catch (error) {
+    return errorResponse(res, error.message || "Something Went Wrong", error);
+  }
+};
+
+
+
+
+
+
+
+
+
+
 
 // ============================================================
 // GET NEXT QUOTATION NO
@@ -643,10 +857,10 @@ const getQuotationList = async (req, res) => {
       }
     }
 
-   const leadMap = await getLeadMap(
-  quotations.map((q) => q.leadId),
-  companyId,
-);
+    const leadMap = await getLeadMap(
+      quotations.map((q) => q.leadId),
+      companyId,
+    );
     const data = quotations.map((quotation) => {
       // ✅ Handle different createdBy values
       let createdByName = quotation.createdBy || "";
@@ -665,7 +879,7 @@ const getQuotationList = async (req, res) => {
         financialYearId: quotation.financialYearId,
         qNo: quotation.qNo,
         leadId: quotation.leadId,
-            ...leadFieldsForQuotation(leadMap.get(String(quotation.leadId))),
+        ...leadFieldsForQuotation(leadMap.get(String(quotation.leadId))),
         vehicleType: quotation.vehicleType,
         trailer: quotation.trailer,
         chassis: quotation.chassis,
@@ -779,7 +993,7 @@ const getQuotationById = async (req, res) => {
 
     const quotation = rows[0];
 
-        const leadMap = await getLeadMap([quotation.leadId], companyId);
+    const leadMap = await getLeadMap([quotation.leadId], companyId);
 
     return successResponse(
       res,
@@ -789,7 +1003,7 @@ const getQuotationById = async (req, res) => {
         qNo: quotation.qNo,
         leadId: quotation.leadId,
 
-                ...leadFieldsForQuotation(leadMap.get(String(quotation.leadId))),
+        ...leadFieldsForQuotation(leadMap.get(String(quotation.leadId))),
 
         vehicleType: quotation.vehicleType,
 
@@ -949,7 +1163,7 @@ const updateQuotation = async (req, res) => {
       return errorResponse(res, "Lead is required.");
     }
 
-       const leadCheck = await selectWithJoins(
+    const leadCheck = await selectWithJoins(
       "lead",
       [],
       { leadId, companyId, delete: 0 },
@@ -1141,7 +1355,7 @@ const deleteQuotation = async (req, res) => {
       return requiredmessage(res, "Quotation not found.");
     }
 
-   
+
 
     return successResponse(
       res,
@@ -1162,4 +1376,5 @@ module.exports = {
   getQuotationById,
   updateQuotation,
   deleteQuotation,
+  getQuotationVehicleModels,
 };

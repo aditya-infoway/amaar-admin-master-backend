@@ -24,13 +24,18 @@ module.exports = sequelize => {
       allowNull: false,
       field: "groupName"
     },
+    groupType: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "manual",
+    },
     status: {
       type: DataTypes.STRING(20),
       allowNull: false,
       defaultValue: "active",
       field: "status"
     },
-    createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },    
+    createdBy: { type: DataTypes.INTEGER, allowNull: true, field: "createdBy" },
     createdType: { type: DataTypes.STRING(20), allowNull: true, field: "createdType" },
     created: {
       type: DataTypes.DATE,

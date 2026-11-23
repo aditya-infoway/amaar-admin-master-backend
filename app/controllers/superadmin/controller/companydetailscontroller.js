@@ -99,6 +99,86 @@ const syncDefaultItemCategories = async (companyId) => {
 
 
 
+
+// ---- Default Item Groups (auto-created on company creation) ----
+const GROUP_MASTER_LIST = ["Tipper", "Trailer"];
+const DEFAULT_GROUP_CATEGORY = "Finished Goods";
+
+const syncDefaultItemGroups = async (companyId) => {
+  // 1. Pehle ensure karo ki default categories (Finished Goods) bani hui hain
+  await syncDefaultItemCategories(companyId);
+
+  // 2. Finished Goods ka itemCategoryId nikalo
+  const categoryRows = await selectWithJoins(
+    "itemcategory",
+    [],
+    { companyId, delete: 0 },
+    ["itemCategoryId", "categoryName"],
+  );
+
+  const finishedGoods = categoryRows.find(
+    (row) =>
+      String(row.categoryName || "").trim().toLowerCase() ===
+      DEFAULT_GROUP_CATEGORY.toLowerCase(),
+  );
+
+  if (!finishedGoods) {
+    throw new Error("Finished Goods category not found for default groups");
+  }
+
+  const finishedGoodsId = finishedGoods.itemCategoryId;
+
+  // 3. Is company ke ALL groups (delete filter nahi, taaki deleted default wapas aa sake)
+  const existingRows = await selectWithJoins(
+    "itemgroup",
+    [],
+    { companyId },
+    ["itemGroupId", "groupName", "groupType", "itemCategoryId", "status", "delete"],
+  );
+
+  for (const groupName of GROUP_MASTER_LIST) {
+    const existing = existingRows.find(
+      (row) =>
+        String(row.groupName || "").trim().toLowerCase() ===
+        groupName.trim().toLowerCase(),
+    );
+
+    if (existing) {
+      const isCorrectDefault =
+        String(existing.groupType || "").toLowerCase() === "default" &&
+        Number(existing.delete) === 0 &&
+        String(existing.itemCategoryId) === String(finishedGoodsId);
+
+      if (!isCorrectDefault) {
+        await updateModel(
+          "itemgroup",
+          {
+            groupType: "default",
+            itemCategoryId: finishedGoodsId,
+            status: "active",
+            delete: 0,
+            updated: new Date(),
+          },
+          { itemGroupId: existing.itemGroupId, companyId },
+        );
+      }
+      continue;
+    }
+
+    await saveModel("itemgroup", {
+      companyId,
+      groupName,
+      groupType: "default",
+      itemCategoryId: finishedGoodsId,
+      status: "active",
+      delete: 0,
+    });
+  }
+
+  return true;
+};
+
+
 // ---- Create Company Details + Financial Year ----
 const createCompanyDetails = async (req, res) => {
   try {
@@ -204,6 +284,7 @@ const createCompanyDetails = async (req, res) => {
     }
 
     await syncDefaultItemCategories(companyId);
+    await syncDefaultItemGroups(companyId);
     await syncDefaultGstAccounts(companyId);
 
     return successResponse(
@@ -496,4 +577,5 @@ module.exports = {
   getCompanyDetails,
   updateCompanyDetails,
   syncDefaultItemCategories,
+  syncDefaultItemGroups,
 };

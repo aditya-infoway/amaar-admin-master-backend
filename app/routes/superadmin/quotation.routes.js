@@ -29,6 +29,8 @@ module.exports = (app) => {
     quotation.getNextQuotationNo
   );
 
+  routes.get("/vehicle-models", quotation.getQuotationVehicleModels);
+
   routes.get(
     "/list",
     quotation.getQuotationList

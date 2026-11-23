@@ -114,15 +114,15 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
         return g === Number(groupId) || subSet.has(sg);
     });
 
-    console.log(
-        "GROUP WEIGHT MATCHED:",
-        { bomId, groupId, subGroupId },
-        matched.map((n) => ({
-            bomItemId: n.bomItemId,
-            itemId: n.itemId,
-            weight: n.weight,
-        })),
-    );
+    // console.log(
+    //     "GROUP WEIGHT MATCHED:",
+    //     { bomId, groupId, subGroupId },
+    //     matched.map((n) => ({
+    //         bomItemId: n.bomItemId,
+    //         itemId: n.itemId,
+    //         weight: n.weight,
+    //     })),
+    // );
 
     const total = matched.reduce((sum, n) => {
         const w = parseFloat(n.weight);
@@ -240,6 +240,45 @@ const getGroupOptions = async (req, res) => {
         if (!companyId)
             return requiredmessage(res, "Unauthorized. Please login again.");
 
+        const finishedGoodsItemId =
+            Number(req.query.finishedGoodsItemId) || null;
+        if (!finishedGoodsItemId) {
+            return successResponse(res, [], "Select Finished Goods first");
+        }
+
+        // latest complete BOM of this finished good (same one auto-fetch uses)
+        const boms = await selectWithJoins(
+            "bom",
+            [],
+            { companyId, finishedGoodsItemId, setupStatus: "complete", delete: 0 },
+            ["bomId"],
+            [["bomId", "DESC"]],
+        );
+        if (!boms || boms.length === 0) {
+            return successResponse(res, [], "No complete BOM found");
+        }
+        const bomId = plain(boms[0]).bomId;
+
+        // items used inside that BOM
+        const nodes = (
+            (await selectWithJoins("bomItem", [], { bomId, delete: 0 }, [
+                "itemId",
+            ])) || []
+        ).map(plain);
+        const itemIds = [...new Set(nodes.map((n) => Number(n.itemId)))];
+        if (itemIds.length === 0) {
+            return successResponse(res, [], "BOM has no items");
+        }
+
+        const items = (
+            (await selectWithJoins(
+                "itemmaster",
+                [],
+                { companyId, delete: 0, itemId: itemIds },
+                ["itemId", "groupId", "subGroupId"],
+            )) || []
+        ).map(plain);
+
         const mains = (
             (await selectWithJoins(
                 "itemgroup",
@@ -264,21 +303,39 @@ const getGroupOptions = async (req, res) => {
             )) || []
         ).map(plain);
 
+        const subById = new Map(subs.map((s) => [Number(s.subGroupId), s]));
+
+              const usedGroupIds = new Set(); // items with NO sub group -> main group
+        const usedSubIds = new Set(); // items with a sub group -> that sub group only
+
+        for (const it of items) {
+            const sid = Number(it.subGroupId) || 0;
+            if (sid) {
+                usedSubIds.add(sid);
+            } else if (it.groupId) {
+                usedGroupIds.add(Number(it.groupId));
+            }
+        }
+
         const data = [
-            ...mains.map((g) => ({
-                id: `G-${g.itemGroupId}`,
-                label: g.groupName,
-                groupId: g.itemGroupId,
-                subGroupId: null,
-                itemCategoryId: g.itemCategoryId,
-            })),
-            ...subs.map((s) => ({
-                id: `S-${s.subGroupId}`,
-                label: s.subGroupName,
-                groupId: s.groupId,
-                subGroupId: s.subGroupId,
-                itemCategoryId: s.itemCategoryId,
-            })),
+            ...mains
+                .filter((g) => usedGroupIds.has(Number(g.itemGroupId)))
+                .map((g) => ({
+                    id: `G-${g.itemGroupId}`,
+                    label: g.groupName,
+                    groupId: g.itemGroupId,
+                    subGroupId: null,
+                    itemCategoryId: g.itemCategoryId,
+                })),
+            ...subs
+                .filter((s) => usedSubIds.has(Number(s.subGroupId)))
+                .map((s) => ({
+                    id: `S-${s.subGroupId}`,
+                    label: s.subGroupName,
+                    groupId: s.groupId,
+                    subGroupId: s.subGroupId,
+                    itemCategoryId: s.itemCategoryId,
+                })),
         ];
 
         return successResponse(res, data, "Group options fetched successfully");
@@ -286,6 +343,11 @@ const getGroupOptions = async (req, res) => {
         return errorResponse(res, error.message || "Something Went Wrong", error);
     }
 };
+
+
+
+
+
 
 const getAutoFetchValues = async (req, res) => {
     try {
