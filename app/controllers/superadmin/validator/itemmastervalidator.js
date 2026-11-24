@@ -28,7 +28,7 @@ const baseSchema = {
     "any.required": "Group is required",
     "number.base": "Group is required",
   }),
-    subGroupId: Joi.number().allow(null, ""),
+  subGroupId: Joi.number().allow(null, ""),
   unit: Joi.string().trim().required().messages({
     "string.empty": "Unit is required",
   }),
@@ -159,26 +159,73 @@ const bulkAutoGenerateBarcode = Joi.object().keys({
 const textOrNumber = Joi.alternatives().try(Joi.string().trim(), Joi.number()).allow("", null);
 const optionalNumber = Joi.alternatives().try(Joi.number(), Joi.string().trim()).allow("", null);
 
+// const bulkImportItemMaster = Joi.object().keys({
+//   items: Joi.array()
+//     .items(
+//       Joi.object().keys({
+//         // Auto category me blank rehta hai, manual category me controller required check karta hai
+//         itemCode: textOrNumber,
+//         itemName: Joi.string().trim().required(),
+//         categoryName: Joi.string().trim().required(),
+//         groupName: Joi.string().trim().required(),
+//         shortName: textOrNumber,
+//         hsnCode: textOrNumber,
+//         itemLocation: textOrNumber,
+//         unit: textOrNumber,
+//         taxSlab: textOrNumber,
+//         thickness: optionalNumber,
+//         length: optionalNumber,
+//         width: optionalNumber,
+//         weight: optionalNumber,
+//         openingStock: optionalNumber,
+//         stockValue: optionalNumber,
+//         minQty: optionalNumber,
+//         maxQty: optionalNumber,
+//         stockMapping: textOrNumber,
+//         generateBarcode: Joi.alternatives().try(Joi.boolean(), Joi.number(), Joi.string()).allow("", null),
+//         barcode: textOrNumber,
+//       })
+//     )
+//     .min(1)
+//     .required()
+//     .messages({
+//       "array.min": "No items to import.",
+//       "any.required": "Items array is required.",
+//     }),
+// });
+
+
+
 const bulkImportItemMaster = Joi.object().keys({
+  createdBy: Joi.number().allow(null, ""),
+  createdType: Joi.string().trim().allow(null, ""),
   items: Joi.array()
     .items(
-
-
       Joi.object().keys({
-        itemCode: Joi.alternatives()
-          .try(Joi.string().trim().min(1), Joi.number())
-          .required()
-          .messages({
-            "alternatives.match": "Item Code must be text or a number",
-            "any.required": "Item Code is required",
-            "string.empty": "Item Code cannot be empty",
-            "string.min": "Item Code cannot be empty",
-          }),
-        itemName: Joi.string().trim().required(),
-        categoryName: Joi.string().trim().required(),
+        // Excel ka Code Type sirf dikhane ke liye hai, backend category se type nikalta hai
+        codeType: Joi.any().strip(),
+        // Barcode ab item code hi hai, purane columns ignore
+        generateBarcode: Joi.any().strip(),
+        barcode: Joi.any().strip(),
+        // Auto category me blank rehta hai, manual me controller required check karta hai
+        itemCode: textOrNumber,
+        itemName: Joi.string().trim().required().messages({
+          "string.empty": "Item Name is required",
+          "any.required": "Item Name is required",
+        }),
+        categoryName: Joi.string().trim().required().messages({
+          "string.empty": "Category Name is required",
+          "any.required": "Category Name is required",
+        }),
         groupName: Joi.string().trim().required(),
         shortName: textOrNumber,
-        hsnCode: textOrNumber,
+        hsnCode: Joi.alternatives()
+          .try(Joi.string().trim(), Joi.number())
+          .required()
+          .messages({
+            "any.required": "HSN Code is required",
+            "string.empty": "HSN Code is required",
+          }),
         itemLocation: textOrNumber,
         unit: textOrNumber,
         taxSlab: textOrNumber,
@@ -191,8 +238,6 @@ const bulkImportItemMaster = Joi.object().keys({
         minQty: optionalNumber,
         maxQty: optionalNumber,
         stockMapping: textOrNumber,
-        generateBarcode: Joi.alternatives().try(Joi.boolean(), Joi.number(), Joi.string()).allow("", null),
-        barcode: textOrNumber,
       })
     )
     .min(1)
@@ -202,7 +247,6 @@ const bulkImportItemMaster = Joi.object().keys({
       "any.required": "Items array is required.",
     }),
 });
-  
 module.exports = {
   createItemMaster,
   updateItemMaster,

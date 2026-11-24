@@ -63,6 +63,49 @@ const isBarcodeTaken = async (companyId, barcode, excludeItemId = null) => {
 // ---------------- Item code: category ke hisaab se next code ----------------
 // Category me jo serialNo hai wo start number hai. Us category ke items
 // (deleted bhi) me se sabse bada number dhoondh kar +1 karte hain.
+// const generateNextItemCode = async (companyId, category) => {
+//   const prefix = category.prefix || "";
+//   const suffix = category.suffix || "";
+//   const head = `${prefix}${suffix}`;
+//   const startStr = String(category.serialNo || "");
+//   const width = startStr.length || 1;
+//   const start = parseInt(startStr, 10) || 1;
+
+//   // delete filter nahi lagaya, kyunki unique index me deleted rows bhi count hoti hain
+//   const rows = await selectWithJoins(
+//     "itemmaster",
+//     [],
+//     { companyId, itemCategoryId: category.itemCategoryId },
+//     ["itemCode"]
+//   );
+
+//   let maxNum = null;
+//   rows.forEach((row) => {
+//     const code = String(row.itemCode || "");
+//     if (!code.startsWith(head)) return;
+//     const rest = code.slice(head.length);
+//     if (!/^\d+$/.test(rest)) return;
+//     const num = parseInt(rest, 10);
+//     if (maxNum === null || num > maxNum) maxNum = num;
+//   });
+
+//   let next = maxNum === null ? start : Math.max(start, maxNum + 1);
+
+//   // Dusri category ya manual code se clash ho to aage badho
+//   for (let i = 0; i < 50; i++) {
+//     const candidate = `${head}${String(next).padStart(width, "0")}`;
+//     const clash = await selectWithJoins(
+//       "itemmaster",
+//       [],
+//       { companyId, itemCode: candidate },
+//       ["itemId"]
+//     );
+//     if (clash.length === 0) return candidate;
+//     next++;
+//   }
+//   throw new Error("Could not generate a unique item code");
+// };
+
 const generateNextItemCode = async (companyId, category) => {
   const prefix = category.prefix || "";
   const suffix = category.suffix || "";
@@ -91,7 +134,7 @@ const generateNextItemCode = async (companyId, category) => {
 
   let next = maxNum === null ? start : Math.max(start, maxNum + 1);
 
-  // Dusri category ya manual code se clash ho to aage badho
+  // Dusri category / manual code / kisi ke barcode se clash ho to aage badho
   for (let i = 0; i < 50; i++) {
     const candidate = `${head}${String(next).padStart(width, "0")}`;
     const clash = await selectWithJoins(
@@ -100,7 +143,8 @@ const generateNextItemCode = async (companyId, category) => {
       { companyId, itemCode: candidate },
       ["itemId"]
     );
-    if (clash.length === 0) return candidate;
+    const barcodeClash = await isBarcodeTaken(companyId, candidate);
+    if (clash.length === 0 && !barcodeClash) return candidate;
     next++;
   }
   throw new Error("Could not generate a unique item code");
@@ -1146,178 +1190,785 @@ const getPurchaseItemList = async (req, res) => {
 };
 
 
-
-// ---------------- BULK IMPORT (from Excel) — validate ALL rows first, reject whole file if any error ----------------
-const bulkImportItemMaster = async (req, res) => {
+const getItemImportTemplateLists = async (req, res) => {
   try {
     const companyId = req.companyId;
     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
 
-    const { items, createdBy, createdType } = req.body;
-
     const categories = await selectWithJoins(
-      "itemcategory", [], { companyId, delete: 0 }, ["itemCategoryId", "categoryName"]
+      "itemcategory", [], { companyId, delete: 0 },
+      ["itemCategoryId", "categoryName", "itemCodeType"]
     );
     const groups = await selectWithJoins(
-      "itemgroup", [], { companyId, delete: 0 }, ["itemGroupId", "groupName"]
+      "itemgroup", [], { companyId, delete: 0 }, ["itemGroupId", "groupName", "itemCategoryId"]
     );
-    const categoryMap = new Map(categories.map((c) => [c.categoryName.trim().toLowerCase(), c.itemCategoryId]));
-    const groupMap = new Map(groups.map((g) => [g.groupName.trim().toLowerCase(), g.itemGroupId]));
+    const subGroups = await selectWithJoins(
+      "subgroup", [], { companyId, delete: 0 }, ["subGroupId", "subGroupName", "groupId"]
+    );
+    // Location master (table name: check your location controller)
+    const locationRows = await selectWithJoins(
+      "location", [], { companyId, delete: 0 }, ["locationId", "locationName"]
+    );
+    const locations = locationRows
+      .map((l) => l.locationName)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
 
-    // active + soft-deleted items
+    const result = categories
+      .map((c) => {
+        const list = [];
+        groups
+          .filter((g) => String(g.itemCategoryId) === String(c.itemCategoryId))
+          .sort((a, b) => a.groupName.localeCompare(b.groupName))
+          .forEach((g) => {
+            list.push(g.groupName); // group
+            subGroups
+              .filter((s) => String(s.groupId) === String(g.itemGroupId))
+              .sort((a, b) => a.subGroupName.localeCompare(b.subGroupName))
+              .forEach((s) => list.push(s.subGroupName)); // sub group, plain name
+          });
+
+        return {
+          name: c.categoryName,
+          codeType: String(c.itemCodeType || "").trim().toLowerCase() === "auto" ? "auto" : "manual",
+          groups: list,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return successResponse(
+      res,
+      { categories: result, locations },
+      "Template lists fetched successfully"
+    );
+  } catch (error) {
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
+
+
+// ---------------- BULK IMPORT (from Excel) — validate ALL rows first, reject whole file if any error ----------------
+// const bulkImportItemMaster = async (req, res) => {
+//   try {
+//     const companyId = req.companyId;
+//     if (!companyId) return requiredmessage(res, "Unauthorized. Please login again.");
+
+//     const { items, createdBy, createdType } = req.body;
+
+//     const categories = await selectWithJoins(
+//       "itemcategory", [], { companyId, delete: 0 }, ["itemCategoryId", "categoryName"]
+//     );
+//     const groups = await selectWithJoins(
+//       "itemgroup", [], { companyId, delete: 0 }, ["itemGroupId", "groupName"]
+//     );
+//     const categoryMap = new Map(categories.map((c) => [c.categoryName.trim().toLowerCase(), c.itemCategoryId]));
+//     const groupMap = new Map(groups.map((g) => [g.groupName.trim().toLowerCase(), g.itemGroupId]));
+
+//     // active + soft-deleted items
+//     const existingItems = await selectWithJoins(
+//       "itemmaster", [], { companyId }, ["itemId", "itemCode", "barcode", "delete"]
+//     );
+//     const activeCodes = new Set(
+//       existingItems.filter((i) => Number(i.delete) === 0).map((i) => (i.itemCode || "").trim().toLowerCase())
+//     );
+//     const deletedItemsByCode = new Map(
+//       existingItems.filter((i) => Number(i.delete) === 1).map((i) => [(i.itemCode || "").trim().toLowerCase(), i])
+//     );
+//     const activeBarcodes = new Set(
+//       existingItems.filter((i) => Number(i.delete) === 0 && i.barcode).map((i) => i.barcode.trim().toLowerCase())
+//     );
+
+//     // ---------------- PASS 1: validate every row, save nothing ----------------
+//     const errors = [];
+//     const seenCodes = new Set();
+//     const seenBarcodes = new Set();
+//     const normalizedRows = [];
+
+//     items.forEach((row, i) => {
+//       const rowNum = i + 2;
+//       const fail = (reason) => errors.push({ row: rowNum, itemCode: clean(row.itemCode), reason });
+
+//       const itemCode = clean(row.itemCode);
+//       const itemName = clean(row.itemName);
+//       const categoryName = clean(row.categoryName);
+//       const groupName = clean(row.groupName);
+
+//       if (!itemCode) return fail("Item Code is required");
+//       if (!itemName) return fail("Item Name is required");
+//       if (!categoryName) return fail("Item Category is required");
+//       if (!groupName) return fail("Group is required");
+
+//       const itemCategoryId = categoryMap.get(categoryName.toLowerCase());
+//       if (!itemCategoryId) return fail(`Item Category "${categoryName}" not found`);
+
+//       const groupId = groupMap.get(groupName.toLowerCase());
+//       if (!groupId) return fail(`Group "${groupName}" not found`);
+
+//       const stockMapping = isYes(row.stockMapping);
+//       const autoGenerate = isYes(row.generateBarcode);
+
+//       // numeric fields (Min/Max only matter when Stock Mapping = Yes)
+//       const numericFields = {
+//         thickness: "Thickness", length: "Length", width: "Width", weight: "Weight",
+//         openingStock: "Opening Stock", stockValue: "Stock Value",
+//         ...(stockMapping ? { minQty: "Min Qty", maxQty: "Max Qty" } : {}),
+//       };
+//       for (const [key, label] of Object.entries(numericFields)) {
+//         const v = clean(row[key]);
+//         if (v !== "" && isNaN(Number(v))) return fail(`${label} must be a number`);
+//       }
+//       if (
+//         stockMapping &&
+//         clean(row.minQty) !== "" && clean(row.maxQty) !== "" &&
+//         Number(row.minQty) > Number(row.maxQty)
+//       ) {
+//         return fail("Min Qty cannot be greater than Max Qty");
+//       }
+
+//       // item code
+//       const codeKey = itemCode.toLowerCase();
+//       if (activeCodes.has(codeKey)) return fail("Item code already exists in database");
+//       if (seenCodes.has(codeKey)) return fail("Duplicate item code within the imported file");
+
+//       // barcode: Yes -> generated later (Barcode Number ignored); No/blank -> manual value or null
+//       const barcode = autoGenerate ? "" : clean(row.barcode);
+//       const barcodeKey = barcode ? barcode.toLowerCase() : null;
+//       if (barcodeKey && activeBarcodes.has(barcodeKey)) return fail("Barcode already exists in database");
+//       if (barcodeKey && seenBarcodes.has(barcodeKey)) return fail("Duplicate barcode within the imported file");
+
+//       seenCodes.add(codeKey);
+//       if (barcodeKey) seenBarcodes.add(barcodeKey);
+
+//       normalizedRows.push({
+//         rowNum,
+//         itemCode,
+//         itemName,
+//         shortName: clean(row.shortName) || itemName,
+//         hsnCode: clean(row.hsnCode),
+//         itemLocation: clean(row.itemLocation),
+//         itemCategoryId,
+//         groupId,
+//         unit: clean(row.unit),
+//         taxSlab: clean(row.taxSlab),
+//         thickness: clean(row.thickness) || null,
+//         length: clean(row.length) || null,
+//         width: clean(row.width) || null,
+//         weight: clean(row.weight) || null,
+//         openingStock: clean(row.openingStock) !== "" ? clean(row.openingStock) : 0,
+//         stockValue: clean(row.stockValue) !== "" ? clean(row.stockValue) : 0,
+//         stockMapping,
+//         minQty: stockMapping ? clean(row.minQty) || null : null,
+//         maxQty: stockMapping ? clean(row.maxQty) || null : null,
+//         barcode: barcode || null,
+//         autoGenerate,
+//       });
+//     });
+
+//     if (errors.length > 0) {
+//       return errorResponse(res, `Import rejected: ${errors.length} row(s) have errors.`, errors);
+//     }
+
+//     // ---------------- PASS 2: save ----------------
+//     // Rows with a manual barcode are saved first, so auto-generated barcodes
+//     // can never collide with a manual ITM000000x from the same file.
+//     normalizedRows.sort((a, b) => Number(a.autoGenerate) - Number(b.autoGenerate));
+
+//     const created = [];
+
+//     for (const row of normalizedRows) {
+//       const deletedItem = deletedItemsByCode.get(row.itemCode.toLowerCase());
+
+//       const finalBarcode = row.autoGenerate
+//         ? await generateBarcodeForCompany(companyId)
+//         : row.barcode;
+
+//       const fields = {
+//         itemName: row.itemName,
+//         shortName: row.shortName,
+//         hsnCode: row.hsnCode,
+//         itemLocation: row.itemLocation,
+//         itemCategoryId: row.itemCategoryId,
+//         groupId: row.groupId,
+//         unit: row.unit,
+//         taxSlab: row.taxSlab,
+//         thickness: row.thickness,
+//         length: row.length,
+//         width: row.width,
+//         weight: row.weight,
+//         openingStock: row.openingStock,
+//         openingStock: row.openingStock || 0,
+//         stockValue: row.stockValue || 0,
+//         minQty: row.minQty,
+//         maxQty: row.maxQty,
+//         barcodeType: row.autoGenerate ? "generate" : "manual",
+//         barcode: finalBarcode,
+//         status: "active",
+//       };
+
+//       let savedItem;
+//       if (deletedItem) {
+//         // restore the soft-deleted record
+//         await updateModelHelper(
+//           "itemmaster",
+//           { ...fields, createdBy, createdType, delete: 0, updated: new Date() },
+//           { itemId: deletedItem.itemId, companyId }
+//         );
+//         savedItem = { itemId: deletedItem.itemId };
+//       } else {
+//         savedItem = await saveModel("itemmaster", {
+//           companyId,
+//           itemCode: row.itemCode,
+//           ...fields,
+//           createdBy,
+//           createdType,
+//           delete: 0,
+//         });
+//       }
+
+//       created.push({ row: row.rowNum, itemId: savedItem.itemId, itemCode: row.itemCode });
+//     }
+
+//     return successResponse(res, { created }, `${created.length} item(s) imported successfully.`);
+//   } catch (error) {
+//     if (error?.name === "SequelizeUniqueConstraintError") {
+//       return errorResponse(res, "Import failed: a barcode or item code is already in use.");
+//     }
+//     return errorResponse(res, "Something Went Wrong", error);
+//   }
+// };
+
+const bulkImportItemMaster = async (req, res) => {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    const { items, createdBy, createdType } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return errorResponse(res, "No items found for import.");
+    }
+
+    const categories = await selectWithJoins(
+      "itemcategory",
+      [],
+      { companyId, delete: 0 },
+      ["itemCategoryId", "categoryName", "itemCodeType", "prefix", "suffix", "serialNo"]
+    );
+
+    const groups = await selectWithJoins(
+      "itemgroup",
+      [],
+      { companyId, delete: 0 },
+      ["itemGroupId", "groupName", "itemCategoryId"]
+    );
+
+    const subGroups = await selectWithJoins(
+      "subgroup",
+      [],
+      { companyId, delete: 0 },
+      ["subGroupId", "subGroupName", "groupId"]
+    );
+
+    const locationRows = await selectWithJoins(
+      "location",
+      [],
+      { companyId, delete: 0 },
+      ["locationId", "locationName"]
+    );
+
+    const locationMap = new Map(
+      locationRows.map((l) => [
+        String(l.locationName).trim().toLowerCase(),
+        l.locationId,
+      ])
+    );
+
+    // ---------------- CATEGORY MAP ----------------
+
+    const categoryInfoMap = new Map(
+      categories.map((c) => [
+        c.categoryName.trim().toLowerCase(),
+        {
+          itemCategoryId: c.itemCategoryId,
+          itemCodeType: c.itemCodeType,
+          prefix: c.prefix,
+          suffix: c.suffix,
+          serialNo: c.serialNo,
+        },
+      ])
+    );
+
+    // ---------------- GROUP + SUBGROUP MAP ----------------
+
+    const groupMap = new Map();
+
+    const addEntry = (key, entry) => {
+      groupMap.set(
+        key,
+        groupMap.has(key) ? { ambiguous: true } : entry
+      );
+    };
+
+    groups.forEach((g) => {
+      addEntry(
+        `${g.itemCategoryId}|${g.groupName.trim().toLowerCase()}`,
+        {
+          groupId: g.itemGroupId,
+          subGroupId: null,
+        }
+      );
+    });
+
+    subGroups.forEach((s) => {
+      const parent = groups.find(
+        (g) => String(g.itemGroupId) === String(s.groupId)
+      );
+
+      if (!parent) return;
+
+      addEntry(
+        `${parent.itemCategoryId}|${s.subGroupName.trim().toLowerCase()}`,
+        {
+          groupId: parent.itemGroupId,
+          subGroupId: s.subGroupId,
+        }
+      );
+    });
+
+    // ---------------- EXISTING ITEMS ----------------
+
     const existingItems = await selectWithJoins(
-      "itemmaster", [], { companyId }, ["itemId", "itemCode", "barcode", "delete"]
-    );
-    const activeCodes = new Set(
-      existingItems.filter((i) => Number(i.delete) === 0).map((i) => (i.itemCode || "").trim().toLowerCase())
-    );
-    const deletedItemsByCode = new Map(
-      existingItems.filter((i) => Number(i.delete) === 1).map((i) => [(i.itemCode || "").trim().toLowerCase(), i])
-    );
-    const activeBarcodes = new Set(
-      existingItems.filter((i) => Number(i.delete) === 0 && i.barcode).map((i) => i.barcode.trim().toLowerCase())
+      "itemmaster",
+      [],
+      { companyId },
+      [
+        "itemId",
+        "itemCode",
+        "barcode",
+        "itemName",
+        "hsnCode",
+        "delete",
+      ]
     );
 
-    // ---------------- PASS 1: validate every row, save nothing ----------------
+    // Active item codes
+    const activeCodes = new Set(
+      existingItems
+        .filter((i) => Number(i.delete) === 0)
+        .map((i) => String(i.itemCode || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    // Deleted items for restore
+    const deletedItemsByCode = new Map(
+      existingItems
+        .filter((i) => Number(i.delete) === 1)
+        .map((i) => [
+          String(i.itemCode || "").trim().toLowerCase(),
+          i,
+        ])
+    );
+
+    // Barcode owner (active + deleted)
+    const barcodeOwner = new Map(
+      existingItems
+        .filter((i) => i.barcode)
+        .map((i) => [
+          String(i.barcode).trim().toLowerCase(),
+          i.itemId,
+        ])
+    );
+
+    // Active Item Names
+    const activeItemNames = new Set(
+      existingItems
+        .filter((i) => Number(i.delete) === 0)
+        .map((i) => String(i.itemName || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    // Active HSN Codes
+    const activeHsns = new Set(
+      existingItems
+        .filter((i) => Number(i.delete) === 0)
+        .map((i) => String(i.hsnCode || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+
+    // ---------------- PASS 1: VALIDATION ----------------
+
     const errors = [];
+
     const seenCodes = new Set();
-    const seenBarcodes = new Set();
+    const seenItemNames = new Set();
+    const seenHsns = new Set();
+
     const normalizedRows = [];
 
     items.forEach((row, i) => {
       const rowNum = i + 2;
-      const fail = (reason) => errors.push({ row: rowNum, itemCode: clean(row.itemCode), reason });
+
+      const fail = (reason) =>
+        errors.push({
+          row: rowNum,
+          itemCode: clean(row.itemCode),
+          reason,
+        });
 
       const itemCode = clean(row.itemCode);
       const itemName = clean(row.itemName);
       const categoryName = clean(row.categoryName);
       const groupName = clean(row.groupName);
 
-      if (!itemCode) return fail("Item Code is required");
+      // Required fields
       if (!itemName) return fail("Item Name is required");
+
       if (!categoryName) return fail("Item Category is required");
+
       if (!groupName) return fail("Group is required");
 
-      const itemCategoryId = categoryMap.get(categoryName.toLowerCase());
-      if (!itemCategoryId) return fail(`Item Category "${categoryName}" not found`);
+      // ---------------- CATEGORY VALIDATION ----------------
 
-      const groupId = groupMap.get(groupName.toLowerCase());
-      if (!groupId) return fail(`Group "${groupName}" not found`);
+      const category = categoryInfoMap.get(categoryName.toLowerCase());
+
+      if (!category) {
+        return fail(`Item Category "${categoryName}" not found`);
+      }
+
+      const itemCategoryId = category.itemCategoryId;
+
+      // ---------------- GROUP VALIDATION ----------------
+
+      const groupEntry = groupMap.get(
+        `${itemCategoryId}|${groupName.toLowerCase()}`
+      );
+
+      if (!groupEntry) {
+        return fail(
+          `Group "${groupName}" not found in category "${categoryName}"`
+        );
+      }
+
+      if (groupEntry.ambiguous) {
+        return fail(
+          `"${groupName}" matches more than one group or sub group in category "${categoryName}". Rename one of them.`
+        );
+      }
+
+      const { groupId, subGroupId } = groupEntry;
+
+      // ---------------- LOCATION VALIDATION ----------------
+
+      const locationName = clean(row.itemLocation);
+
+      if (!locationName) {
+        return fail("Item Location is required");
+      }
+
+      const locationId = locationMap.get(locationName.toLowerCase());
+
+      if (!locationId) {
+        return fail(`Item Location "${locationName}" not found`);
+      }
+
+      // ---------------- UNIT + TAX VALIDATION ----------------
+
+      if (!clean(row.unit)) {
+        return fail("Unit / UOM is required");
+      }
+
+      if (!clean(row.taxSlab)) {
+        return fail("Tax Slab is required");
+      }
+
+      // ---------------- ITEM CODE TYPE VALIDATION ----------------
+
+      const autoCode =
+        String(category.itemCodeType || "").trim().toLowerCase() === "auto";
+
+      if (autoCode && itemCode) {
+        return fail(
+          `Category "${categoryName}" uses an auto item code. Leave Item Code blank.`
+        );
+      }
+
+      if (!autoCode && !itemCode) {
+        return fail(
+          "Item Code is required for this category (manual code)"
+        );
+      }
+
+      // ---------------- BASIC VALIDATION ----------------
+
+      if (itemName.length > 150) {
+        return fail("Item Name must not exceed 150 characters");
+      }
+
+      if ((clean(row.shortName) || itemName).length > 50) {
+        return fail("Short Name must not exceed 50 characters");
+      }
+
+      const hsnCode = clean(row.hsnCode);
+
+      if (!/^\d{4,8}$/.test(hsnCode)) {
+        return fail("HSN Code must be 4 to 8 digits");
+      }
+
+      if (!autoCode && (itemCode.length < 2 || itemCode.length > 30)) {
+        return fail("Item Code must be between 2 and 30 characters");
+      }
+
+      // ==================================================
+      // ITEM NAME DUPLICATE VALIDATION
+      // ==================================================
+
+      const itemNameKey = itemName.toLowerCase();
+
+      if (activeItemNames.has(itemNameKey)) {
+        return fail(
+          `Item Name "${itemName}" already exists in database`
+        );
+      }
+
+      if (seenItemNames.has(itemNameKey)) {
+        return fail(
+          `Duplicate Item Name "${itemName}" within the imported file`
+        );
+      }
+
+      // ==================================================
+      // HSN CODE DUPLICATE VALIDATION
+      // ==================================================
+
+      const hsnKey = hsnCode.toLowerCase();
+
+      if (activeHsns.has(hsnKey)) {
+        return fail(
+          `HSN Code "${hsnCode}" already exists in database`
+        );
+      }
+
+      if (seenHsns.has(hsnKey)) {
+        return fail(
+          `Duplicate HSN Code "${hsnCode}" within the imported file`
+        );
+      }
+
+      // ---------------- STOCK MAPPING ----------------
 
       const stockMapping = isYes(row.stockMapping);
-      const autoGenerate = isYes(row.generateBarcode);
 
-      // numeric fields (Min/Max only matter when Stock Mapping = Yes)
       const numericFields = {
-        thickness: "Thickness", length: "Length", width: "Width", weight: "Weight",
-        openingStock: "Opening Stock", stockValue: "Stock Value",
-        ...(stockMapping ? { minQty: "Min Qty", maxQty: "Max Qty" } : {}),
+        thickness: "Thickness",
+        length: "Length",
+        width: "Width",
+        weight: "Weight",
+        openingStock: "Opening Stock",
+        stockValue: "Stock Value",
+        ...(stockMapping
+          ? {
+            minQty: "Min Qty",
+            maxQty: "Max Qty",
+          }
+          : {}),
       };
+
       for (const [key, label] of Object.entries(numericFields)) {
         const v = clean(row[key]);
-        if (v !== "" && isNaN(Number(v))) return fail(`${label} must be a number`);
+
+        if (v !== "" && isNaN(Number(v))) {
+          return fail(`${label} must be a number`);
+        }
+
+        if (v !== "" && Number(v) < 0) {
+          return fail(`${label} cannot be negative`);
+        }
       }
+
       if (
         stockMapping &&
-        clean(row.minQty) !== "" && clean(row.maxQty) !== "" &&
+        clean(row.minQty) !== "" &&
+        clean(row.maxQty) !== "" &&
         Number(row.minQty) > Number(row.maxQty)
       ) {
         return fail("Min Qty cannot be greater than Max Qty");
       }
 
-      // item code
-      const codeKey = itemCode.toLowerCase();
-      if (activeCodes.has(codeKey)) return fail("Item code already exists in database");
-      if (seenCodes.has(codeKey)) return fail("Duplicate item code within the imported file");
+      // ==================================================
+      // ITEM CODE + BARCODE DUPLICATE VALIDATION
+      // ==================================================
 
-      // barcode: Yes -> generated later (Barcode Number ignored); No/blank -> manual value or null
-      const barcode = autoGenerate ? "" : clean(row.barcode);
-      const barcodeKey = barcode ? barcode.toLowerCase() : null;
-      if (barcodeKey && activeBarcodes.has(barcodeKey)) return fail("Barcode already exists in database");
-      if (barcodeKey && seenBarcodes.has(barcodeKey)) return fail("Duplicate barcode within the imported file");
+      if (!autoCode) {
+        const codeKey = itemCode.toLowerCase();
 
-      seenCodes.add(codeKey);
-      if (barcodeKey) seenBarcodes.add(barcodeKey);
+        if (activeCodes.has(codeKey)) {
+          return fail("Item code already exists in database");
+        }
+
+        if (seenCodes.has(codeKey)) {
+          return fail("Duplicate item code within the imported file");
+        }
+
+        // Barcode = Item Code
+        const sameCodeDeleted = deletedItemsByCode.get(codeKey);
+
+        const owner = barcodeOwner.get(codeKey);
+
+        if (
+          owner !== undefined &&
+          (!sameCodeDeleted ||
+            String(owner) !== String(sameCodeDeleted.itemId))
+        ) {
+          return fail(
+            `Barcode "${itemCode}" is already used by another item`
+          );
+        }
+
+        seenCodes.add(codeKey);
+      }
+
+      // Add duplicate tracking only after successful row validation
+      seenItemNames.add(itemNameKey);
+      seenHsns.add(hsnKey);
+
+      // ---------------- NORMALIZED ROW ----------------
 
       normalizedRows.push({
         rowNum,
         itemCode,
+        autoCode,
+        category,
+
         itemName,
         shortName: clean(row.shortName) || itemName,
-        hsnCode: clean(row.hsnCode),
-        itemLocation: clean(row.itemLocation),
+        hsnCode,
+
+        itemLocation: String(locationId),
+
         itemCategoryId,
         groupId,
+        subGroupId,
+
         unit: clean(row.unit),
         taxSlab: clean(row.taxSlab),
+
         thickness: clean(row.thickness) || null,
         length: clean(row.length) || null,
         width: clean(row.width) || null,
         weight: clean(row.weight) || null,
-        openingStock: clean(row.openingStock) !== "" ? clean(row.openingStock) : 0,
-        stockValue: clean(row.stockValue) !== "" ? clean(row.stockValue) : 0,
+
+        openingStock:
+          clean(row.openingStock) !== ""
+            ? clean(row.openingStock)
+            : 0,
+
+        stockValue:
+          clean(row.stockValue) !== ""
+            ? clean(row.stockValue)
+            : 0,
+
         stockMapping,
+
         minQty: stockMapping ? clean(row.minQty) || null : null,
         maxQty: stockMapping ? clean(row.maxQty) || null : null,
-        barcode: barcode || null,
-        autoGenerate,
       });
     });
 
+    // ---------------- STOP IMPORT IF ERRORS ----------------
+
     if (errors.length > 0) {
-      return errorResponse(res, `Import rejected: ${errors.length} row(s) have errors.`, errors);
+      const errorMessage = errors
+        .map((err) => `Row ${err.row}: ${err.reason}`)
+        .join("\n");
+
+      return errorResponse(
+        res,
+        errorMessage,
+        errors
+      );
     }
 
-    // ---------------- PASS 2: save ----------------
-    // Rows with a manual barcode are saved first, so auto-generated barcodes
-    // can never collide with a manual ITM000000x from the same file.
-    normalizedRows.sort((a, b) => Number(a.autoGenerate) - Number(b.autoGenerate));
+    // ==================================================
+    // PASS 2: SAVE ITEMS
+    // ==================================================
+
+    // Manual codes first, then auto-generated codes
+    normalizedRows.sort(
+      (a, b) => Number(a.autoCode) - Number(b.autoCode)
+    );
 
     const created = [];
 
     for (const row of normalizedRows) {
-      const deletedItem = deletedItemsByCode.get(row.itemCode.toLowerCase());
+      const finalItemCode = row.autoCode
+        ? await generateNextItemCode(companyId, row.category)
+        : row.itemCode;
 
-      const finalBarcode = row.autoGenerate
-        ? await generateBarcodeForCompany(companyId)
-        : row.barcode;
+      const deletedItem = deletedItemsByCode.get(
+        finalItemCode.toLowerCase()
+      );
 
       const fields = {
         itemName: row.itemName,
         shortName: row.shortName,
         hsnCode: row.hsnCode,
+
         itemLocation: row.itemLocation,
+
         itemCategoryId: row.itemCategoryId,
         groupId: row.groupId,
+        subGroupId: row.subGroupId,
+
         unit: row.unit,
         taxSlab: row.taxSlab,
+
         thickness: row.thickness,
         length: row.length,
         width: row.width,
         weight: row.weight,
-        openingStock: row.openingStock,
+
         openingStock: row.openingStock || 0,
         stockValue: row.stockValue || 0,
+
+        stockMapping: row.stockMapping,
         minQty: row.minQty,
         maxQty: row.maxQty,
-        barcodeType: row.autoGenerate ? "generate" : "manual",
-        barcode: finalBarcode,
+
+        // Barcode = Item Code
+        barcodeType: "generate",
+        barcode: finalItemCode,
+
         status: "active",
       };
 
       let savedItem;
+
       if (deletedItem) {
-        // restore the soft-deleted record
+        // Restore soft-deleted item
         await updateModelHelper(
           "itemmaster",
-          { ...fields, createdBy, createdType, delete: 0, updated: new Date() },
-          { itemId: deletedItem.itemId, companyId }
+          {
+            ...fields,
+            createdBy,
+            createdType,
+            delete: 0,
+            updated: new Date(),
+          },
+          {
+            itemId: deletedItem.itemId,
+            companyId,
+          }
         );
-        savedItem = { itemId: deletedItem.itemId };
+
+        savedItem = {
+          itemId: deletedItem.itemId,
+        };
       } else {
         savedItem = await saveModel("itemmaster", {
           companyId,
-          itemCode: row.itemCode,
+          itemCode: finalItemCode,
           ...fields,
           createdBy,
           createdType,
@@ -1325,19 +1976,32 @@ const bulkImportItemMaster = async (req, res) => {
         });
       }
 
-      created.push({ row: row.rowNum, itemId: savedItem.itemId, itemCode: row.itemCode });
+      created.push({
+        row: row.rowNum,
+        itemId: savedItem.itemId,
+        itemCode: finalItemCode,
+      });
     }
 
-    return successResponse(res, { created }, `${created.length} item(s) imported successfully.`);
+    return successResponse(
+      res,
+      { created },
+      `${created.length} item(s) imported successfully.`
+    );
+
   } catch (error) {
+    console.error("bulkImportItemMaster error:", error);
+
     if (error?.name === "SequelizeUniqueConstraintError") {
-      return errorResponse(res, "Import failed: a barcode or item code is already in use.");
+      return errorResponse(
+        res,
+        "Import failed: a barcode, item code, or unique field is already in use."
+      );
     }
+
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
-
-
 
 const getFinishedGoodsItemList = async (req, res) => {
   try {
@@ -1430,6 +2094,7 @@ module.exports = {
   getVehicleItemList,
   getItemByBarcode,
   getPurchaseItemList,
+  getItemImportTemplateLists,
   bulkImportItemMaster,
   getFinishedGoodsItemList,
 };

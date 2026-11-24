@@ -67,7 +67,7 @@ module.exports = (app) => {
     validate(itemmasterValidation.bulkImportItemMaster),
     itemmaster.bulkImportItemMaster
   );
-
+routes.get("/template-lists", itemmaster.getItemImportTemplateLists);
   // ───── Generic dynamic GET route — hamesha SABSE AAKHIR me ─────
   routes.get("/:id", itemmaster.getItemMasterById);
 
