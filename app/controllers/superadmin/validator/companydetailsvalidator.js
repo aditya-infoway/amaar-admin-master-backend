@@ -197,8 +197,47 @@ const companyDetailsUpdateSchema = Joi.object({
     "string.pattern.base": "Enter a valid IFSC code",
   }),
 });
+// ---- Change Company Password Validation ----
+const changeCompanyPasswordSchema = Joi.object({
+  email: Joi.string()
+    .trim()
+    .email({ tlds: false })
+    .required()
+    .messages({
+      "string.empty": "Email ID is required",
+      "string.email": "Enter a valid email ID",
+      "any.required": "Email ID is required",
+    }),
 
+  currentPassword: Joi.string()
+    .required()
+    .messages({
+      "string.empty": "Current password is required",
+      "any.required": "Current password is required",
+    }),
+
+ newPassword: Joi.string()
+  .min(4)
+  .max(24)
+  .required()
+  .messages({
+    "string.min": "New password must be at least 4 characters",
+    "string.max": "New password must not exceed 24 characters",
+    "string.empty": "New password is required",
+    "any.required": "New password is required",
+  }),
+
+  confirmPassword: Joi.string()
+    .valid(Joi.ref("newPassword"))
+    .required()
+    .messages({
+      "any.only": "New password and confirm password do not match",
+      "string.empty": "Confirm password is required",
+      "any.required": "Confirm password is required",
+    }),
+});
 module.exports = {
   companyDetailsSchema,
   companyDetailsUpdateSchema,
+  changeCompanyPasswordSchema,
 };

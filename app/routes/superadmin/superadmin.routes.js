@@ -2,7 +2,11 @@ const { errorResponse } = require("../../helper/index.js");
 const company = require("../../controllers/superadmin/controller/companycontroller.js");
 const companyDetails = require("../../controllers/superadmin/controller/companydetailscontroller.js");
 const companyvalidation = require('../../controllers/superadmin/validator/companyvalidator.js');
-const { companyDetailsSchema, companyDetailsUpdateSchema } = require("../../controllers/superadmin/validator/companydetailsvalidator.js");
+const {
+  companyDetailsSchema,
+  companyDetailsUpdateSchema,
+  changeCompanyPasswordSchema,
+} = require("../../controllers/superadmin/validator/companydetailsvalidator.js");
 const prefix = require("../../controllers/superadmin/controller/prefixcontroller.js");
 const { prefixCreateSchema, prefixUpdateSchema } = require("../../controllers/superadmin/validator/prefixvalidator.js");
 const { checktoken } = require("../../middleware/token.js");
@@ -45,7 +49,12 @@ module.exports = (app) => {
     validate(companyDetailsUpdateSchema),
     companyDetails.updateCompanyDetails
   );
-
+routes.post(
+  "/company-details/change-password",
+  logoUpload.none(),               // ✅ multipart text fields parse karega
+  validate(changeCompanyPasswordSchema),
+  companyDetails.changeCompanyPassword
+);
   routes.get("/financial-years", companyDetails.getFinancialYears);
   routes.get("/company-details", companyDetails.getCompanyDetails);
 

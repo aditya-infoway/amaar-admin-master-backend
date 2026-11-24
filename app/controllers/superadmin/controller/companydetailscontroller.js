@@ -8,7 +8,7 @@ const {
   selectWithJoinsV2,
   getBlobTempPublicUrl,
 } = require("../../../helper/index.js");
-
+const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
 
@@ -570,7 +570,87 @@ const updateCompanyDetails = async (req, res) => {
     return errorResponse(res, "Something Went Wrong", error);
   }
 };
+// ---- Change Company Password ----
+const changeCompanyPassword = async (req, res) => {
+  try {
+    const companyId = await getCompanyIdFromToken(req);
 
+    if (!companyId) {
+      return requiredmessage(res, "Unauthorized. Please login again.");
+    }
+
+    // ✅ email bhi destructure karo
+    const { email, currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return requiredmessage(res, "All password fields are required.");
+    }
+    if (newPassword.length < 4 || newPassword.length > 24) {
+      return requiredmessage(
+        res,
+        "New password must be between 4 and 24 characters long."
+      );
+    }
+
+    if (newPassword !== confirmPassword) {
+      return requiredmessage(res, "New password and confirm password do not match.");
+    }
+
+    if (currentPassword === newPassword) {
+      return requiredmessage(
+        res,
+        "New password must be different from current password."
+      );
+    }
+
+    // ✅ email column bhi fetch karo
+    const company = await selectWithJoins(
+      "company",
+      [],
+      { companyId, delete: 0 },
+      ["companyId", "email", "password"]
+    );
+
+    if (!company.length) {
+      return requiredmessage(res, "Company not found.");
+    }
+
+    // ✅ Email match check
+    if (
+      String(company[0].email || "").trim().toLowerCase() !==
+      String(email || "").trim().toLowerCase()
+    ) {
+      return requiredmessage(res, "Email ID does not match.");
+    }
+
+    // Verify current password
+    const isValid = await bcrypt.compare(
+      currentPassword,
+      company[0].password
+    );
+
+    if (!isValid) {
+      return requiredmessage(res, "Current password is incorrect.");
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await updateModel(
+      "company",
+      {
+        password: hashedPassword,
+        updated: new Date(),
+      },
+      { companyId, delete: 0 }
+    );
+
+    return successResponse(res, {}, "Password changed successfully.");
+  } catch (error) {
+    console.log("Change password error:", error);
+    return errorResponse(res, "Something Went Wrong", error);
+  }
+};
 module.exports = {
   createCompanyDetails,
   getFinancialYears,
@@ -578,4 +658,5 @@ module.exports = {
   updateCompanyDetails,
   syncDefaultItemCategories,
   syncDefaultItemGroups,
+  changeCompanyPassword,
 };

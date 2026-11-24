@@ -2,7 +2,8 @@ const { errorResponse } = require("../../helper/index.js");
 const payment = require("../../controllers/superadmin/controller/paymentcontroller.js");
 const paymentValidation = require("../../controllers/superadmin/validator/paymentvalidator.js");
 const { superAdminAuth } = require("../../helper/superAdminAuth.js");
-
+const { printCashReceipt } = require("../../controllers/superadmin/controller/cashreceiptprintcontroller.js");
+const { printBankReceipt } = require("../../controllers/superadmin/controller/bankreceiptprintcontroller.js");
 var routes = require("express").Router();
 
 const validate = (schema) => (req, res, next) => {
@@ -21,7 +22,8 @@ module.exports = (app) => {
 
   routes.get("/cash/list", payment.getCashPaymentList);
   routes.post("/cash/create", validate(paymentValidation.createCashPayment), payment.createCashPayment);
-
+routes.get("/cash-receipt/print/:id", printCashReceipt);
+routes.get("/bank-receipt/print/:id", printBankReceipt);
   routes.get("/bank/list", payment.getBankPaymentList);
   routes.post("/bank/create", validate(paymentValidation.createBankPayment), payment.createBankPayment);
 

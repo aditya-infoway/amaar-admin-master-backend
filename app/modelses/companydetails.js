@@ -59,6 +59,8 @@ module.exports = sequelize => {
     updated: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     delete: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: "delete" },
   };
+
+  
   const options = {
     tableName: "companydetails",
     comment: "",
