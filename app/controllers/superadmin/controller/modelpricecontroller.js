@@ -66,7 +66,9 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
     const nodes = (
         (await selectWithJoins("bomItem", [], { bomId, delete: 0 }, [])) || []
     ).map(plain);
-    if (nodes.length === 0) return { total: 0, matchedCount: 0 };
+    if (nodes.length === 0) {
+        return { total: 0, matchedCount: 0, childMatchedCount: 0 };
+    }
 
     const subs = (
         (await selectWithJoins(
@@ -103,6 +105,7 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
     ).map(plain);
     const itemMap = new Map(items.map((i) => [Number(i.itemId), i]));
 
+    // group se match karne wale saare BOM items (root + child)
     const matched = nodes.filter((n) => {
         const it = itemMap.get(Number(n.itemId));
         if (!it) return false;
@@ -112,51 +115,18 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
         return g === Number(groupId) || subSet.has(sg);
     });
 
-    // ---- tree helpers ----
-    const nodeById = new Map(nodes.map((n) => [Number(n.bomItemId), n]));
-    const childrenByParent = new Map();
-    nodes.forEach((n) => {
-        const p = n.parentId == null ? null : Number(n.parentId);
-        if (!childrenByParent.has(p)) childrenByParent.set(p, []);
-        childrenByParent.get(p).push(n);
-    });
+    // sirf child items (root = parentId null, usse count nahi karna)
+    const childMatched = matched.filter((n) => n.parentId != null);
 
-    // apna weight > 0 to wahi, warna children ka effective weight
-    const effectiveWeight = (n, seen = new Set()) => {
-        const id = Number(n.bomItemId);
-        if (seen.has(id)) return 0;
-        seen.add(id);
-
-        const own = parseFloat(n.weight);
-        if (!Number.isNaN(own) && own > 0) return own;
-
-        return (childrenByParent.get(id) || []).reduce(
-            (sum, c) => sum + effectiveWeight(c, seen),
-            0,
-        );
-    };
-
-    // matched item ka koi ancestor bhi matched ho to usse skip (double count na ho)
-    const matchedIds = new Set(matched.map((n) => Number(n.bomItemId)));
-    const hasMatchedAncestor = (n) => {
-        let p = n.parentId == null ? null : Number(n.parentId);
-        const guard = new Set();
-        while (p != null && !guard.has(p)) {
-            if (matchedIds.has(p)) return true;
-            guard.add(p);
-            const parent = nodeById.get(p);
-            p = parent && parent.parentId != null ? Number(parent.parentId) : null;
-        }
-        return false;
-    };
-
-    const total = matched
-        .filter((n) => !hasMatchedAncestor(n))
-        .reduce((sum, n) => sum + effectiveWeight(n), 0);
+    const total = childMatched.reduce((sum, n) => {
+        const w = parseFloat(n.weight);
+        return sum + (Number.isNaN(w) ? 0 : w);
+    }, 0);
 
     return {
         total: Number(total.toFixed(3)),
         matchedCount: matched.length,
+        childMatchedCount: childMatched.length,
     };
 };
 
@@ -488,20 +458,22 @@ const getAutoFetchValues = async (req, res) => {
             );
         }
 
-        const bom = plain(boms[0]);
-        const { total: groupWeight, matchedCount } = await calcBomGroupWeight(
-            bom.bomId,
-            companyId,
-            groupId,
-            subGroupId,
-        );
+              const bom = plain(boms[0]);
+        const {
+            total: groupWeight,
+            matchedCount,
+            childMatchedCount,
+        } = await calcBomGroupWeight(bom.bomId, companyId, groupId, subGroupId);
 
         let message = "BOM group weight fetched";
         if (groupWeight <= 0) {
-            message =
-                matchedCount === 0
-                    ? `No item of this group found in BOM ${bom.bomCode}`
-                    : `Items of this group found in BOM ${bom.bomCode}, but none of them has a weight yet. You can enter the weight manually.`;
+            if (matchedCount === 0) {
+                message = `No item of this group found in BOM ${bom.bomCode}`;
+            } else if (childMatchedCount === 0) {
+                message = `This group exists only on the main/root item of BOM ${bom.bomCode}. No child item has the same group, so weight cannot be fetched.`;
+            } else {
+                message = `Child items of this group found in BOM ${bom.bomCode}, but none of them has a weight yet. You can enter the weight manually.`;
+            }
         }
 
         return successResponse(
