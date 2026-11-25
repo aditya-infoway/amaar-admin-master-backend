@@ -1548,7 +1548,6 @@ const bulkImportItemMaster = async (req, res) => {
         "itemCode",
         "barcode",
         "itemName",
-        "hsnCode",
         "delete",
       ]
     );
@@ -1589,21 +1588,12 @@ const bulkImportItemMaster = async (req, res) => {
         .filter(Boolean)
     );
 
-    // Active HSN Codes
-    const activeHsns = new Set(
-      existingItems
-        .filter((i) => Number(i.delete) === 0)
-        .map((i) => String(i.hsnCode || "").trim().toLowerCase())
-        .filter(Boolean)
-    );
-
     // ---------------- PASS 1: VALIDATION ----------------
 
     const errors = [];
 
     const seenCodes = new Set();
     const seenItemNames = new Set();
-    const seenHsns = new Set();
 
     const normalizedRows = [];
 
@@ -1712,8 +1702,8 @@ const bulkImportItemMaster = async (req, res) => {
 
       const hsnCode = clean(row.hsnCode);
 
-      if (!/^\d{4,8}$/.test(hsnCode)) {
-        return fail("HSN Code must be 4 to 8 digits");
+         if (!/^\d{4,24}$/.test(hsnCode)) {
+        return fail("HSN Code must be 4 to 24 digits");
       }
 
       if (!autoCode && (itemCode.length < 2 || itemCode.length > 30)) {
@@ -1735,24 +1725,6 @@ const bulkImportItemMaster = async (req, res) => {
       if (seenItemNames.has(itemNameKey)) {
         return fail(
           `Duplicate Item Name "${itemName}" within the imported file`
-        );
-      }
-
-      // ==================================================
-      // HSN CODE DUPLICATE VALIDATION
-      // ==================================================
-
-      const hsnKey = hsnCode.toLowerCase();
-
-      if (activeHsns.has(hsnKey)) {
-        return fail(
-          `HSN Code "${hsnCode}" already exists in database`
-        );
-      }
-
-      if (seenHsns.has(hsnKey)) {
-        return fail(
-          `Duplicate HSN Code "${hsnCode}" within the imported file`
         );
       }
 
@@ -1831,7 +1803,6 @@ const bulkImportItemMaster = async (req, res) => {
 
       // Add duplicate tracking only after successful row validation
       seenItemNames.add(itemNameKey);
-      seenHsns.add(hsnKey);
 
       // ---------------- NORMALIZED ROW ----------------
 

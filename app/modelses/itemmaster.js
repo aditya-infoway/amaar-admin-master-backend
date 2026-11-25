@@ -12,7 +12,7 @@ module.exports = sequelize => {
     itemCode: { type: DataTypes.STRING(30), allowNull: false, field: "itemCode" },
     itemName: { type: DataTypes.STRING(150), allowNull: false, field: "itemName" },
     shortName: { type: DataTypes.STRING(50), allowNull: false, field: "shortName" },
-    hsnCode: { type: DataTypes.STRING(10), allowNull: false, field: "hsnCode" },
+       hsnCode: { type: DataTypes.STRING(24), allowNull: false, field: "hsnCode" },
     itemLocation: { type: DataTypes.STRING(150), allowNull: true, field: "itemLocation" },
     itemCategoryId: { type: DataTypes.INTEGER, allowNull: false, field: "itemCategoryId" },
     groupId: { type: DataTypes.INTEGER, allowNull: false, field: "groupId" },

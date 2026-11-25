@@ -14,9 +14,9 @@ const baseSchema = {
     "string.empty": "Short Name is required",
     "string.max": "Short Name must not exceed 50 characters",
   }),
-  hsnCode: Joi.string().trim().required().pattern(/^\d{4,8}$/).messages({
+  hsnCode: Joi.string().trim().required().pattern(/^\d{4,24}$/).messages({
     "string.empty": "HSN Code is required",
-    "string.pattern.base": "HSN Code must be 4 to 8 digits",
+    "string.pattern.base": "HSN Code must be 4 to 24 digits",
   }),
   itemLocation: Joi.string().trim().allow("", null),
 
