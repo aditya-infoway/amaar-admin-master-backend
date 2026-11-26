@@ -77,8 +77,9 @@ const getVehicleGroupId = async (companyId, vehicleType) => {
 };
 
 // Us group ki lines ka modelPriceId-wise total value
-const getGroupLineTotals = async (groupId, modelPriceIds = null) => {
-  const where = { groupId, delete: 0 };
+// Total value of ALL lines of a model price (no group filter)
+const getModelTotals = async (modelPriceIds = null) => {
+  const where = { delete: 0 };
   if (modelPriceIds) where.modelPriceId = modelPriceIds;
 
   const lines = await selectWithJoins("modelpriceitem", [], where, [
@@ -102,7 +103,7 @@ const getFinishedGoodsMap = async (companyId, itemIds) => {
     "itemmaster",
     [],
     { companyId, delete: 0, itemId: itemIds },
-    ["itemId", "itemCode", "itemName"],
+    ["itemId", "itemCode", "itemName", "groupId"],
   );
   return new Map(
     items.map((i) => {
@@ -117,22 +118,20 @@ const getVehicleModelOptions = async (companyId, vehicleType) => {
   const groupId = await getVehicleGroupId(companyId, vehicleType);
   if (!groupId) return [];
 
-  const totals = await getGroupLineTotals(groupId);
-  const modelPriceIds = [...totals.keys()];
-  if (!modelPriceIds.length) return [];
-
   const headers = await selectWithJoins(
     "modelprice",
     [],
-    { companyId, delete: 0, status: "active", modelPriceId: modelPriceIds },
+    { companyId, delete: 0, status: "active" },
     ["modelPriceId", "finishedGoodsItemId", "modelName"],
     [["modelPriceId", "DESC"]],
   );
+  if (!headers.length) return [];
 
   const fgMap = await getFinishedGoodsMap(
     companyId,
     headers.map((h) => h.finishedGoodsItemId),
   );
+  const totals = await getModelTotals(headers.map((h) => h.modelPriceId));
 
   const seen = new Set();
   const options = [];
@@ -140,13 +139,17 @@ const getVehicleModelOptions = async (companyId, vehicleType) => {
   for (const h of headers) {
     const row = h.toJSON ? h.toJSON() : h;
     const fgId = Number(row.finishedGoodsItemId);
-    if (seen.has(fgId)) continue; // ek finished good ka latest hi
+    const fg = fgMap.get(fgId);
+
+    // main group of the finished good must match Tipper / Trailer
+    if (!fg || Number(fg.groupId) !== Number(groupId)) continue;
+
+    if (seen.has(fgId)) continue; // latest model price per finished good
     seen.add(fgId);
 
     const total = Number((totals.get(Number(row.modelPriceId)) || 0).toFixed(2));
     if (total <= 0) continue;
 
-    const fg = fgMap.get(fgId) || {};
     options.push({
       modelPriceId: row.modelPriceId,
       finishedGoodsItemId: fgId,
@@ -172,12 +175,13 @@ const getVehicleModelById = async (companyId, vehicleType, modelPriceId) => {
   if (!rows.length) return null;
   const row = rows[0].toJSON ? rows[0].toJSON() : rows[0];
 
-  const totals = await getGroupLineTotals(groupId, [Number(modelPriceId)]);
-  const total = Number((totals.get(Number(modelPriceId)) || 0).toFixed(2));
-  if (total <= 0) return null; // is model me is group ki line hi nahi
-
   const fgMap = await getFinishedGoodsMap(companyId, [row.finishedGoodsItemId]);
-  const fg = fgMap.get(Number(row.finishedGoodsItemId)) || {};
+  const fg = fgMap.get(Number(row.finishedGoodsItemId));
+  if (!fg || Number(fg.groupId) !== Number(groupId)) return null;
+
+  const totals = await getModelTotals([Number(modelPriceId)]);
+  const total = Number((totals.get(Number(modelPriceId)) || 0).toFixed(2));
+  if (total <= 0) return null;
 
   return {
     modelPriceId: row.modelPriceId,
@@ -516,11 +520,8 @@ const createQuotation = async (req, res) => {
 
     const {
       financialYearId,
-
       leadId,
-
       vehicleType,
-
       trailer,
       chassis,
       body,
@@ -538,9 +539,7 @@ const createQuotation = async (req, res) => {
       supdRupd,
       box,
       spareWheelCarrier,
-
       warranty,
-
       discountType,
       discountValue,
 
@@ -776,7 +775,7 @@ const getQuotationList = async (req, res) => {
       companyId,
       delete: 0,
     };
-
+   
     // Employee panel requests always carry req.employeeId (set by employeeAuth) —
     // trust that over any frontend-supplied role, and scope strictly to this employee.
     if (employeeId) {

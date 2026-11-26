@@ -116,7 +116,13 @@ const calcBomGroupWeight = async (bomId, companyId, groupId, subGroupId) => {
     });
 
     // sirf child items (root = parentId null, usse count nahi karna)
-    const childMatched = matched.filter((n) => n.parentId != null);
+    // real child items only: not root, and not a parent of any other row
+    const parentIds = new Set(
+        nodes.filter((n) => n.parentId != null).map((n) => Number(n.parentId)),
+    );
+    const childMatched = matched.filter(
+        (n) => n.parentId != null && !parentIds.has(Number(n.bomItemId)),
+    );
 
     const total = childMatched.reduce((sum, n) => {
         const w = parseFloat(n.weight);
@@ -257,15 +263,39 @@ const getGroupOptions = async (req, res) => {
         }
         const bomId = plain(boms[0]).bomId;
 
-        // items used inside that BOM
+        // // items used inside that BOM
+        // const nodes = (
+        //     (await selectWithJoins("bomItem", [], { bomId, delete: 0 }, [
+        //         "itemId",
+        //         "parentId",
+        //     ])) || []
+        // ).map(plain);
+
+        // // only child items; skip the root/parent item (parentId null)
+        // const childNodes = nodes.filter((n) => n.parentId != null);
+
+
         const nodes = (
             (await selectWithJoins("bomItem", [], { bomId, delete: 0 }, [
+                "bomItemId",
                 "itemId",
+                "parentId",
             ])) || []
         ).map(plain);
-        const itemIds = [...new Set(nodes.map((n) => Number(n.itemId)))];
+
+        // ids of every row that has at least one child under it (parents)
+        const parentIds = new Set(
+            nodes.filter((n) => n.parentId != null).map((n) => Number(n.parentId)),
+        );
+
+        // real child items = not root (parentId null) AND not a parent of anything
+        const childNodes = nodes.filter(
+            (n) => n.parentId != null && !parentIds.has(Number(n.bomItemId)),
+        );
+
+        const itemIds = [...new Set(childNodes.map((n) => Number(n.itemId)))];
         if (itemIds.length === 0) {
-            return successResponse(res, [], "BOM has no items");
+            return successResponse(res, [], "BOM has no child items");
         }
 
         const items = (
@@ -458,7 +488,7 @@ const getAutoFetchValues = async (req, res) => {
             );
         }
 
-              const bom = plain(boms[0]);
+        const bom = plain(boms[0]);
         const {
             total: groupWeight,
             matchedCount,
