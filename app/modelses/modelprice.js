@@ -25,6 +25,26 @@ module.exports = (sequelize) => {
             allowNull: true,
             field: "modelName",
         },
+        modelPriceNo: {
+            type: DataTypes.STRING(50),
+            allowNull: true,
+            field: "modelPriceNo",
+        },
+        financialYearId: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            field: "financialYearId",
+        },
+        referenceModelPriceId: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            field: "referenceModelPriceId",
+        },
+        effectiveDate: {
+            type: DataTypes.DATEONLY,
+            allowNull: true,
+            field: "effectiveDate",
+        },
         currentDate: {
             type: DataTypes.DATEONLY,
             allowNull: false,

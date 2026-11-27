@@ -35,6 +35,9 @@ module.exports = (app) => {
     // Query: ?type=BOM|Manual|Quotation&createMasterId=xx&finishedGoodsItemId=yy
     routes.get("/auto-fetch", modelPrice.getAutoFetchValues);
 
+    routes.get("/next-no", modelPrice.getNextModelPriceNo);
+    routes.get("/references", modelPrice.getReferenceOptions);
+
     // ---------------------------------------------------------
     // CRUD
     // ---------------------------------------------------------

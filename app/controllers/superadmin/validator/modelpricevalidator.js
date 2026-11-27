@@ -40,7 +40,12 @@ const createModelPrice = Joi.object().keys({
         "any.required": "Finished Goods is required",
         "number.base": "Finished Goods is required",
     }),
+    financialYearId: Joi.number().integer().positive().required().messages({
+        "any.required": "Financial Year not found in session.",
+    }),
     modelName: Joi.string().trim().allow("", null),
+    referenceModelPriceId: Joi.number().integer().positive().allow(null),
+    effectiveDate: Joi.string().trim().allow("", null),
     currentDate: Joi.date().required().messages({
         "any.required": "Current Date is required",
     }),
@@ -55,6 +60,7 @@ const updateModelPrice = createModelPrice.keys({
         "any.required": "modelPriceId is required",
         "number.base": "modelPriceId is required",
     }),
+    financialYearId: Joi.number().integer().positive().allow(null),
 });
 
 const deleteModelPrice = Joi.object().keys({

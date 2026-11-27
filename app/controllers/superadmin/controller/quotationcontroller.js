@@ -55,6 +55,38 @@ const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
 const VEHICLE_GROUP_NAME = { tipper: "Tipper", trailer: "Trailer" };
 
+
+
+
+const todayLocal = () => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+// Effective ho chuke Model Prices, jinhe koi effective naya reference nahi kar raha
+const getLiveModelPrices = async (companyId) => {
+  const today = todayLocal();
+  const rows = (
+    await selectWithJoins(
+      "modelprice",
+      [],
+      { companyId, delete: 0, status: "active" },
+      ["modelPriceId", "finishedGoodsItemId", "modelName", "effectiveDate", "referenceModelPriceId"],
+      [["modelPriceId", "DESC"]],
+    )
+  ).map((h) => (h.toJSON ? h.toJSON() : h));
+
+  const effective = rows.filter(
+    (r) => !r.effectiveDate || String(r.effectiveDate).slice(0, 10) <= today,
+  );
+  const superseded = new Set(
+    effective.map((r) => Number(r.referenceModelPriceId)).filter(Boolean),
+  );
+  return effective.filter((r) => !superseded.has(Number(r.modelPriceId)));
+};
+
+
 // Default group (Tipper / Trailer) ka itemGroupId
 const getVehicleGroupId = async (companyId, vehicleType) => {
   const groupName = VEHICLE_GROUP_NAME[vehicleType];
@@ -118,13 +150,8 @@ const getVehicleModelOptions = async (companyId, vehicleType) => {
   const groupId = await getVehicleGroupId(companyId, vehicleType);
   if (!groupId) return [];
 
-  const headers = await selectWithJoins(
-    "modelprice",
-    [],
-    { companyId, delete: 0, status: "active" },
-    ["modelPriceId", "finishedGoodsItemId", "modelName"],
-    [["modelPriceId", "DESC"]],
-  );
+  const headers = await getLiveModelPrices(companyId);
+
   if (!headers.length) return [];
 
   const fgMap = await getFinishedGoodsMap(
@@ -133,19 +160,18 @@ const getVehicleModelOptions = async (companyId, vehicleType) => {
   );
   const totals = await getModelTotals(headers.map((h) => h.modelPriceId));
 
-  const seen = new Set();
+
   const options = [];
 
   for (const h of headers) {
-    const row = h.toJSON ? h.toJSON() : h;
+    const row = h;
     const fgId = Number(row.finishedGoodsItemId);
     const fg = fgMap.get(fgId);
 
     // main group of the finished good must match Tipper / Trailer
     if (!fg || Number(fg.groupId) !== Number(groupId)) continue;
 
-    if (seen.has(fgId)) continue; // latest model price per finished good
-    seen.add(fgId);
+
 
     const total = Number((totals.get(Number(row.modelPriceId)) || 0).toFixed(2));
     if (total <= 0) continue;
@@ -153,7 +179,7 @@ const getVehicleModelOptions = async (companyId, vehicleType) => {
     options.push({
       modelPriceId: row.modelPriceId,
       finishedGoodsItemId: fgId,
-      label: fg.itemName || row.modelName || `Model ${row.modelPriceId}`,
+      label: row.modelName || fg.itemName || `Model ${row.modelPriceId}`,
       totalValue: total,
     });
   }
@@ -166,14 +192,9 @@ const getVehicleModelById = async (companyId, vehicleType, modelPriceId) => {
   const groupId = await getVehicleGroupId(companyId, vehicleType);
   if (!groupId) return null;
 
-  const rows = await selectWithJoins(
-    "modelprice",
-    [],
-    { modelPriceId, companyId, delete: 0, status: "active" },
-    ["modelPriceId", "finishedGoodsItemId", "modelName"],
-  );
-  if (!rows.length) return null;
-  const row = rows[0].toJSON ? rows[0].toJSON() : rows[0];
+  const live = await getLiveModelPrices(companyId);
+  const row = live.find((r) => Number(r.modelPriceId) === Number(modelPriceId));
+  if (!row) return null;
 
   const fgMap = await getFinishedGoodsMap(companyId, [row.finishedGoodsItemId]);
   const fg = fgMap.get(Number(row.finishedGoodsItemId));
@@ -185,10 +206,13 @@ const getVehicleModelById = async (companyId, vehicleType, modelPriceId) => {
 
   return {
     modelPriceId: row.modelPriceId,
-    label: fg.itemName || row.modelName || `Model ${row.modelPriceId}`,
+    label: row.modelName || fg.itemName || `Model ${row.modelPriceId}`,
     totalValue: total,
   };
 };
+
+
+
 
 // Lead details are never copied into the quotation. Always read them live from the lead.
 const getLeadMap = async (leadIds, companyId) => {
@@ -775,7 +799,7 @@ const getQuotationList = async (req, res) => {
       companyId,
       delete: 0,
     };
-   
+
     // Employee panel requests always carry req.employeeId (set by employeeAuth) —
     // trust that over any frontend-supplied role, and scope strictly to this employee.
     if (employeeId) {

@@ -6,8 +6,25 @@ const {
     updateModel: updateModelHelper,
     selectWithJoins,
 } = require("../../../helper/index.js");
+const { generateVoucherNo } = require("../../../helper/billNoGenerator.js");
 
 const plain = (r) => (r && r.toJSON ? r.toJSON() : r);
+
+const todayLocal = () => {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+const hasDuplicateLine = (items) => {
+    const seen = new Set();
+    for (const r of items) {
+        const k = `${Number(r.itemId)}|${r.type}|${Number(r.groupId || 0)}|${Number(r.subGroupId || 0)}`;
+        if (seen.has(k)) return true;
+        seen.add(k);
+    }
+    return false;
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -534,8 +551,11 @@ const createModelPrice = async (req, res) => {
             return requiredmessage(res, "Unauthorized. Please login again.");
 
         const {
+            financialYearId,
             finishedGoodsItemId,
             modelName,
+            referenceModelPriceId,
+            effectiveDate,
             currentDate,
             status,
             items,
@@ -594,6 +614,44 @@ const createModelPrice = async (req, res) => {
             );
         }
 
+        if (hasDuplicateLine(items)) {
+            return errorResponse(
+                res,
+                "Duplicate rows: same item, type and group added more than once.",
+            );
+        }
+
+        const existingForFg =
+            (await selectWithJoins(
+                "modelprice",
+                [],
+                { companyId, finishedGoodsItemId, delete: 0 },
+                ["modelPriceId"],
+            )) || [];
+        const isSecond = existingForFg.length > 0;
+        const cleanName = String(modelName || "").trim();
+
+        if (isSecond) {
+            const refOk = existingForFg.some(
+                (r) => Number(r.modelPriceId) === Number(referenceModelPriceId),
+            );
+            if (!refOk)
+                return errorResponse(res, "Please select a valid Reference.");
+            if (!cleanName)
+                return errorResponse(res, "Model Price Name is required.");
+            if (!effectiveDate)
+                return errorResponse(res, "Effective Date is required.");
+            if (String(effectiveDate).slice(0, 10) < todayLocal())
+                return errorResponse(res, "Effective Date cannot be a past date.");
+        }
+
+        const { billNo } = await generateVoucherNo({
+            companyId,
+            financialYearId,
+            tableName: "modelprice",
+            idColumn: "modelPriceId",
+            prefixFor: "MODELPRICE",
+        });
         const totalValue = items.reduce((sum, row) => {
             const v = parseFloat(row.value);
             return sum + (Number.isNaN(v) ? 0 : v);
@@ -601,8 +659,12 @@ const createModelPrice = async (req, res) => {
 
         const header = await saveModel("modelprice", {
             companyId,
+            financialYearId,
+            modelPriceNo: billNo,
             finishedGoodsItemId,
-            modelName: modelName || null,
+            modelName: isSecond ? cleanName : null,
+            referenceModelPriceId: isSecond ? Number(referenceModelPriceId) : null,
+            effectiveDate: isSecond ? String(effectiveDate).slice(0, 10) : null,
             currentDate: currentDate || new Date(),
             totalValue: Number(totalValue.toFixed(2)),
             status: status || "active",
@@ -651,7 +713,6 @@ const getModelPriceList = async (req, res) => {
                 "finishedGoodsItemId",
                 "modelName",
                 "currentDate",
-                "totalValue",
                 "status",
                 "created",
             ],
@@ -692,6 +753,8 @@ const getModelPriceList = async (req, res) => {
                 modelName: row.modelName || master.itemName || "",
                 itemCode: master.itemCode || "",
                 itemName: master.itemName || "",
+                modelPriceNo: row.modelPriceNo,
+                effectiveDate: row.effectiveDate,
                 currentDate: row.currentDate,
                 totalValue: row.totalValue,
                 status: row.status,
@@ -820,6 +883,9 @@ const getModelPriceById = async (req, res) => {
                 finishedGoodsCode: fgMaster.itemCode || "",
                 finishedGoodsName: fgMaster.itemName || "",
                 modelName: header.modelName,
+                modelPriceNo: header.modelPriceNo,
+                referenceModelPriceId: header.referenceModelPriceId,
+                effectiveDate: header.effectiveDate,
                 currentDate: header.currentDate,
                 totalValue: header.totalValue,
                 status: header.status,
@@ -842,6 +908,7 @@ const updateModelPrice = async (req, res) => {
             modelPriceId,
             finishedGoodsItemId,
             modelName,
+            effectiveDate,
             currentDate,
             status,
             items,
@@ -858,7 +925,7 @@ const updateModelPrice = async (req, res) => {
             "modelprice",
             [],
             { modelPriceId, companyId, delete: 0 },
-            ["modelPriceId"],
+            ["modelPriceId", "modelName", "referenceModelPriceId", "effectiveDate"],
         );
         if (!existing || existing.length === 0) {
             return requiredmessage(res, "Model Price not found");
@@ -880,6 +947,23 @@ const updateModelPrice = async (req, res) => {
                 res,
                 "Selected Finished Goods does not have a complete BOM",
             );
+        }
+        const old = plain(existing[0]);
+        const isSecond = !!old.referenceModelPriceId;
+        const cleanName = String(modelName || "").trim();
+
+        if (hasDuplicateLine(items))
+            return errorResponse(res, "Duplicate rows: same item, type and group.");
+
+        if (isSecond) {
+            if (!cleanName)
+                return errorResponse(res, "Model Price Name is required.");
+            if (!effectiveDate)
+                return errorResponse(res, "Effective Date is required.");
+            const newEff = String(effectiveDate).slice(0, 10);
+            const oldEff = old.effectiveDate ? String(old.effectiveDate).slice(0, 10) : null;
+            if (newEff !== oldEff && newEff < todayLocal())
+                return errorResponse(res, "Effective Date cannot be a past date.");
         }
 
         const cmMap = await getCreateMasterMap(companyId);
@@ -918,7 +1002,8 @@ const updateModelPrice = async (req, res) => {
             "modelprice",
             {
                 finishedGoodsItemId,
-                modelName: modelName || null,
+                modelName: isSecond ? cleanName : old.modelName,
+                effectiveDate: isSecond ? String(effectiveDate).slice(0, 10) : null,
                 currentDate: currentDate || null,
                 totalValue: Number(totalValue.toFixed(2)),
                 status: status || "active",
@@ -991,10 +1076,65 @@ const deleteModelPrice = async (req, res) => {
     }
 };
 
+
+
+const getNextModelPriceNo = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+        const { financialYearId } = req.query;
+        if (!financialYearId)
+            return errorResponse(res, "Financial Year not found in session.");
+
+        const { billNo } = await generateVoucherNo({
+            companyId,
+            financialYearId,
+            tableName: "modelprice",
+            idColumn: "modelPriceId",
+            prefixFor: "MODELPRICE",
+        });
+        return successResponse(res, { modelPriceNo: billNo }, "Number generated");
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
+const getReferenceOptions = async (req, res) => {
+    try {
+        const companyId = req.companyId;
+        if (!companyId)
+            return requiredmessage(res, "Unauthorized. Please login again.");
+        const finishedGoodsItemId = Number(req.query.finishedGoodsItemId) || null;
+        if (!finishedGoodsItemId)
+            return successResponse(res, [], "Select Finished Goods first");
+
+        const rows = await selectWithJoins(
+            "modelprice",
+            [],
+            { companyId, finishedGoodsItemId, delete: 0 },
+            ["modelPriceId", "modelPriceNo", "modelName"],
+            [["modelPriceId", "DESC"]],
+        );
+        const itemMap = await getItemMasterMap(companyId);
+        const fgName = (itemMap.get(finishedGoodsItemId) || {}).itemName || "";
+
+        const list = (rows || []).map(plain).map((r) => ({
+            modelPriceId: r.modelPriceId,
+            label: [r.modelPriceNo, r.modelName || fgName].filter(Boolean).join(" - "),
+        }));
+        return successResponse(res, list, "References fetched successfully");
+    } catch (error) {
+        return errorResponse(res, error.message || "Something Went Wrong", error);
+    }
+};
+
 module.exports = {
     getFinishedGoodsOptions,
     getCreateMasterOptions,
     getGroupOptions,
+    getNextModelPriceNo,
+    getReferenceOptions,
     getAutoFetchValues,
     createModelPrice,
     getModelPriceList,
